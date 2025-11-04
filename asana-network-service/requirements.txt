@@ -1,0 +1,8 @@
+pydantic
+fastapi
+loguru
+pillow
+ultralytics
+uvicorn
+boto3
+torch

@@ -19,6 +19,7 @@ import AddSource from './pages/AddSource';
 import AboutProject from './pages/AboutProject';
 import ExpertInstructions from './pages/ExpertInstructions';
 import Settings from './pages/Settings';
+import Moderation from './pages/Moderation';
 
 // Защищенные маршруты
 import PrivateRoute from './components/PrivateRoute';
@@ -77,9 +78,18 @@ function App() {
               <Route
                 path="/settings"
                 element={
-                  <AdminRoute>
+                  <ExpertRoute>
                     <Settings />
-                  </AdminRoute>
+                  </ExpertRoute>
+                }
+              />
+              
+              <Route
+                path="/moderation"
+                element={
+                  <ExpertRoute>
+                    <Moderation />
+                  </ExpertRoute>
                 }
               />
             </Routes>

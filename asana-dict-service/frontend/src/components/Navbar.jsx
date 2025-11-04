@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { moderationAPI } from '../api/moderation';
 import '../styles/Navbar.css';
 
 const Navbar = () => {
@@ -8,9 +9,28 @@ const Navbar = () => {
   const navigate = useNavigate();
   const { isAuthenticated, isAdmin, isExpertOrAdmin, logout, user } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [moderationCount, setModerationCount] = useState(0);
   const dropdownRef = useRef(null);
 
   const isActive = (path) => location.pathname === path;
+
+  // Загружаем счетчик модерации
+  useEffect(() => {
+    if (isExpertOrAdmin) {
+      const loadModerationCount = async () => {
+        try {
+          const data = await moderationAPI.getItemsCount();
+          setModerationCount(data.count || 0);
+        } catch (error) {
+          console.error('Error loading moderation count:', error);
+        }
+      };
+      loadModerationCount();
+      // Обновляем счетчик каждые 30 секунд
+      const interval = setInterval(loadModerationCount, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [isExpertOrAdmin]);
 
   // Закрываем dropdown при клике вне его
   useEffect(() => {
@@ -35,13 +55,11 @@ const Navbar = () => {
     setIsDropdownOpen(false);
   };
 
-  const getRoleLabel = (role) => {
-    const labels = {
-      admin: 'Администратор',
-      expert: 'Эксперт',
-      guest: 'Гость'
-    };
-    return labels[role] || role;
+  const getRoleLabel = (login) => {
+    if (!user) return 'Гость';
+    if (user.isAdmin) return 'Администратор';
+    if (user.isExpert) return 'Эксперт';
+    return 'Гость';
   };
 
   const getInitials = (login) => {
@@ -67,7 +85,7 @@ const Navbar = () => {
             <div className="user-dropdown">
               <div className="user-dropdown-role">
                 <span className="role-label">Роль:</span>
-                <span className="role-value">{getRoleLabel(user?.role)}</span>
+                <span className="role-value">{getRoleLabel(user?.login)}</span>
               </div>
               <button 
                 className="user-dropdown-logout"
@@ -97,12 +115,23 @@ const Navbar = () => {
             >
               Источники
             </Link>
-            {isAdmin && (
+            {isExpertOrAdmin && (
               <Link
                 to="/settings"
                 className={`nav-link ${isActive('/settings') ? 'active' : ''}`}
               >
                 Настройки
+              </Link>
+            )}
+            {isExpertOrAdmin && (
+              <Link
+                to="/moderation"
+                className={`nav-link ${isActive('/moderation') ? 'active' : ''}`}
+              >
+                Требует модерации
+                {moderationCount > 0 && (
+                  <span className="moderation-badge">{moderationCount}</span>
+                )}
               </Link>
             )}
             <Link

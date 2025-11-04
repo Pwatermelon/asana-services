@@ -8,6 +8,7 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 300000, // 5 минут для импорта больших файлов
 });
 
 // Интерсептор для добавления токена и схемы БД к запросам

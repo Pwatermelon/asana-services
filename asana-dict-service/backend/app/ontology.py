@@ -1,5 +1,6 @@
 from rdflib import Graph, Namespace, URIRef, Literal, RDF
 from app import config
+from app.s3_utils import get_s3_url
 from typing import Optional, Dict, Any
 import uuid
 import logging
@@ -9,6 +10,8 @@ import base64
 logger = logging.getLogger("asana_service.ontology")
 
 ASANA = Namespace("http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#")
+# Добавляем новое свойство для S3 пути к фото
+ASANA.s3PhotoPath = URIRef(f"{ASANA}s3PhotoPath")
 
 def ensure_ontology_file_exists():
     """Создает файл онтологии, если он не существует"""
@@ -80,24 +83,42 @@ def load_asanas():
                 "pages": int(g.value(source_obj, ASANA.sourcePages)) if g.value(source_obj, ASANA.sourcePages) else 0,
                 "annotation": str(g.value(source_obj, ASANA.sourceAnnotation)) if g.value(source_obj, ASANA.sourceAnnotation) else ""
             }
-        photos_base64 = [str(g.value(photo, ASANA.base64Photo)) for photo in photo_objs if g.value(photo, ASANA.base64Photo)]
-        logger.debug(f"Photos count: {len(photos_base64)}")
+        # Получаем фото: сначала пробуем S3 путь, потом base64 (для обратной совместимости)
+        photos = []
+        for photo in photo_objs:
+            s3_path = g.value(photo, ASANA.s3PhotoPath)
+            base64_photo = g.value(photo, ASANA.base64Photo)
+            
+            if s3_path:
+                photos.append(get_s3_url(str(s3_path)))  # Use S3 URL
+            elif base64_photo:
+                photos.append(str(base64_photo))
+        
+        logger.debug(f"Photos count: {len(photos)}")
         asana_data = {
             "id": str(asana),
             "name": name_data,
             "source": source_data,
-            "photos": photos_base64,
-            "photo": photos_base64[0] if photos_base64 else ""
+            "photos": photos,
+            "photo": photos[0] if photos else ""
         }
         logger.debug(f"Adding asana with ID: {asana_data['id']}")
         asanas.append(asana_data)
     logger.info(f"Successfully loaded {len(asanas)} asanas")
     return asanas
 
-def add_asana(name_id: str, source_id: str, photo_base64: str):
+def add_asana(name_id: str, source_id: str, photo_path: str):
+    """
+    Добавляет асану в онтологию.
+    
+    Args:
+        name_id: ID названия асаны
+        source_id: ID источника
+        photo_path: Путь к фото в S3 (формат: bucket/path/to/file) или base64 строка
+    """
     try:
         logger.info("Starting to add new asana")
-        logger.debug(f"Parameters: name_id={name_id}, source_id={source_id}, photo_base64=<truncated>")
+        logger.debug(f"Parameters: name_id={name_id}, source_id={source_id}, photo_path=<truncated>")
         
         g = get_graph()
         
@@ -118,7 +139,16 @@ def add_asana(name_id: str, source_id: str, photo_base64: str):
         logger.debug(f"Created photo URI: {photo_uri}")
         
         g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
-        g.add((photo_uri, ASANA.base64Photo, Literal(photo_base64)))
+        
+        # Добавляем фото: если путь содержит '/' и не начинается с 'data:', это S3 путь
+        if photo_path:
+            if '/' in photo_path and not photo_path.startswith('data:'):
+                g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
+                logger.debug("Added S3 photo path")
+            else:
+                g.add((photo_uri, ASANA.base64Photo, Literal(photo_path)))  # Store base64
+                logger.debug("Added base64 photo data")
+        
         g.add((photo_uri, ASANA.hasSource, URIRef(source_id)))
         g.add((asana_uri, ASANA.hasPhoto, photo_uri))
         logger.debug("Added photo and source triples")
@@ -151,8 +181,79 @@ def load_sources():
     logger.info(f"Successfully loaded {len(sources)} sources")
     return sources
 
-def add_source(source_data: Dict[str, Any]) -> str:
+def find_existing_source(source_data: Dict[str, Any]) -> Optional[str]:
+    """
+    Ищет существующий источник по title, author и year.
+    Возвращает ID источника, если найден, иначе None.
+    """
     try:
+        g = get_graph()
+        title = source_data.get("title", "").strip()
+        author = source_data.get("author", "").strip()
+        year = source_data.get("year", 0)
+        
+        if not title and not author:
+            logger.debug("No title or author provided, skipping search")
+            return None
+        
+        # Ищем все источники
+        sources_found = 0
+        for source_uri in g.subjects(RDF.type, ASANA.AsanaSource):
+            sources_found += 1
+            existing_title = str(g.value(source_uri, ASANA.sourseTitle) or "").strip()
+            existing_author = str(g.value(source_uri, ASANA.sourceAuthor) or "").strip()
+            existing_year = int(g.value(source_uri, ASANA.sourceYear) or 0)
+            
+            # Сравниваем title и author (case-insensitive)
+            title_match = False
+            if title and existing_title:
+                title_match = title.lower().strip() == existing_title.lower().strip()
+            elif not title and not existing_title:
+                title_match = True  # Оба пустые
+            
+            author_match = False
+            if author and existing_author:
+                author_match = author.lower().strip() == existing_author.lower().strip()
+            elif not author and not existing_author:
+                author_match = True  # Оба пустые
+            
+            # Сравниваем год: если оба не равны 0, должны совпадать
+            # Если один из них 0, считаем что год не важен для сравнения
+            year_match = True
+            if year != 0 and existing_year != 0:
+                year_match = year == existing_year
+            # Если один из них 0, год не учитывается в сравнении
+            
+            # Если совпадают title и author (и год если оба указаны), возвращаем существующий
+            if title_match and author_match and year_match:
+                logger.info(f"Found existing source: {str(source_uri)} (title: '{existing_title}', author: '{existing_author}', year: {existing_year})")
+                return str(source_uri)
+        
+        logger.debug(f"Checked {sources_found} sources, no match found for title='{title}', author='{author}', year={year}")
+        return None
+    except Exception as e:
+        logger.error(f"Error finding existing source: {str(e)}", exc_info=True)
+        return None
+
+def add_source(source_data: Dict[str, Any], check_existing: bool = True) -> str:
+    """
+    Добавляет источник в онтологию.
+    
+    Args:
+        source_data: Данные источника
+        check_existing: Если True, проверяет существующие источники перед созданием
+    
+    Returns:
+        ID созданного или найденного источника
+    """
+    try:
+        # Проверяем существующий источник
+        if check_existing:
+            existing_id = find_existing_source(source_data)
+            if existing_id:
+                logger.info(f"Using existing source: {existing_id}")
+                return existing_id
+        
         logger.info("Starting to add new source")
         logger.debug(f"Source data: {source_data}")
         
@@ -392,14 +493,24 @@ def get_asanas_by_source(source_id: str):
             "definition": definition
         }
         
-        photos_base64 = [str(g.value(photo, ASANA.base64Photo)) for photo in source_photo_objs if g.value(photo, ASANA.base64Photo)]
-        logger.debug(f"Found {len(photos_base64)} photos for asana {name_ru}")
+        # Получаем фото: сначала пробуем S3 путь, потом base64
+        photos = []
+        for photo in source_photo_objs:
+            s3_path = g.value(photo, ASANA.s3PhotoPath)
+            base64_photo = g.value(photo, ASANA.base64Photo)
+            
+            if s3_path:
+                photos.append(get_s3_url(str(s3_path)))
+            elif base64_photo:
+                photos.append(str(base64_photo))
+        
+        logger.debug(f"Found {len(photos)} photos for asana {name_ru}")
         
         asana_data = {
             "id": str(asana_uri),
             "name": name_data,
-            "photos": photos_base64,
-            "photo": photos_base64[0] if photos_base64 else ""
+            "photos": photos,
+            "photo": photos[0] if photos else ""
         }
         asanas.append(asana_data)
     
@@ -454,10 +565,10 @@ def search_asanas_by_name(query: str, fuzzy_threshold: float = 0.7):
 
 def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:
     """
-    Возвращает base64 фото асаны по id асаны и id источника, если такое фото есть
+    Возвращает фото асаны по id асаны и id источника, если такое фото есть.
+    Приоритет: S3 путь, затем base64.
     """
     g = get_graph()
-    ASANA = Namespace("http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#")
     asana_uri = URIRef(asana_id)
     source_uri = URIRef(source_id)
     # Найти все фото, связанные с асаной
@@ -465,6 +576,9 @@ def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:
     for photo_uri in photo_uris:
         # Проверяем, связано ли фото с нужным источником
         if g.value(photo_uri, ASANA.hasSource) == source_uri:
+            s3_path = g.value(photo_uri, ASANA.s3PhotoPath)
+            if s3_path:
+                return get_s3_url(str(s3_path))
             base64_photo = g.value(photo_uri, ASANA.base64Photo)
             if base64_photo:
                 return str(base64_photo)

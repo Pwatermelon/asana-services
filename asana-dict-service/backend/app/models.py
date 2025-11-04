@@ -81,3 +81,25 @@ class ExpertInstructions(Base):
     __table_args__ = {'schema': DICT_SCHEMA}
     id = Column(Integer, primary_key=True, index=True)
     content = Column(String, nullable=False)
+
+class ModerationItem(Base):
+    __tablename__ = "moderation_items"
+    __table_args__ = {'schema': DICT_SCHEMA}
+    id = Column(Integer, primary_key=True, index=True)
+    asana_name = Column(String(500), nullable=False)  # Название асаны из импорта
+    source_id = Column(String(500), nullable=True)  # ID источника
+    error_message = Column(String, nullable=False)  # Сообщение об ошибке
+    row_number = Column(Integer, nullable=False)  # Номер строки в Excel
+    import_data = Column(String, nullable=True)  # JSON с данными импорта
+    created_at = Column(String, nullable=False)  # Дата создания
+    resolved = Column(Boolean, default=False)  # Решена ли проблема
+    resolved_by = Column(String(256), nullable=True)  # Кто решил
+    resolved_at = Column(String, nullable=True)  # Когда решена
+    # Поля для модерации названий асан
+    suggested_name_ru = Column(String(500), nullable=True)  # Предложенное название на русском
+    suggested_name_sanskrit = Column(String(500), nullable=True)  # Предложенное название на санскрите
+    suggested_transliteration = Column(String(500), nullable=True)  # Предложенная транслитерация
+    suggested_definition = Column(String, nullable=True)  # Предложенное определение
+    existing_name_id = Column(String(500), nullable=True)  # ID существующего названия (если найдено неполное совпадение)
+    existing_name_ru = Column(String(500), nullable=True)  # Существующее название на русском
+    moderation_type = Column(String(50), nullable=True)  # Тип модерации: 'error' или 'name_mismatch'

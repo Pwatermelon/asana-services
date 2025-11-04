@@ -28,7 +28,7 @@ export const sourcesAPI = {
   },
 
   delete: async (sourceId) => {
-    const response = await apiClient.delete(`/sources/${sourceId}`, {
+    const response = await apiClient.delete('/delete-source', {
       params: { uri: sourceId },
     });
     return response.data;

@@ -54,7 +54,8 @@ const SourceAsanas = () => {
 
   const getAsanaId = (asana) => {
     const id = asana.id.split('#').pop();
-    return id.replace('asana_', '');
+    // Сохраняем asana_ для правильного поиска в AsanaDetail
+    return id; // Не удаляем asana_, оставляем как есть
   };
 
   return (
@@ -88,7 +89,7 @@ const SourceAsanas = () => {
                   <div className="asana-image">
                     {asana.photo ? (
                       <img
-                        src={`data:image/jpeg;base64,${asana.photo}`}
+                        src={asana.photo.startsWith('http') || asana.photo.startsWith('data:') ? asana.photo : `data:image/jpeg;base64,${asana.photo}`}
                         alt={asana.name?.name_ru}
                       />
                     ) : (

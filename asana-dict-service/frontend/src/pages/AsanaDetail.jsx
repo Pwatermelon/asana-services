@@ -29,10 +29,28 @@ const AsanaDetail = () => {
   const loadAsana = async () => {
     try {
       const asanaId = id.replace('-page', '');
+      // Формируем полный URI - asanaId уже содержит asana_ или просто UUID
       const fullUri = `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${asanaId.startsWith('asana_') ? asanaId : `asana_${asanaId}`}`;
       const allAsanas = await asanasAPI.getAll();
-      const foundAsana = allAsanas.find(a => a.id === fullUri);
+      
+      // Ищем по полному URI
+      let foundAsana = allAsanas.find(a => a.id === fullUri);
+      
+      // Если не найдено, пробуем найти по короткому ID
+      if (!foundAsana) {
+        const shortId = fullUri.split('#').pop();
+        foundAsana = allAsanas.find(a => {
+          const aShortId = a.id.split('#').pop();
+          return aShortId === shortId;
+        });
+      }
+      
       setAsana(foundAsana);
+      if (!foundAsana) {
+        console.error('Asana not found. Searched URI:', fullUri);
+        console.error('Searched short ID:', fullUri.split('#').pop());
+        console.error('Sample asana IDs:', allAsanas.slice(0, 5).map(a => ({ full: a.id, short: a.id.split('#').pop() })));
+      }
     } catch (error) {
       console.error('Error loading asana:', error);
     } finally {
@@ -133,38 +151,54 @@ const AsanaDetail = () => {
           <div className="asana-photos">
             {asana.photos && asana.photos.length > 0 ? (
               <div className="photo-gallery">
-                {asana.photos.map((photo, index) => (
-                  <div key={index} className="photo-container">
-                    {typeof photo === 'object' && photo.image ? (
-                      <>
+                {asana.photos.map((photo, index) => {
+                  const getPhotoSrc = (photoData) => {
+                    if (typeof photoData === 'object' && photoData.image) {
+                      return photoData.image.startsWith('http') || photoData.image.startsWith('data:') 
+                        ? photoData.image 
+                        : `data:image/jpeg;base64,${photoData.image}`;
+                    }
+                    if (typeof photoData === 'string') {
+                      return photoData.startsWith('http') || photoData.startsWith('data:') 
+                        ? photoData 
+                        : `data:image/jpeg;base64,${photoData}`;
+                    }
+                    return photoData;
+                  };
+                  
+                  return (
+                    <div key={index} className="photo-container">
+                      {typeof photo === 'object' && photo.image ? (
+                        <>
+                          <img
+                            src={getPhotoSrc(photo.image)}
+                            alt={asana.name?.name_ru}
+                            className="gallery-item"
+                          />
+                          {photo.source && (
+                            <div className="photo-source">
+                              {typeof photo.source === 'object' ? (
+                                <a href={`/sources/${photo.source.id.split('#').pop()}`}>
+                                  {photo.source.author} - {photo.source.title}
+                                </a>
+                              ) : (
+                                <a href={`/sources/${photo.source.split('#').pop()}`}>
+                                  Источник {photo.source.split('#').pop()}
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
                         <img
-                          src={`data:image/jpeg;base64,${photo.image}`}
+                          src={getPhotoSrc(photo)}
                           alt={asana.name?.name_ru}
                           className="gallery-item"
                         />
-                        {photo.source && (
-                          <div className="photo-source">
-                            {typeof photo.source === 'object' ? (
-                              <a href={`/sources/${photo.source.id.split('#').pop()}`}>
-                                {photo.source.author} - {photo.source.title}
-                              </a>
-                            ) : (
-                              <a href={`/sources/${photo.source.split('#').pop()}`}>
-                                Источник {photo.source.split('#').pop()}
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <img
-                        src={`data:image/jpeg;base64,${photo}`}
-                        alt={asana.name?.name_ru}
-                        className="gallery-item"
-                      />
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p>Фотографии отсутствуют</p>

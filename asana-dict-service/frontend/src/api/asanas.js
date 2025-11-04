@@ -42,9 +42,7 @@ export const asanasAPI = {
   },
 
   delete: async (asanaId) => {
-    // Извлекаем короткий ID
-    const shortId = asanaId.split('#').pop().replace('asana_', '');
-    const response = await apiClient.delete(`/asanas/${shortId}`, {
+    const response = await apiClient.delete('/asanas', {
       params: { uri: asanaId },
     });
     return response.data;

@@ -45,6 +45,15 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "your-smtp-password")
 SMTP_FROM = os.getenv("SMTP_FROM", "noreply@your-domain.com")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Каталог Асан")
 
+# Настройки MINIO S3
+HOST_MINIO = os.getenv("HOST_MINIO", "minio")
+PORT_MINIO = os.getenv("PORT_MINIO", "9000")
+USER_MINIO = os.getenv("USER_MINIO", "minioadmin")
+PASSWORD_MINIO = os.getenv("PASSWORD_MINIO", "minioadmin")
+NAME_BUCKET_IMAGES_MINIO = os.getenv("NAME_BUCKET_IMAGES_MINIO", "images")
+# Используем Nginx прокси для доступа к MinIO, чтобы фронтенд мог получать изображения
+MINIO_URL_PREFIX = os.getenv("MINIO_URL_PREFIX", "http://localhost/images")
+
 # Настройки приложения
 APP_NAME = "Каталог асан"
 APP_DESCRIPTION = "Каталог асан для йоги с возможностью поиска и фильтрации"
