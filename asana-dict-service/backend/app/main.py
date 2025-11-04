@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path
-from fastapi.security import OAuth2PasswordRequestForm
 from typing import Optional, List
 from pydantic import BaseModel
 import base64
@@ -8,8 +7,7 @@ import logging
 import json
 from starlette.responses import RedirectResponse
 from app.auth import (
-    authenticate_user, create_access_token, get_current_user, is_admin, is_expert_or_admin, 
-    register_user, confirm_registration, reset_password_request, reset_password_confirm
+    get_current_user, is_admin, is_expert_or_admin
 )
 from app.ontology import (
     add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
@@ -20,14 +18,12 @@ from app.ontology import (
 from app.config import logger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from app.models import Base, User, Token, UserRegistration, UserLogin, PasswordReset, PasswordResetConfirm, AboutProject, ExpertInstructions, UserRole
+from app.models import Base, User, AboutProject, ExpertInstructions, UserRole
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from passlib.context import CryptContext
 from app import config
 from fastapi.templating import Jinja2Templates
 from jose import jwt, JWTError
-from datetime import datetime
 
 # Create module logger
 logger = logging.getLogger("asana_service.api")
@@ -81,56 +77,11 @@ engine = create_engine(config.SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
-# Создаём пользователя admin:admin123, если его нет
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-def create_default_users():
-    """Создание пользователей по умолчанию (admin, expert и guest)"""
+# Создаем записи о проекте и инструкции, если их нет
+def create_default_content():
+    """Создание контента по умолчанию"""
     db = SessionLocal()
     
-    # Создаем admin пользователя
-    admin_username = os.getenv("ADMIN_USERNAME", "admin")
-    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
-    
-    if not db.query(User).filter(User.username == admin_username).first():
-        admin = User(
-            username=admin_username,
-            password_hash=pwd_context.hash(admin_password),
-            role="admin",
-            is_confirmed=True
-        )
-        db.add(admin)
-        logger.info(f"Created default admin user: {admin_username}")
-    
-    # Создаем expert пользователя
-    expert_username = os.getenv("EXPERT_USERNAME", "expert")
-    expert_password = os.getenv("EXPERT_PASSWORD", "expert123")
-    
-    if not db.query(User).filter(User.username == expert_username).first():
-        expert = User(
-            username=expert_username,
-            password_hash=pwd_context.hash(expert_password),
-            role="expert",
-            is_confirmed=True
-        )
-        db.add(expert)
-        logger.info(f"Created default expert user: {expert_username}")
-    
-    # Создаем guest пользователя
-    guest_username = os.getenv("GUEST_USERNAME", "guest")
-    guest_password = os.getenv("GUEST_PASSWORD", "guest123")
-    
-    if not db.query(User).filter(User.username == guest_username).first():
-        guest = User(
-            username=guest_username,
-            password_hash=pwd_context.hash(guest_password),
-            role="guest",
-            is_confirmed=True
-        )
-        db.add(guest)
-        logger.info(f"Created default guest user: {guest_username}")
-    
-    # Создаем записи о проекте и инструкции, если их нет
     if not db.query(AboutProject).first():
         about = AboutProject(content="О проекте каталога асан")
         db.add(about)
@@ -144,115 +95,14 @@ def create_default_users():
     db.commit()
     db.close()
 
-create_default_users()
+create_default_content()
 
 # Маршруты аутентификации и авторизации
-@app.post("/token", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    logger.info(f"Login attempt for user: {form_data.username}")
-    user = authenticate_user(form_data.username, form_data.password)
-    if not user:
-        logger.warning(f"Failed login attempt for user: {form_data.username}")
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    access_token = create_access_token(data={"sub": user["username"]})
-    logger.info(f"Successful login for user: {form_data.username}")
-    return {"access_token": access_token, "token_type": "bearer", "role": user["role"]}
+# Авторизация и регистрация теперь обрабатываются внешним сервисом
+# Токены приходят извне и проверяются через get_user_role_from_request
 
-@app.post("/login")
-async def login_form(user_login: UserLogin):
-    logger.info(f"Login form attempt for user: {user_login.username}")
-    user = authenticate_user(user_login.username, user_login.password)
-    if not user:
-        logger.warning(f"Failed login form attempt for user: {user_login.username}")
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    
-    # Создаем токен с информацией о пользователе и его роли
-    access_token = create_access_token(
-        data={"sub": user["username"], "role": user["role"]}, 
-        remember_me=user_login.remember_me
-    )
-    
-    # Создаем response с cookie
-    response = JSONResponse(
-        content={"access_token": access_token, "token_type": "bearer", "role": user["role"]}
-    )
-    
-    # Устанавливаем cookie
-    response.set_cookie(
-        key="session_token",
-        value=access_token,
-        httponly=True,
-        samesite="lax",
-        max_age=44640 * 60 if user_login.remember_me else 1440 * 60  # в секундах
-    )
-    
-    logger.info(f"Successful login form for user: {user_login.username}")
-    return response
-
-@app.post("/register")
-async def register(user_data: UserRegistration):
-    logger.info(f"Registration attempt for username: {user_data.username}, email: {user_data.email}")
-    try:
-        result = register_user(
-            username=user_data.username,
-            email=user_data.email,
-            first_name=user_data.first_name,
-            last_name=user_data.last_name,
-            password=user_data.password
-        )
-        logger.info(f"Successfully registered user: {user_data.username}")
-        return result
-    except HTTPException as e:
-        logger.warning(f"Registration failed: {e.detail}")
-        raise e
-    except Exception as e:
-        logger.error(f"Unexpected error during registration: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred during registration")
-
-@app.post("/confirm-registration")
-async def confirm(code: str):
-    logger.info(f"Confirmation attempt with code: {code}")
-    try:
-        result = confirm_registration(code)
-        logger.info(f"Successfully confirmed user: {result['username']}")
-        return result
-    except HTTPException as e:
-        logger.warning(f"Confirmation failed: {e.detail}")
-        raise e
-    except Exception as e:
-        logger.error(f"Unexpected error during confirmation: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred during confirmation")
-
-@app.post("/reset-password-request")
-async def reset_request(reset_data: PasswordReset):
-    logger.info(f"Password reset request for email: {reset_data.email}")
-    try:
-        result = reset_password_request(reset_data.email)
-        logger.info(f"Password reset email sent (if email exists)")
-        return result
-    except Exception as e:
-        logger.error(f"Unexpected error during password reset request: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred during password reset request")
-
-@app.post("/reset-password-confirm")
-async def reset_confirm(reset_data: PasswordResetConfirm):
-    logger.info(f"Password reset confirmation attempt with code: {reset_data.code}")
-    try:
-        result = reset_password_confirm(reset_data.code, reset_data.new_password)
-        logger.info(f"Successfully reset password for user: {result['username']}")
-        return result
-    except HTTPException as e:
-        logger.warning(f"Password reset confirmation failed: {e.detail}")
-        raise e
-    except Exception as e:
-        logger.error(f"Unexpected error during password reset confirmation: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred during password reset confirmation")
-
-@app.get("/logout")
-async def logout():
-    logger.info("User logout")
-    response = RedirectResponse(url="/")
-    return response
+# Логаут теперь обрабатывается фронтендом
+# @app.get("/logout")
 
 # Маршруты для асан
 @app.get("/asanas", tags=["asana"])
@@ -296,7 +146,7 @@ def add_asana_page(request: Request):
     """Страница добавления асаны (только для expert/admin)"""
     user_role = get_user_role_from_request(request)
     if user_role not in ['admin', 'expert']:
-        return RedirectResponse(url="/login", status_code=303)  # 303 See Other
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
     
     # Загружаем существующие названия и источники для выбора
     names = load_asana_names()
@@ -725,7 +575,7 @@ def sources_page(request: Request):
 def settings_page(request: Request):
     user_role = get_user_role_from_request(request)
     if user_role != 'admin':
-        return RedirectResponse(url="/login", status_code=303)
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
     
     return templates.TemplateResponse(
         "settings.html",
@@ -785,7 +635,7 @@ def add_source_page(request: Request):
     """Страница добавления источника (только для expert/admin)"""
     user_role = get_user_role_from_request(request)
     if user_role not in ['admin', 'expert']:
-        return RedirectResponse(url="/login", status_code=303)
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
     
     return templates.TemplateResponse(
         "add_source.html",
