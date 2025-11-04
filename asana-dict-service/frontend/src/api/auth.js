@@ -34,8 +34,8 @@ export const authAPI = {
     }
   },
 
-  register: async (username, email, firstName, lastName, password) => {
-    // server-module использует login, mail, password (без first_name, last_name)
+  register: async (username, email, password) => {
+    // server-module использует login, mail, password
     const response = await apiClient.post('/api/auth/registration', {
       login: username,
       mail: email,

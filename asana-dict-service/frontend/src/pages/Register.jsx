@@ -7,8 +7,6 @@ const Register = () => {
   const [formData, setFormData] = useState({
     username: '',
     email: '',
-    first_name: '',
-    last_name: '',
     password: '',
   });
   const [error, setError] = useState('');
@@ -32,8 +30,6 @@ const Register = () => {
       await authAPI.register(
         formData.username,
         formData.email,
-        formData.first_name,
-        formData.last_name,
         formData.password
       );
       setSuccess(true);
@@ -85,28 +81,6 @@ const Register = () => {
               id="email"
               name="email"
               value={formData.email}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="first_name">Имя</label>
-            <input
-              type="text"
-              id="first_name"
-              name="first_name"
-              value={formData.first_name}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="last_name">Фамилия</label>
-            <input
-              type="text"
-              id="last_name"
-              name="last_name"
-              value={formData.last_name}
               onChange={handleChange}
               required
             />
