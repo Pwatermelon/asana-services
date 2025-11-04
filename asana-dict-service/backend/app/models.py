@@ -42,8 +42,6 @@ class User(Base):
 class UserRegistration(BaseModel):
     username: str
     email: EmailStr
-    first_name: str
-    last_name: str
     password: str
 
 class UserLogin(BaseModel):

@@ -23,8 +23,17 @@ export const AuthProvider = ({ children }) => {
     try {
       const authData = await authAPI.checkAuth();
       if (authData.isAuthenticated && authData.role) {
-        // Устанавливаем пользователя даже если это guest
-        setUser({ role: authData.role });
+        // Получаем полную информацию о пользователе
+        try {
+          const response = await authAPI.getUserInfo();
+          setUser({ 
+            role: authData.role,
+            login: response.login || null
+          });
+        } catch (error) {
+          // Если не удалось получить логин, используем только роль
+          setUser({ role: authData.role });
+        }
       } else {
         setUser(null);
       }
@@ -43,7 +52,16 @@ export const AuthProvider = ({ children }) => {
       // чтобы убедиться что токен валиден и получить актуальную роль
       const authData = await authAPI.checkAuth();
       if (authData.isAuthenticated) {
-        setUser({ role: authData.role });
+        // Получаем полную информацию о пользователе
+        try {
+          const userInfo = await authAPI.getUserInfo();
+          setUser({ 
+            role: authData.role,
+            login: userInfo.login || username
+          });
+        } catch (error) {
+          setUser({ role: authData.role, login: username });
+        }
         return { success: true };
       } else {
         return {

@@ -1,19 +1,82 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/Navbar.css';
 
 const Navbar = () => {
   const location = useLocation();
-  const { isAuthenticated, isAdmin, isExpertOrAdmin, logout } = useAuth();
+  const navigate = useNavigate();
+  const { isAuthenticated, isAdmin, isExpertOrAdmin, logout, user } = useAuth();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   const isActive = (path) => location.pathname === path;
+
+  // Закрываем dropdown при клике вне его
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+    setIsDropdownOpen(false);
+  };
+
+  const getRoleLabel = (role) => {
+    const labels = {
+      admin: 'Администратор',
+      expert: 'Эксперт',
+      guest: 'Гость'
+    };
+    return labels[role] || role;
+  };
+
+  const getInitials = (login) => {
+    if (!login) return '?';
+    return login.charAt(0).toUpperCase();
+  };
 
   return (
     <>
       {isAuthenticated && (
-        <div className="user-role-badge-fixed">
-          <span>{localStorage.getItem('user_role')?.toUpperCase() || ''}</span>
+        <div className="user-menu-fixed" ref={dropdownRef}>
+          <div 
+            className="user-menu-trigger"
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          >
+            <div className="user-avatar">
+              {getInitials(user?.login)}
+            </div>
+            <span className="user-login">{user?.login || 'Пользователь'}</span>
+            <span className="dropdown-arrow">▼</span>
+          </div>
+          {isDropdownOpen && (
+            <div className="user-dropdown">
+              <div className="user-dropdown-role">
+                <span className="role-label">Роль:</span>
+                <span className="role-value">{getRoleLabel(user?.role)}</span>
+              </div>
+              <button 
+                className="user-dropdown-logout"
+                onClick={handleLogout}
+              >
+                Выйти
+              </button>
+            </div>
+          )}
         </div>
       )}
       <nav className="navbar">
@@ -68,11 +131,7 @@ const Navbar = () => {
                 </Link>
               </>
             )}
-            {isAuthenticated ? (
-              <Link to="/login" onClick={logout} className="btn-logout">
-                <span style={{ fontSize: '1.1em' }}>⎋</span> Выйти
-              </Link>
-            ) : (
+            {!isAuthenticated && (
               <Link to="/login" className="btn-primary">
                 Войти
               </Link>

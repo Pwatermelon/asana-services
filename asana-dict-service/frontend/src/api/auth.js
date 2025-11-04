@@ -70,6 +70,16 @@ export const authAPI = {
     localStorage.removeItem('user_role');
   },
 
+  getUserInfo: async () => {
+    try {
+      const response = await apiClient.get('/api/users/me');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get user info:', error);
+      throw error;
+    }
+  },
+
   checkAuth: async () => {
     try {
       const token = localStorage.getItem('access_token');
