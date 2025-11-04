@@ -10,13 +10,17 @@ const apiClient = axios.create({
   },
 });
 
-// Интерсептор для добавления токена к запросам
+// Интерсептор для добавления токена и схемы БД к запросам
 apiClient.interceptors.request.use(
   (config) => {
     if (typeof window !== 'undefined' && window.localStorage) {
       const token = window.localStorage.getItem('access_token');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+      }
+      // Добавляем заголовок схемы БД для запросов к server-module (все /api/auth и /api/users)
+      if (config.url && (config.url.startsWith('/api/auth') || config.url.startsWith('/api/users'))) {
+        config.headers['X-DB-Schema'] = 'dict_schema';
       }
     }
     return config;

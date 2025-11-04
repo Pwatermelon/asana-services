@@ -7,7 +7,8 @@ from src.database.config import Base
 
 
 class User(Base):
-    __tablename__ = "t_users"
+    __tablename__ = "users"
+    # Схема будет определяться динамически через search_path в сессии
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     login: Mapped[str] = mapped_column(String(256), unique=True)
@@ -43,7 +44,7 @@ class ResultPrediction(Base):
     __tablename__ = "t_result_predictions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    id_user: Mapped[int] = mapped_column(BigInteger(), ForeignKey("t_users.id"), nullable=True)
+    id_user: Mapped[int] = mapped_column(BigInteger(), ForeignKey("users.id"), nullable=True)
     image: Mapped[str] = mapped_column(Text())
     answer: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False))
@@ -56,14 +57,14 @@ class ResultPrediction(Base):
     right_answer_russian: Mapped[str] = mapped_column(String(256), nullable=True)
     right_answer_russian_interpretation: Mapped[str] = mapped_column(String(256), nullable=True)
 
-    user = relationship("User", lazy="selectin")
+    user: Mapped["User"] = relationship("User", lazy="selectin", foreign_keys=[id_user])
 
 
 class Report(Base):
     __tablename__ = "t_reports"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    id_user: Mapped[int] = mapped_column(BigInteger(), ForeignKey("t_users.id"), nullable=True)
+    id_user: Mapped[int] = mapped_column(BigInteger(), ForeignKey("users.id"), nullable=True)
     text: Mapped[str] = mapped_column(Text())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
 
@@ -72,9 +73,9 @@ class RequestToAdminStatus(Base):
     __tablename__ = "t_request_to_admin_status"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    id_user: Mapped[int] = mapped_column(BigInteger(), ForeignKey("t_users.id"), nullable=True)
+    id_user: Mapped[int] = mapped_column(BigInteger(), ForeignKey("users.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
 
-    user = relationship("User", lazy="selectin")
+    user: Mapped["User"] = relationship("User", lazy="selectin", foreign_keys=[id_user])
 

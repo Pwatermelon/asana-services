@@ -1,5 +1,8 @@
 import asyncio
+import os
+import fcntl
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Depends
@@ -21,19 +24,47 @@ from alembic.config import Config
 
 settings = get_settings()
 
+LOCK_FILE = Path("/tmp/alembic_migration.lock")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    process = await asyncio.create_subprocess_exec("alembic", "upgrade", "head")
-    await process.communicate()
+    # Используем файловую блокировку, чтобы только один процесс запускал миграции
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(LOCK_FILE, "w") as lock_file:
+        try:
+            # Попытка получить эксклюзивную блокировку (неблокирующая)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Если блокировка получена, запускаем миграции
+            process = await asyncio.create_subprocess_exec("alembic", "upgrade", "head")
+            await process.communicate()
+            if process.returncode != 0:
+                raise RuntimeError(f"Alembic migration failed with return code {process.returncode}")
+        except BlockingIOError:
+            # Блокировка уже занята другим процессом, ждем завершения миграций
+            # Ждем, пока другой процесс освободит блокировку (блокирующий режим)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    
     yield
 
 
 app = FastAPI(lifespan=lifespan)
+
+# CORS настройки из переменных окружения
+cors_origins_str = os.getenv("CORS_ORIGINS", "*")
+# Если указан *, разрешаем все источники (без credentials), иначе разбиваем по запятой
+if cors_origins_str == "*":
+    cors_origins = ["*"]
+    allow_credentials = False
+else:
+    cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+    allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://yoga-project-network.ru", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

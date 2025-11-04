@@ -1,28 +1,68 @@
 from __future__ import annotations
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status
+from starlette.requests import Request
 from fastapi.security import OAuth2PasswordBearer
 from app import config
-from app.models import User, UserRole
+from app.models import UserRole
 import logging
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
+import httpx
+from typing import Optional
 
 logger = logging.getLogger("asana_service.auth")
 
 # OAuth2 схема для получения токена из заголовка Authorization
-# tokenUrl указывается для совместимости, но авторизация идет через внешний сервис
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
-engine = create_engine(config.SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Авторизация обрабатывается через server-module API
+# Используем HTTP запросы к сервису авторизации
+# Для синхронных эндпоинтов используем синхронный httpx клиент
 
-# Авторизация и создание токенов теперь обрабатываются внешним сервисом
-# Токены приходят извне и проверяются через get_current_user
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user_sync(token: str, request: Request = None) -> Optional[str]:
     """
-    Проверяет токен, который приходит из внешнего сервиса авторизации.
+    Синхронная проверка токена через API server-module.
+    Используется для синхронных эндпоинтов.
+    """
+    if not token and request:
+        token = request.cookies.get("access_token")
+    
+    if not token:
+        return None
+    
+    try:
+        # Используем синхронный клиент для синхронных эндпоинтов
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(
+                f"{config.AUTH_SERVICE_URL}/api/users/me",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-DB-Schema": "dict_schema"  # Указываем схему для dict-service
+                }
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                login = user_data.get("login")
+                if login:
+                    logger.debug(f"Successfully validated token for user: {login}")
+                    return login
+    except Exception as e:
+        logger.error(f"Error validating token via auth service: {str(e)}")
+        # Fallback: проверяем токен локально
+        try:
+            payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+            login = payload.get("login")
+            if login:
+                logger.debug(f"Fallback: validated token locally for user: {login}")
+                return login
+        except JWTError:
+            pass
+    
+    return None
+
+async def get_current_user(token: str = Depends(oauth2_scheme), request: Request = None):
+    """
+    Проверяет токен через API server-module и получает информацию о пользователе.
     Токен должен быть в заголовке Authorization: Bearer <token>
     """
     credentials_exception = HTTPException(
@@ -31,70 +71,129 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         headers={"WWW-Authenticate": "Bearer"},
     )
     
+    if not token and request:
+        token = request.cookies.get("access_token")
+    
     if not token:
         raise credentials_exception
     
     try:
-        logger.debug("Decoding JWT token from external auth service")
-        # Декодируем токен (предполагается, что токен создан внешним сервисом с тем же SECRET_KEY)
-        payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
-        username: str = payload.get("sub")
+        # Делаем запрос к server-module для проверки токена и получения информации о пользователе
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{config.AUTH_SERVICE_URL}/api/users/me",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-DB-Schema": "dict_schema"  # Указываем схему для dict-service
+                }
+            )
+            
+            if response.status_code == 401:
+                raise credentials_exception
+            
+            if response.status_code != 200:
+                logger.warning(f"Failed to get user from auth service: {response.status_code}")
+                raise credentials_exception
+            
+            user_data = response.json()
+            login = user_data.get("login")
+            
+            if not login:
+                logger.warning("User data missing login")
+                raise credentials_exception
+            
+            logger.debug(f"Successfully validated token for user: {login}")
+            return login
+            
+    except httpx.RequestError as e:
+        logger.error(f"Error connecting to auth service: {str(e)}")
+        # Fallback: проверяем токен локально если сервис недоступен
+        try:
+            payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+            login = payload.get("login")
+            if login:
+                logger.debug(f"Fallback: validated token locally for user: {login}")
+                return login
+        except JWTError:
+            pass
         
-        if username is None:
-            logger.warning("Token missing username claim")
-            raise credentials_exception
-        
-        # Проверяем, что пользователь существует в БД (может быть не обязательно, если все данные в токене)
-        db = SessionLocal()
-        user = db.query(User).filter(User.username == username).first()
-        db.close()
-        
-        if user is None:
-            logger.warning(f"User from token not found in DB: {username}")
-            # Можно не требовать наличия пользователя в БД, если роль берется из токена
-            # Но для безопасности лучше проверить
-            raise credentials_exception
-        
-        logger.debug(f"Successfully validated token for user: {username} with role: {user.role}")
-        return username
-    except JWTError as e:
-        logger.error(f"Token validation failed: {str(e)}")
+        raise credentials_exception
+    except Exception as e:
+        logger.error(f"Unexpected error in get_current_user: {str(e)}")
         raise credentials_exception
 
-def is_admin(user: str = Depends(get_current_user)):
-    """Проверяет, что пользователь является администратором"""
-    db = SessionLocal()
-    db_user = db.query(User).filter(User.username == user).first()
-    db.close()
-    
-    if not db_user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    # Проверка подтверждения email может быть не нужна, если это обрабатывается внешним сервисом
-    # if not db_user.is_confirmed:
-    #     raise HTTPException(status_code=403, detail="Email not confirmed")
-        
-    if db_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Недостаточно прав доступа. Требуется роль администратора.")
-        
-    return user
+def get_user_info_from_token_sync(token: str) -> Optional[dict]:
+    """Синхронно получает информацию о пользователе из server-module по токену"""
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(
+                f"{config.AUTH_SERVICE_URL}/api/users/me",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-DB-Schema": "dict_schema"  # Указываем схему для dict-service
+                }
+            )
+            if response.status_code == 200:
+                return response.json()
+    except Exception as e:
+        logger.error(f"Error getting user info from auth service: {str(e)}")
+    return None
 
-def is_expert_or_admin(user: str = Depends(get_current_user)):
+async def get_user_info_from_token(token: str) -> Optional[dict]:
+    """Асинхронно получает информацию о пользователе из server-module по токену"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{config.AUTH_SERVICE_URL}/api/users/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if response.status_code == 200:
+                return response.json()
+    except Exception as e:
+        logger.error(f"Error getting user info from auth service: {str(e)}")
+    return None
+
+def get_current_user_from_request(request: Request):
+    """Получает токен из request и возвращает пользователя"""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Token not found")
+    
+    # Используем синхронную функцию для получения информации о пользователе
+    user_data = get_user_info_from_token_sync(token)
+    if user_data:
+        login = user_data.get("login")
+        if login:
+            return login
+    
+    raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+def is_admin(request: Request, user: str = Depends(get_current_user_from_request)):
+    """Проверяет, что пользователь является администратором через server-module"""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Token not found")
+    
+    user_data = get_user_info_from_token_sync(token)
+    if user_data and user_data.get("is_admin"):
+        return user
+    
+    raise HTTPException(status_code=403, detail="Недостаточно прав доступа. Требуется роль администратора.")
+
+def is_expert_or_admin(request: Request, user: str = Depends(get_current_user_from_request)):
     """Проверяет, что пользователь является экспертом или администратором"""
-    db = SessionLocal()
-    db_user = db.query(User).filter(User.username == user).first()
-    db.close()
+    token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Token not found")
     
-    if not db_user:
-        raise HTTPException(status_code=401, detail="User not found")
+    user_data = get_user_info_from_token_sync(token)
+    if user_data:
+        is_admin_flag = user_data.get("is_admin", False)
+        permission_study = user_data.get("permission_study", False)
+        # Маппинг: is_admin → admin, permission_study → expert
+        if is_admin_flag or permission_study:
+            return user
     
-    # Проверка подтверждения email может быть не нужна, если это обрабатывается внешним сервисом
-    # if not db_user.is_confirmed:
-    #     raise HTTPException(status_code=403, detail="Email not confirmed")
-        
-    if db_user.role not in [UserRole.ADMIN, UserRole.EXPERT]:
-        raise HTTPException(status_code=403, detail="Недостаточно прав доступа. Требуется роль эксперта или администратора.")
-        
-    return user
+    raise HTTPException(status_code=403, detail="Недостаточно прав доступа. Требуется роль эксперта или администратора.")
 
 # Функции регистрации, подтверждения email и сброса пароля теперь обрабатываются внешним сервисом

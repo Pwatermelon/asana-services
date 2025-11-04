@@ -6,7 +6,11 @@ from sqlalchemy.ext.declarative import declarative_base
 from enum import Enum
 from typing import Optional
 
+# Используем отдельную схему для asana-dict-service
 Base = declarative_base()
+
+# Схема для таблиц asana-dict-service
+DICT_SCHEMA = "dict_schema"
 
 class UserRole(str, Enum):
     ADMIN = "admin"
@@ -22,17 +26,18 @@ class TokenData(BaseModel):
     username: str | None = None
     role: str | None = None
 
+# Таблица users для server-module в схеме dict_schema
+# Структура соответствует модели User из server-module
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=True)
-    first_name = Column(String, nullable=True)
-    last_name = Column(String, nullable=True)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, default=UserRole.GUEST)
-    is_confirmed = Column(Boolean, default=False)
-    confirmation_code = Column(String, nullable=True)
+    __table_args__ = {'schema': DICT_SCHEMA}
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    login = Column(String(256), unique=True, nullable=False, index=True)
+    mail = Column(String(256), unique=True, nullable=False, index=True)
+    password = Column(String(256), nullable=False)  # Хеш пароля
+    is_admin = Column(Boolean, default=False)
+    permission_study = Column(Boolean, default=False)
+    is_verify = Column(Boolean, default=False)
 
 class UserRegistration(BaseModel):
     username: str
@@ -69,10 +74,12 @@ class AsanaSource(BaseModel):
 
 class AboutProject(Base):
     __tablename__ = "about_project"
+    __table_args__ = {'schema': DICT_SCHEMA}
     id = Column(Integer, primary_key=True, index=True)
     content = Column(String, nullable=False)
 
 class ExpertInstructions(Base):
     __tablename__ = "expert_instructions"
+    __table_args__ = {'schema': DICT_SCHEMA}
     id = Column(Integer, primary_key=True, index=True)
     content = Column(String, nullable=False)

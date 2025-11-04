@@ -18,7 +18,7 @@ from app.ontology import (
 from app.config import logger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from app.models import Base, User, AboutProject, ExpertInstructions, UserRole
+from app.models import Base, AboutProject, ExpertInstructions, UserRole, User
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app import config
@@ -73,9 +73,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = create_engine(config.SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base.metadata.create_all(bind=engine)
+engine = None
+SessionLocal = None
+
+def init_database():
+    """Инициализация базы данных"""
+    global engine, SessionLocal
+    
+    if engine is None:
+        engine = create_engine(config.SQLALCHEMY_DATABASE_URL)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        
+        # Создаем схему если её нет
+        from sqlalchemy import text
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("CREATE SCHEMA IF NOT EXISTS dict_schema"))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to create schema: {e}")
+            raise
+        
+        # Создаем все таблицы включая User в схеме dict_schema
+        from app.models import AboutProject, ExpertInstructions, User
+        try:
+            Base.metadata.create_all(bind=engine, tables=[User.__table__, AboutProject.__table__, ExpertInstructions.__table__])
+        except Exception as e:
+            logger.error(f"Failed to create tables: {e}")
+            raise
 
 # Создаем записи о проекте и инструкции, если их нет
 def create_default_content():
@@ -95,7 +120,88 @@ def create_default_content():
     db.commit()
     db.close()
 
-create_default_content()
+@app.on_event("startup")
+async def startup_event():
+    """Инициализация при запуске приложения"""
+    try:
+        init_database()
+        create_default_content()
+        create_default_users()
+        logger.info("Application startup completed successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize application: {e}")
+        raise
+
+# Создаем стандартных пользователей, если их нет
+def create_default_users():
+    """Создание стандартных пользователей для авторизации через server-module"""
+    from passlib.context import CryptContext
+    import os
+    
+    # Используем ту же конфигурацию и метод, что и в server-module
+    # Это гарантирует 100% совместимость со старыми паролями
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    db = SessionLocal()
+    
+    def hash_password(password: str) -> str:
+        """Хеширует пароль с использованием passlib, как в server-module"""
+        # Используем passlib.hash() для полной совместимости со старыми паролями
+        # Старые пароли создавались через passlib, новые должны быть в том же формате
+        return pwd_context.hash(password)
+    
+    # Создаем стандартных пользователей ТОЛЬКО если их нет
+    # НЕ трогаем существующих пользователей, чтобы сохранить их старые пароли
+    admin_login = os.getenv("ADMIN_USERNAME", "admin")
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
+    
+    if not db.query(User).filter(User.login == admin_login).first():
+        admin_user = User(
+            login=admin_login,
+            mail=f"{admin_login}@example.com",
+            password=hash_password(admin_password),
+            is_admin=True,
+            permission_study=True,
+            is_verify=True
+        )
+        db.add(admin_user)
+        logger.info(f"Created default admin user: {admin_login}")
+    
+    # Создаем expert пользователя
+    expert_login = os.getenv("EXPERT_USERNAME", "expert")
+    expert_password = os.getenv("EXPERT_PASSWORD", "expert123")
+    
+    if not db.query(User).filter(User.login == expert_login).first():
+        expert_user = User(
+            login=expert_login,
+            mail=f"{expert_login}@example.com",
+            password=hash_password(expert_password),
+            is_admin=False,
+            permission_study=True,
+            is_verify=True
+        )
+        db.add(expert_user)
+        logger.info(f"Created default expert user: {expert_login}")
+    
+    # Создаем guest пользователя
+    guest_login = os.getenv("GUEST_USERNAME", "guest")
+    guest_password = os.getenv("GUEST_PASSWORD", "guest123")
+    
+    if not db.query(User).filter(User.login == guest_login).first():
+        guest_user = User(
+            login=guest_login,
+            mail=f"{guest_login}@example.com",
+            password=hash_password(guest_password),
+            is_admin=False,
+            permission_study=False,
+            is_verify=True
+        )
+        db.add(guest_user)
+        logger.info(f"Created default guest user: {guest_login}")
+    
+    db.commit()
+    db.close()
+
+# Инициализация выполняется в startup event
 
 # Маршруты аутентификации и авторизации
 # Авторизация и регистрация теперь обрабатываются внешним сервисом
@@ -465,12 +571,39 @@ async def get_asana_photo_by_source(asana_id: str, source_id: str):
 templates = Jinja2Templates(directory="frontend/app/templates")
 
 def get_user_role_from_request(request: Request) -> str:
-    token = request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+    """
+    Получает роль пользователя из токена через server-module API.
+    Если сервис недоступен, использует fallback на локальную проверку токена.
+    """
+    token = request.cookies.get('access_token') or request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
     if not token:
         return 'guest'
+    
+    try:
+        # Пробуем получить информацию о пользователе через server-module
+        from app.auth import get_user_info_from_token_sync
+        user_data = get_user_info_from_token_sync(token)
+        if user_data:
+            is_admin = user_data.get("is_admin", False)
+            permission_study = user_data.get("permission_study", False)
+            # Маппинг: is_admin → admin, permission_study → expert, иначе → guest
+            if is_admin:
+                return 'admin'
+            elif permission_study:
+                return 'expert'
+            else:
+                return 'guest'
+    except Exception as e:
+        logger.warning(f"Failed to get user role from auth service: {str(e)}, using fallback")
+    
+    # Fallback: проверяем токен локально (если в токене есть роль)
     try:
         payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
-        return payload.get('role', 'guest')
+        role = payload.get('role')
+        if role:
+            return role
+        # Если роли нет в токене, возвращаем guest
+        return 'guest'
     except JWTError:
         return 'guest'
 
@@ -660,33 +793,8 @@ async def api_search_asanas(query: str, fuzzy: bool = True):
         logger.error(f"Error searching asanas: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/admin/update-user-role")
-async def update_user_role(role_update: UserRoleUpdate, admin: str = Depends(is_admin)):
-    """Обновить роль пользователя (только для администратора)"""
-    logger.info(f"Updating user role. Admin: {admin}, User: {role_update.username}, New role: {role_update.new_role}")
-    
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == role_update.username).first()
-    
-    if not user:
-        db.close()
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    
-    if not user.is_confirmed:
-        db.close()
-        raise HTTPException(status_code=400, detail="Пользователь должен подтвердить email перед изменением роли")
-    
-    # Запрещаем менять роль администратора
-    if user.role == UserRole.ADMIN:
-        db.close()
-        raise HTTPException(status_code=403, detail="Невозможно изменить роль администратора")
-    
-    user.role = role_update.new_role
-    db.commit()
-    db.close()
-    
-    logger.info(f"Successfully updated role for user {role_update.username} to {role_update.new_role}")
-    return {"username": user.username, "new_role": user.role}
+# Управление пользователями теперь через server-module API
+# Используйте эндпоинты server-module для управления пользователями
 
 @app.get("/api/auth/check")
 async def check_auth(request: Request):

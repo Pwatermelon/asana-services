@@ -31,7 +31,11 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 if not all([POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD]):
     raise ValueError("Missing required database environment variables")
 
-SQLALCHEMY_DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+# URL подключения к БД с указанием схемы для asana-dict-service
+SQLALCHEMY_DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}?options=-csearch_path%3Ddict_schema"
+
+# URL для сервиса авторизации (server-module)
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://server-module:8000")
 
 # Настройки SMTP для отправки писем
 SMTP_SERVER = os.getenv("SMTP_HOST", "mailcow")
