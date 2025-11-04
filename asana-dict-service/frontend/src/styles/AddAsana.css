@@ -1,0 +1,130 @@
+.form-container {
+  background: var(--card-background);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  margin: 2em 0;
+  padding: 2.5em;
+  border: 1px solid var(--border-light);
+  transition: all 0.3s;
+}
+
+.form-container:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+.form-section {
+  margin-bottom: 2.5em;
+  border-bottom: 2px solid var(--border-light);
+  padding-bottom: 2em;
+}
+
+.form-section:last-child {
+  border-bottom: none;
+}
+
+.form-section-title {
+  font-size: 1.375em;
+  font-weight: 700;
+  margin-bottom: 1.5em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.01em;
+}
+
+.form-row {
+  display: flex;
+  gap: 1.5em;
+  margin-bottom: 1.2em;
+}
+
+.radio-group {
+  display: flex;
+  gap: 2em;
+  margin-bottom: 1.2em;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: 1.05em;
+}
+
+.radio-option {
+  padding: 0.75em 1em;
+  border-radius: 8px;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.radio-option:hover {
+  background: rgba(99, 102, 241, 0.05);
+  border-color: var(--border-color);
+}
+
+.radio-option input[type="radio"] {
+  accent-color: var(--primary-color);
+  width: 1.2em;
+  height: 1.2em;
+  cursor: pointer;
+}
+
+.file-preview {
+  margin-top: 1em;
+  min-height: 120px;
+  background: var(--background-alt);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.9375em;
+  border: 2px dashed var(--border-color);
+  padding: 1.5em;
+  transition: all 0.3s;
+}
+
+.file-preview:hover {
+  border-color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.file-preview img {
+  max-width: 200px;
+  max-height: 150px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+}
+
+.file-preview-text {
+  color: var(--text-muted);
+  font-size: 1em;
+  font-weight: 500;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1em;
+  justify-content: flex-end;
+  margin-top: 2.5em;
+  padding-top: 2em;
+  border-top: 2px solid var(--border-light);
+}
+
+@media (max-width: 700px) {
+  .form-container {
+    padding: 1em 0.5em;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 1em;
+  }
+
+  .form-section {
+    padding-bottom: 1em;
+  }
+}
+

@@ -1,0 +1,61 @@
+.auth-container {
+  background: var(--card-background);
+  max-width: 420px;
+  margin: 3em auto;
+  padding: 2.5em;
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-light);
+}
+
+.auth-title {
+  text-align: center;
+  font-size: 2em;
+  font-weight: 700;
+  margin-bottom: 1.5em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+
+.auth-links {
+  text-align: center;
+  margin-top: 2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+}
+
+.auth-links a {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.2s;
+  padding: 0.5em;
+  border-radius: 8px;
+}
+
+.auth-links a:hover {
+  background: rgba(99, 102, 241, 0.1);
+  transform: translateX(4px);
+}
+
+.remember-me {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 1em;
+}
+
+@media (max-width: 600px) {
+  .auth-container {
+    padding: 1em 0.5em;
+  }
+
+  .auth-title {
+    font-size: 1.2em;
+  }
+}
+

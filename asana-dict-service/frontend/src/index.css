@@ -1,0 +1,310 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Основные цвета */
+  --primary-color: #6366f1;
+  --primary-hover: #4f46e5;
+  --primary-light: #818cf8;
+  --primary-dark: #4338ca;
+  
+  --secondary-color: #8b5cf6;
+  --secondary-hover: #7c3aed;
+  
+  --danger-color: #ef4444;
+  --danger-hover: #dc2626;
+  --danger-light: #fca5a5;
+  
+  --success-color: #10b981;
+  --success-hover: #059669;
+  
+  --warning-color: #f59e0b;
+  --warning-hover: #d97706;
+  
+  /* Фон и карточки */
+  --background: #f8fafc;
+  --background-alt: #f1f5f9;
+  --card-background: #ffffff;
+  --card-hover: #f9fafb;
+  
+  /* Текст */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-light: #94a3b8;
+  
+  /* Границы и тени */
+  --border-color: #e2e8f0;
+  --border-light: #f1f5f9;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  
+  /* Градиенты */
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --gradient-secondary: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--text-primary);
+  margin-bottom: 60px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  padding-top: 60px;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2em;
+}
+
+.page-header {
+  margin-bottom: 2em;
+  padding-bottom: 1.5em;
+  border-bottom: 2px solid var(--border-light);
+}
+
+.page-title {
+  font-size: 2.25em;
+  font-weight: 700;
+  margin-bottom: 0.5em;
+  color: var(--text-primary);
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+
+.page-description {
+  font-size: 1.125em;
+  color: var(--text-secondary);
+  margin-bottom: 0;
+  line-height: 1.6;
+}
+
+/* Унифицированные стили кнопок */
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-logout,
+.btn-view,
+.btn-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.625em 1.25em;
+  font-size: 0.9375em;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+  box-shadow: var(--shadow-sm);
+  min-height: 2.5rem;
+}
+
+.btn-primary {
+  background: var(--gradient-primary);
+  color: #ffffff;
+  box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.39);
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.3);
+}
+
+.btn-secondary {
+  background: var(--background-alt);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+  background: var(--card-hover);
+  border-color: var(--primary-light);
+  color: var(--primary-color);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.btn-danger {
+  background: var(--danger-color);
+  color: #ffffff;
+  box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+  background: var(--danger-hover);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-danger:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.3);
+}
+
+.btn-logout {
+  background: var(--background-alt);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-logout:hover {
+  background: #fee2e2;
+  color: var(--danger-color);
+  border-color: var(--danger-light);
+  transform: translateY(-1px);
+}
+
+.btn-view {
+  background: var(--background-alt);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 0.5em 1em;
+  font-size: 0.875em;
+}
+
+.btn-view:hover {
+  background: var(--primary-color);
+  color: #ffffff;
+  border-color: var(--primary-color);
+  transform: translateY(-1px);
+}
+
+.btn-delete {
+  background: #fee2e2;
+  color: var(--danger-color);
+  border: 1px solid var(--danger-light);
+  padding: 0.5em 1em;
+  font-size: 0.875em;
+}
+
+.btn-delete:hover {
+  background: var(--danger-color);
+  color: #ffffff;
+  border-color: var(--danger-color);
+  transform: translateY(-1px);
+}
+
+.form-group {
+  margin-bottom: 1.2em;
+}
+
+.form-label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.5em;
+  color: #374151;
+}
+
+.form-control,
+.form-select,
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+textarea {
+  width: 100%;
+  padding: 0.875em 1.25em;
+  font-size: 1em;
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--card-background);
+  font-family: inherit;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+}
+
+.form-control:focus,
+.form-select:focus,
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  background: #ffffff;
+}
+
+.form-control::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.form-select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236366f1' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1em center;
+  padding-right: 3em;
+  appearance: none;
+}
+
+.error-message {
+  color: var(--danger-color);
+  font-size: 0.9375em;
+  margin-bottom: 1.5em;
+  text-align: center;
+  padding: 1em 1.5em;
+  background: #fee2e2;
+  border: 2px solid var(--danger-light);
+  border-radius: 10px;
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+
+.success-message {
+  color: var(--success-color);
+  font-size: 0.9375em;
+  margin-bottom: 1.5em;
+  text-align: center;
+  padding: 1em 1.5em;
+  background: #d1fae5;
+  border: 2px solid #6ee7b7;
+  border-radius: 10px;
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 1em;
+  }
+}
+

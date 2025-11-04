@@ -1,0 +1,32 @@
+.form-container {
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 4px 24px rgba(37, 99, 235, 0.08), 0 1.5px 6px rgba(0, 0, 0, 0.04);
+  margin: 2em 0;
+  padding: 2.5em 2em;
+}
+
+.form-row {
+  display: flex;
+  gap: 1.5em;
+  margin-bottom: 1.2em;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1em;
+  justify-content: flex-end;
+  margin-top: 2em;
+}
+
+@media (max-width: 700px) {
+  .form-container {
+    padding: 1em 0.5em;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 1em;
+  }
+}
+

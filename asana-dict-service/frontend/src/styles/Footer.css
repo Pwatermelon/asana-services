@@ -1,0 +1,17 @@
+footer {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #ffffff;
+  text-align: center;
+  padding: 1.5em 0;
+  font-size: 0.9375em;
+  font-weight: 500;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  letter-spacing: 0.025em;
+  box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+

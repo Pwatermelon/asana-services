@@ -1,0 +1,7 @@
+fastapi>=0.95.0,<0.96.0
+uvicorn>=0.21.1,<0.22.0
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.5
+httpx==0.23.0
+Jinja2==3.0.3
+gunicorn==20.1.0

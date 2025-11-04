@@ -1,0 +1,48 @@
+.settings-container {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.settings-title {
+  font-size: 2.25em;
+  font-weight: 700;
+  margin-bottom: 2em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+
+.settings-section {
+  background: var(--card-background);
+  padding: 2.5em;
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-light);
+  margin-bottom: 2em;
+  transition: all 0.3s;
+}
+
+.settings-section:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+.settings-section-title {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin-bottom: 0.75em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.settings-description {
+  color: var(--text-secondary);
+  margin-bottom: 2em;
+  font-size: 1.0625em;
+  line-height: 1.6;
+}
+

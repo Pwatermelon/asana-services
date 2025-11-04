@@ -1,0 +1,127 @@
+.navbar {
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+  padding: 0.875em 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.navbar-content {
+  display: flex;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2em;
+}
+
+.navbar-brand {
+  font-size: 1.625em;
+  font-weight: 700;
+  margin-right: 2em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-decoration: none;
+  line-height: 1.2;
+  transition: transform 0.2s;
+}
+
+.navbar-brand:hover {
+  transform: scale(1.05);
+}
+
+.navbar-links {
+  display: flex;
+  gap: 1.5em;
+  flex: 1;
+  justify-content: center;
+}
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 1rem;
+  font-weight: 500;
+  padding: 0.5em 0.875em;
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+  position: relative;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 2px;
+  background: var(--gradient-primary);
+  transition: width 0.3s ease;
+}
+
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.nav-link.active::after {
+  width: 80%;
+}
+
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  flex-wrap: wrap;
+}
+
+.user-role-badge-fixed {
+  position: fixed;
+  top: 1.125rem;
+  right: 1.75rem;
+  z-index: 2000;
+  background: var(--gradient-primary);
+  color: #ffffff;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.5em 1em;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: transform 0.2s;
+}
+
+.user-role-badge-fixed:hover {
+  transform: scale(1.05);
+}
+
+@media (max-width: 768px) {
+  .navbar-links {
+    display: none;
+  }
+
+  .navbar-actions {
+    flex-wrap: wrap;
+    gap: 0.5em;
+  }
+
+  .user-role-badge-fixed {
+    top: 8px;
+    right: 8px;
+    font-size: 0.95em;
+    padding: 0.2em 0.6em;
+  }
+}
+
