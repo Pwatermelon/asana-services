@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path, BackgroundTasks
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 import base64
@@ -75,6 +77,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Обработчик ошибок валидации
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Обработчик ошибок валидации с детальным логированием"""
+    errors = exc.errors()
+    logger.error(f"Validation error on {request.url.path}")
+    logger.error(f"Validation errors: {json.dumps(errors, indent=2, ensure_ascii=False)}")
+    logger.error(f"Request method: {request.method}, URL: {request.url}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": errors,
+            "message": "Ошибка валидации данных формы"
+        }
+    )
+
 engine = None
 SessionLocal = None
 
@@ -145,7 +163,8 @@ def add_moderation_columns_if_needed():
             'suggested_definition': 'TEXT',
             'existing_name_id': 'VARCHAR(500)',
             'existing_name_ru': 'VARCHAR(500)',
-            'moderation_type': 'VARCHAR(50)'
+            'moderation_type': 'VARCHAR(50)',
+            'object_type': 'VARCHAR(50)'
         }
         
         for col_name, col_type in new_columns.items():
@@ -270,6 +289,24 @@ async def get_asanas():
     logger.info(f"Retrieved {len(asanas)} asanas")
     return asanas
 
+@app.get("/asana/{asana_id}", tags=["asana"])
+async def get_asana_by_id_endpoint(asana_id: str = Path(...)):
+    """Получить асану по ID (доступно всем)"""
+    logger.info(f"Getting asana by ID: {asana_id}")
+    
+    # Убираем суффикс -page, если он есть
+    if asana_id.endswith('-page'):
+        asana_id = asana_id[:-5]
+    
+    asana = get_asana_by_id(asana_id)
+    
+    if not asana:
+        logger.warning(f"Asana not found with ID: {asana_id}")
+        raise HTTPException(status_code=404, detail="Асана не найдена")
+    
+    logger.info(f"Found asana: {asana.get('name', {}).get('name_ru', 'Unknown')}")
+    return asana
+
 @app.get("/asanas/by-letter/{letter}", tags=["asana"])
 async def get_asanas_by_letter(letter: str):
     """Получить асаны, начинающиеся с определенной буквы (доступно всем)"""
@@ -333,11 +370,11 @@ async def post_asana(
     selected_source: str = Form(...),
     new_source_title: Optional[str] = Form(None),
     new_source_author: Optional[str] = Form(None),
-    new_source_year: Optional[int] = Form(None),
+    new_source_year: Optional[str] = Form(None),  # Изменено на str для обработки пустых строк
     new_source_publisher: Optional[str] = Form(None),
-    new_source_pages: Optional[int] = Form(None),
+    new_source_pages: Optional[str] = Form(None),  # Изменено на str для обработки пустых строк
     new_source_annotation: Optional[str] = Form(None),
-    photo: UploadFile = File(...),
+    photos: List[UploadFile] = File(...),  # Изменено на список фото
     user: str = Depends(is_expert_or_admin)
 ):
     """Добавить новую асану (только эксперты и админы)"""
@@ -346,7 +383,7 @@ async def post_asana(
         logger.debug(f"Form data received - selected_name: {selected_name}, selected_source: {selected_source}")
         logger.debug(f"New name data: ru={new_name_ru}, sanskrit={new_name_sanskrit}")
         logger.debug(f"New source data: title={new_source_title}, author={new_source_author}, year={new_source_year}")
-        logger.debug(f"Photo filename: {photo.filename}")
+        logger.debug(f"Photos count: {len(photos)}")
         
         # Обработка названия
         name_id = None
@@ -377,17 +414,27 @@ async def post_asana(
             source_id = selected_source
         elif all([new_source_title, new_source_author, new_source_year]):
             logger.info("Creating new source")
+            
+            # Преобразуем year в int, обрабатывая пустые строки
+            try:
+                year = int(new_source_year) if new_source_year and new_source_year.strip() else 0
+            except (ValueError, TypeError):
+                year = 0
+            
             source_data = {
                 "title": new_source_title,
                 "author": new_source_author,
-                "year": int(new_source_year)
+                "year": year
             }
             
             # Добавляем необязательные поля, если они есть
             if new_source_publisher:
                 source_data["publisher"] = new_source_publisher
-            if new_source_pages:
-                source_data["pages"] = int(new_source_pages)
+            if new_source_pages and new_source_pages.strip():
+                try:
+                    source_data["pages"] = int(new_source_pages)
+                except (ValueError, TypeError):
+                    pass  # Пропускаем если не удалось преобразовать
             if new_source_annotation:
                 source_data["annotation"] = new_source_annotation
                 
@@ -397,28 +444,32 @@ async def post_asana(
             logger.error("Missing required source fields for new source")
             raise HTTPException(status_code=400, detail="При добавлении нового источника поля автора, названия и года обязательны")
 
-        # Обработка фото - загружаем в S3
-        photo_s3_path = None
-        if photo:
-            logger.info("Processing photo upload to S3")
-            try:
-                from app.s3_utils import upload_image_to_s3
-                photo_content = await photo.read()
-                photo_base64_str = base64.b64encode(photo_content).decode()
-                # Преобразуем в data URI формат
-                photo_data_uri = f"data:image/jpeg;base64,{photo_base64_str}"
-                photo_s3_path = upload_image_to_s3(photo_data_uri, prefix="asans")
-                logger.info(f"Photo uploaded to S3: {photo_s3_path}")
-            except Exception as e:
-                logger.error(f"Error uploading photo to S3: {e}")
-                # В случае ошибки используем base64 как fallback
-                photo_base64 = base64.b64encode(photo_content).decode()
-                photo_s3_path = photo_base64
+        # Обработка фото - загружаем все в S3
+        photo_s3_paths = []
+        if photos:
+            logger.info(f"[DEBUG MAIN] Processing {len(photos)} photo(s) upload to S3")
+            from app.s3_utils import upload_image_to_s3
+            for idx, photo in enumerate(photos):
+                try:
+                    photo_content = await photo.read()
+                    logger.info(f"[DEBUG MAIN] Photo {idx+1}: read {len(photo_content)} bytes")
+                    # Загружаем bytes напрямую в S3 (upload_image_to_s3 поддерживает bytes)
+                    photo_s3_path = upload_image_to_s3(photo_content, prefix="asans")
+                    logger.info(f"[DEBUG MAIN] Photo {idx+1}: uploaded to S3, path={photo_s3_path}, type={type(photo_s3_path)}")
+                    photo_s3_paths.append(photo_s3_path)
+                    logger.info(f"[DEBUG MAIN] Photo {idx+1} added to list. Total paths: {len(photo_s3_paths)}")
+                except Exception as e:
+                    logger.error(f"[ERROR MAIN] Error uploading photo {idx+1} to S3: {e}", exc_info=True)
+                    # НЕ сохраняем base64! Пропускаем фото при ошибке
+                    logger.warning(f"[WARNING MAIN] Skipping photo {idx+1} due to upload error - will add asana without this photo")
+        else:
+            logger.info(f"[DEBUG MAIN] No photos provided in request")
 
-        # Добавляем асану
-        logger.info("Adding asana to ontology")
-        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_path=photo_s3_path or "")
-        logger.info(f"Successfully created asana with ID: {asana_id}")
+        # Добавляем асану с несколькими фото
+        logger.info(f"[DEBUG MAIN] Adding asana to ontology with {len(photo_s3_paths)} photo path(s)")
+        logger.info(f"[DEBUG MAIN] Photo paths to add: {photo_s3_paths}")
+        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths)
+        logger.info(f"[DEBUG MAIN] Successfully created asana with ID: {asana_id} with {len(photo_s3_paths)} photo(s)")
         
         return {"message": "Asana added successfully", "id": asana_id}
     except Exception as e:
@@ -629,7 +680,14 @@ def run_import_asanas_task(task_id: str, tmp_path: str, source_id: str, user: st
         
         from app.excel_import import import_asanas_from_excel
         
-        result = import_asanas_from_excel(tmp_path, source_id, user=user)
+        # Функция для обновления прогресса
+        def update_progress(current: int, total: int):
+            if total > 0:
+                progress = int((current / total) * 100)
+                import_tasks[task_id]["progress"] = progress
+                logger.debug(f"Import progress: {progress}% ({current}/{total})")
+        
+        result = import_asanas_from_excel(tmp_path, source_id, user=user, progress_callback=update_progress)
         error_count = len(result.get('errors', []))
         
         import_tasks[task_id]["status"] = "completed"
@@ -696,7 +754,14 @@ def run_import_full_task(task_id: str, tmp_path: str, user: str):
         
         from app.excel_import import import_full_from_excel
         
-        result = import_full_from_excel(tmp_path, user=user)
+        # Функция для обновления прогресса
+        def update_progress(current: int, total: int):
+            if total > 0:
+                progress = int((current / total) * 100)
+                import_tasks[task_id]["progress"] = progress
+                logger.debug(f"Import progress: {progress}% ({current}/{total})")
+        
+        result = import_full_from_excel(tmp_path, user=user, progress_callback=update_progress)
         error_count = len(result.get('errors', []))
         
         import_tasks[task_id]["status"] = "completed"
@@ -755,6 +820,36 @@ async def import_full(
         logger.error(f"Error starting import task: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Ошибка при запуске импорта: {str(e)}")
 
+@app.get("/import/status/{task_id}")
+async def get_import_status(
+    task_id: str = Path(...), 
+    user: str = Depends(is_expert_or_admin)
+):
+    """Получить статус задачи импорта"""
+    if task_id not in import_tasks:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    
+    task = import_tasks[task_id]
+    
+    # Проверяем, что пользователь может видеть эту задачу (только если он создал её)
+    # Для админов можно разрешить просмотр всех задач, но для простоты оставляем только проверку на создателя
+    if task.get("user") != user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    response = {
+        "status": task.get("status", "unknown"),
+        "progress": task.get("progress", 0)
+    }
+    
+    # Если задача завершена, добавляем результат
+    if task.get("status") == "completed":
+        response["result"] = task.get("result", {})
+    # Если задача завершилась с ошибкой, добавляем ошибку
+    elif task.get("status") == "error":
+        response["error"] = task.get("error", "Неизвестная ошибка")
+    
+    return response
+
 @app.post("/import/asana-names")
 async def import_asana_names(
     file: UploadFile = File(...),
@@ -794,6 +889,8 @@ async def import_asana_names(
 @app.get("/moderation/items")
 async def get_moderation_items(
     resolved: Optional[bool] = None,
+    moderation_type: Optional[str] = Query(None, description="Тип модерации: error, name_mismatch, duplicate_name, duplicate_source"),
+    object_type: Optional[str] = Query(None, description="Тип объекта: asana_name, source, asana"),
     user: str = Depends(is_expert_or_admin)
 ):
     """Получить список записей на модерацию (только для экспертов и админов)"""
@@ -805,6 +902,14 @@ async def get_moderation_items(
         else:
             # По умолчанию показываем нерешенные
             query = query.filter(ModerationItem.resolved == False)
+        
+        # Фильтр по типу модерации
+        if moderation_type:
+            query = query.filter(ModerationItem.moderation_type == moderation_type)
+        
+        # Фильтр по типу объекта
+        if object_type:
+            query = query.filter(ModerationItem.object_type == object_type)
         
         items = query.order_by(ModerationItem.created_at.desc()).all()
         
@@ -818,6 +923,20 @@ async def get_moderation_items(
                 except:
                     pass
             
+            # Определяем тип объекта, если не указан (для старых записей)
+            obj_type = item.object_type
+            if not obj_type:
+                if item.moderation_type in ['duplicate_name', 'name_mismatch'] and not item.source_id:
+                    obj_type = 'asana_name'
+                elif item.moderation_type == 'duplicate_source' or (item.source_id and 'source' in item.error_message.lower()):
+                    obj_type = 'source'
+                elif item.source_id and item.asana_name:
+                    obj_type = 'asana'
+                elif not item.source_id and item.asana_name:
+                    obj_type = 'asana_name'
+                else:
+                    obj_type = 'asana'
+            
             result.append({
                 "id": item.id,
                 "asana_name": item.asana_name,
@@ -830,6 +949,7 @@ async def get_moderation_items(
                 "resolved_by": item.resolved_by,
                 "resolved_at": item.resolved_at,
                 "moderation_type": item.moderation_type,
+                "object_type": obj_type,
                 "suggested_name_ru": item.suggested_name_ru,
                 "suggested_name_sanskrit": item.suggested_name_sanskrit,
                 "suggested_transliteration": item.suggested_transliteration,
@@ -858,6 +978,7 @@ async def add_asana_from_moderation(
     name_id: str = Form(...),
     source_id: str = Form(...),
     photo: Optional[UploadFile] = File(None),
+    keep_photo_from_request: str = Form("false"),
     user: str = Depends(is_expert_or_admin)
 ):
     """Добавить асану из записи модерации"""
@@ -869,18 +990,22 @@ async def add_asana_from_moderation(
         
         # Обработка фото
         photo_s3_path = None
+        keep_photo = keep_photo_from_request.lower() == 'true'
+        
         if photo:
+            # Если загружено новое фото, используем его
             try:
                 from app.s3_utils import upload_image_to_s3
                 photo_content = await photo.read()
-                photo_base64_str = base64.b64encode(photo_content).decode()
-                photo_data_uri = f"data:image/jpeg;base64,{photo_base64_str}"
-                photo_s3_path = upload_image_to_s3(photo_data_uri, prefix="asans")
+                # Загружаем bytes напрямую в S3
+                photo_s3_path = upload_image_to_s3(photo_content, prefix="asans")
+                logger.info(f"Photo uploaded to S3: {photo_s3_path}")
             except Exception as e:
-                logger.error(f"Error uploading photo to S3: {e}")
-                photo_base64 = base64.b64encode(photo_content).decode()
-                photo_s3_path = photo_base64
-        elif item.import_data:
+                logger.error(f"Error uploading photo to S3: {e}", exc_info=True)
+                # НЕ сохраняем base64! Оставляем None при ошибке
+                photo_s3_path = None
+                logger.warning(f"Failed to upload photo - will add asana without photo")
+        elif keep_photo and item.import_data:
             # Парсим JSON если это строка
             import json
             try:
@@ -890,20 +1015,36 @@ async def add_asana_from_moderation(
                     import_data = item.import_data
                 
                 # Если фото есть в данных импорта
+                photo_info = import_data.get('photo_info') if isinstance(import_data, dict) else None
+                if photo_info:
+                    logger.info(f"[DEBUG] Photo info from import: {photo_info}")
+                    if 'removed' in photo_info:
+                        logger.warning(f"[WARNING] Photo was removed from import_data: {photo_info}")
+                        logger.warning(f"[WARNING] You need to upload a new photo manually")
+                
                 if isinstance(import_data, dict) and 'photo' in import_data:
                     photo_data = import_data['photo']
-                    if isinstance(photo_data, str) and photo_data.startswith('data:'):
+                    # Проверяем, что фото не было удалено
+                    if photo_data is None:
+                        logger.warning(f"Photo was removed from import_data (reason: {photo_info})")
+                    elif isinstance(photo_data, str) and photo_data.startswith('data:'):
                         try:
                             from app.s3_utils import upload_image_to_s3
+                            logger.info(f"[DEBUG] Uploading photo from import data. Length: {len(photo_data)}, preview: {photo_data[:100]}")
                             photo_s3_path = upload_image_to_s3(photo_data, prefix="asans")
+                            logger.info(f"[DEBUG] Successfully uploaded photo to S3: {photo_s3_path}")
                         except Exception as e:
-                            logger.error(f"Error uploading photo from import data: {e}")
-                            photo_s3_path = photo_data
+                            logger.error(f"Error uploading photo from import data: {e}", exc_info=True)
+                            logger.error(f"Photo data preview (first 200 chars): {photo_data[:200] if len(photo_data) > 200 else photo_data}")
+                            # Не сохраняем base64 как путь S3, оставляем None
+                            photo_s3_path = None
+                            logger.warning(f"Photo upload failed, will continue without photo")
             except Exception as e:
                 logger.error(f"Error parsing import_data: {e}")
         
         # Добавляем асану
-        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_path=photo_s3_path or "")
+        photo_paths = [photo_s3_path] if photo_s3_path else []
+        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths)
         
         # Отмечаем как решенную
         item.resolved = True

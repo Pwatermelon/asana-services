@@ -116,8 +116,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=${USER_MINIO:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${PASSWORD_MINIO:-minioadmin}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -128,6 +128,29 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+
+  # Init контейнер для настройки MinIO bucket policy
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin} 2>/dev/null; do
+          echo 'Waiting for MinIO to be ready...'
+          sleep 2
+        done
+        mc mb local/images --ignore-existing || true
+        mc anonymous set public local/images || true
+        echo 'MinIO bucket policy configured successfully'
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    networks:
+      - asana-network
 
   # ============================================
   # Nginx для проксирования

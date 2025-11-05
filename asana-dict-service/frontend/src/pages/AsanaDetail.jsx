@@ -6,10 +6,13 @@ import { useAuth } from '../contexts/AuthContext';
 import '../styles/AsanaDetail.css';
 
 const AsanaDetail = () => {
-  const { id } = useParams();
+  const params = useParams();
+  // Получаем id из параметров (может быть 'id' или 'id-page' в зависимости от роута)
+  const id = params.id || params['id-page'] || params.idPage;
   const [asana, setAsana] = useState(null);
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [selectedSource, setSelectedSource] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
@@ -28,31 +31,111 @@ const AsanaDetail = () => {
 
   const loadAsana = async () => {
     try {
-      const asanaId = id.replace('-page', '');
-      // Формируем полный URI - asanaId уже содержит asana_ или просто UUID
-      const fullUri = `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${asanaId.startsWith('asana_') ? asanaId : `asana_${asanaId}`}`;
-      const allAsanas = await asanasAPI.getAll();
+      setError(null); // Сбрасываем ошибку при новой загрузке
+      setLoading(true);
       
-      // Ищем по полному URI
-      let foundAsana = allAsanas.find(a => a.id === fullUri);
+      // Проверяем, что id существует
+      if (!id) {
+        console.error('No asana ID provided in URL');
+        setError('ID асаны не указан в URL');
+        setLoading(false);
+        return;
+      }
       
-      // Если не найдено, пробуем найти по короткому ID
-      if (!foundAsana) {
-        const shortId = fullUri.split('#').pop();
-        foundAsana = allAsanas.find(a => {
-          const aShortId = a.id.split('#').pop();
-          return aShortId === shortId;
+      // Убираем суффикс -page если есть
+      let asanaId = String(id);
+      if (asanaId.endsWith('-page')) {
+        asanaId = asanaId.replace('-page', '');
+      }
+      
+      console.log('Loading asana with ID from URL:', asanaId);
+      
+      // Пробуем использовать API getById
+      try {
+        const asana = await asanasAPI.getById(asanaId);
+        if (asana) {
+          console.log('Found asana via getById:', asana.id);
+          setAsana(asana);
+          setLoading(false);
+          return;
+        } else {
+          console.warn('getById returned null/undefined for ID:', asanaId);
+        }
+      } catch (apiError) {
+        console.warn('getById failed, trying getAll:', apiError);
+        console.warn('Error details:', {
+          message: apiError.message,
+          response: apiError.response?.data,
+          status: apiError.response?.status
         });
+      }
+      
+      // Fallback: получаем все асаны и ищем локально
+      const allAsanas = await asanasAPI.getAll();
+      console.log('Total asanas loaded:', allAsanas.length);
+      
+      // Нормализуем ID из URL
+      const normalizedUrlId = asanaId.trim();
+      
+      // Формируем возможные варианты ID для поиска
+      const possibleIds = [
+        normalizedUrlId, // Точное совпадение
+        normalizedUrlId.startsWith('asana_') ? normalizedUrlId : `asana_${normalizedUrlId}`, // С префиксом
+        normalizedUrlId.replace(/^asana_/, ''), // Без префикса
+        `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${normalizedUrlId}`,
+        `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${normalizedUrlId.startsWith('asana_') ? normalizedUrlId : `asana_${normalizedUrlId}`}`
+      ];
+      
+      console.log('Searching with possible IDs:', possibleIds);
+      
+      // Ищем асану
+      let foundAsana = null;
+      
+      for (const asana of allAsanas) {
+        const fullId = asana.id;
+        const shortId = fullId.split('#').pop();
+        
+        // Проверяем все возможные варианты
+        for (const possibleId of possibleIds) {
+          if (fullId === possibleId || shortId === possibleId) {
+            foundAsana = asana;
+            break;
+          }
+          
+          // Также проверяем без префикса
+          const shortIdNoPrefix = shortId.replace(/^asana_/, '');
+          const possibleIdNoPrefix = possibleId.replace(/^asana_/, '').replace(/^http.*#/, '');
+          if (shortIdNoPrefix && possibleIdNoPrefix && shortIdNoPrefix === possibleIdNoPrefix) {
+            foundAsana = asana;
+            break;
+          }
+        }
+        
+        if (foundAsana) break;
       }
       
       setAsana(foundAsana);
       if (!foundAsana) {
-        console.error('Asana not found. Searched URI:', fullUri);
-        console.error('Searched short ID:', fullUri.split('#').pop());
-        console.error('Sample asana IDs:', allAsanas.slice(0, 5).map(a => ({ full: a.id, short: a.id.split('#').pop() })));
+        console.error('Asana not found. Searched ID:', normalizedUrlId);
+        console.error('Possible IDs tried:', possibleIds);
+        console.error('First 10 asana IDs for comparison:', allAsanas.slice(0, 10).map(a => ({
+          full: a.id,
+          short: a.id.split('#').pop(),
+          shortNoPrefix: a.id.split('#').pop().replace(/^asana_/, '')
+        })));
+        setError(`Асана не найдена (ID: ${normalizedUrlId})`);
+      } else {
+        console.log('Found asana:', foundAsana.id);
+        setError(null); // Очищаем ошибку при успехе
       }
     } catch (error) {
       console.error('Error loading asana:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        response: error.response?.data
+      });
+      setError(`Ошибка при загрузке асаны: ${error.message || 'Неизвестная ошибка'}`);
     } finally {
       setLoading(false);
     }
@@ -102,8 +185,22 @@ const AsanaDetail = () => {
     return <div className="container">Загрузка...</div>;
   }
 
+  if (error) {
+    return (
+      <div className="container">
+        <div className="error-message">{error}</div>
+        <p>Попробуйте вернуться к <a href="/asanas">списку асан</a></p>
+      </div>
+    );
+  }
+
   if (!asana) {
-    return <div className="container">Асана не найдена</div>;
+    return (
+      <div className="container">
+        <div className="error-message">Асана не найдена</div>
+        <p>Попробуйте вернуться к <a href="/asanas">списку асан</a></p>
+      </div>
+    );
   }
 
   return (

@@ -42,7 +42,7 @@ function App() {
               <Route path="/reset-password-confirm" element={<ResetPasswordConfirm />} />
               
               <Route path="/asanas" element={<AsanasList />} />
-              <Route path="/asana/:id-page" element={<AsanaDetail />} />
+              <Route path="/asana/:id" element={<AsanaDetail />} />
               
               <Route
                 path="/asana/add"

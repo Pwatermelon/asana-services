@@ -12,12 +12,36 @@ export const asanasAPI = {
   },
 
   getById: async (asanaId) => {
-    // Получаем все асаны и находим нужную
-    const allAsanas = await asanasAPI.getAll();
-    const fullUri = asanaId.startsWith('http://') 
-      ? asanaId 
-      : `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${asanaId.startsWith('asana_') ? asanaId : `asana_${asanaId}`}`;
-    return allAsanas.find(a => a.id === fullUri);
+    // Убираем суффикс -page если есть
+    let cleanId = asanaId;
+    if (cleanId.endsWith('-page')) {
+      cleanId = cleanId.replace('-page', '');
+    }
+    
+    try {
+      // Пробуем использовать API endpoint
+      const response = await apiClient.get(`/asana/${encodeURIComponent(cleanId)}`);
+      return response.data;
+    } catch (error) {
+      // Fallback: получаем все асаны и находим нужную
+      console.warn('Direct API call failed, using getAll fallback:', error);
+      const allAsanas = await asanasAPI.getAll();
+      const fullUri = cleanId.startsWith('http://') 
+        ? cleanId 
+        : `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${cleanId.startsWith('asana_') ? cleanId : `asana_${cleanId}`}`;
+      
+      // Ищем по разным вариантам ID
+      let found = allAsanas.find(a => a.id === fullUri);
+      if (!found) {
+        // Пробуем найти по короткому ID
+        const shortId = fullUri.split('#').pop();
+        found = allAsanas.find(a => {
+          const aShortId = a.id.split('#').pop();
+          return aShortId === shortId || aShortId === cleanId || a.id === cleanId;
+        });
+      }
+      return found;
+    }
   },
 
   search: async (query, fuzzy = true) => {

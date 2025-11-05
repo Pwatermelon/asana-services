@@ -8,18 +8,21 @@ const Moderation = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [resolvedFilter, setResolvedFilter] = useState(false);
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'error', 'name_mismatch', 'duplicate_name', 'duplicate_source'
+  const [objectTypeFilter, setObjectTypeFilter] = useState('all'); // 'all', 'asana_name', 'source', 'asana'
   const [resolving, setResolving] = useState({});
   const [addingAsana, setAddingAsana] = useState({});
   const [showAddForm, setShowAddForm] = useState({});
   const [sources, setSources] = useState([]);
   const [names, setNames] = useState([]);
   const [addFormData, setAddFormData] = useState({});
+  const [keepPhotoFromRequest, setKeepPhotoFromRequest] = useState({}); // Галочка для сохранения фото из запроса
 
   useEffect(() => {
     loadItems();
     loadSources();
     loadNames();
-  }, [resolvedFilter]);
+  }, [resolvedFilter, typeFilter, objectTypeFilter]);
 
   const loadSources = async () => {
     try {
@@ -42,7 +45,9 @@ const Moderation = () => {
   const loadItems = async () => {
     setLoading(true);
     try {
-      const data = await moderationAPI.getItems(resolvedFilter);
+      const typeFilterParam = typeFilter === 'all' ? null : typeFilter;
+      const objectTypeFilterParam = objectTypeFilter === 'all' ? null : objectTypeFilter;
+      const data = await moderationAPI.getItems(resolvedFilter, typeFilterParam, objectTypeFilterParam);
       setItems(data);
     } catch (error) {
       console.error('Error loading moderation items:', error);
@@ -80,11 +85,13 @@ const Moderation = () => {
         itemId,
         formData.name_id,
         formData.source_id,
-        formData.photo
+        formData.photo,
+        keepPhotoFromRequest[itemId] || false
       );
       await loadItems();
       setShowAddForm({ ...showAddForm, [itemId]: false });
       setAddFormData({ ...addFormData, [itemId]: {} });
+      setKeepPhotoFromRequest({ ...keepPhotoFromRequest, [itemId]: false });
     } catch (error) {
       console.error('Error adding asana:', error);
       alert(error.response?.data?.detail || 'Ошибка при добавлении асаны');
@@ -121,14 +128,47 @@ const Moderation = () => {
         <h1 className="moderation-title">Требует модерации</h1>
 
         <div className="moderation-filters">
-          <label>
-            <input
-              type="checkbox"
-              checked={resolvedFilter}
-              onChange={(e) => setResolvedFilter(e.target.checked)}
-            />
-            Показать решенные
-          </label>
+          <div className="filter-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={resolvedFilter}
+                onChange={(e) => setResolvedFilter(e.target.checked)}
+              />
+              Показать решенные
+            </label>
+          </div>
+          <div className="filter-group">
+            <label>
+              Тип модерации:
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                style={{ marginLeft: '0.5em', padding: '0.25em' }}
+              >
+                <option value="all">Все типы</option>
+                <option value="error">Ошибки</option>
+                <option value="name_mismatch">Несовпадение названия</option>
+                <option value="duplicate_name">Дубликат названия</option>
+                <option value="duplicate_source">Дубликат источника</option>
+              </select>
+            </label>
+          </div>
+          <div className="filter-group">
+            <label>
+              Тип объекта:
+              <select
+                value={objectTypeFilter}
+                onChange={(e) => setObjectTypeFilter(e.target.value)}
+                style={{ marginLeft: '0.5em', padding: '0.25em' }}
+              >
+                <option value="all">Все объекты</option>
+                <option value="asana_name">Название Асаны</option>
+                <option value="source">Источник</option>
+                <option value="asana">Асана</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         {items.length === 0 ? (
@@ -138,9 +178,28 @@ const Moderation = () => {
             {items.map((item) => (
               <div key={item.id} className="moderation-item">
                 <div className="moderation-item-header">
-                  <span className="moderation-item-type">
-                    {item.moderation_type === 'name_mismatch' ? 'Несовпадение названия' : 'Ошибка'}
-                  </span>
+                  <div style={{ display: 'flex', gap: '1em', alignItems: 'center' }}>
+                    <span className="moderation-item-type">
+                      {item.moderation_type === 'name_mismatch' ? 'Несовпадение названия' :
+                       item.moderation_type === 'duplicate_name' ? 'Дубликат названия' :
+                       item.moderation_type === 'duplicate_source' ? 'Дубликат источника' :
+                       'Ошибка'}
+                    </span>
+                    {item.object_type && (
+                      <span style={{ 
+                        padding: '0.25em 0.5em', 
+                        backgroundColor: '#e3f2fd', 
+                        borderRadius: '4px',
+                        fontSize: '0.85em',
+                        fontWeight: '500'
+                      }}>
+                        {item.object_type === 'asana_name' ? 'Название Асаны' :
+                         item.object_type === 'source' ? 'Источник' :
+                         item.object_type === 'asana' ? 'Асана' :
+                         item.object_type}
+                      </span>
+                    )}
+                  </div>
                   <span className="moderation-item-row">Строка {item.row_number}</span>
                 </div>
                 
@@ -280,6 +339,20 @@ const Moderation = () => {
                           style={{ width: '100%', padding: '0.5em', marginTop: '0.25em' }}
                         />
                       </label>
+                      {item.import_data && typeof item.import_data === 'object' && item.import_data.photo && (
+                        <label style={{ display: 'flex', alignItems: 'center', marginTop: '0.5em' }}>
+                          <input
+                            type="checkbox"
+                            checked={keepPhotoFromRequest[item.id] || false}
+                            onChange={(e) => setKeepPhotoFromRequest({
+                              ...keepPhotoFromRequest,
+                              [item.id]: e.target.checked
+                            })}
+                            style={{ marginRight: '0.5em' }}
+                          />
+                          Оставить фото как было в запросе
+                        </label>
+                      )}
                     </div>
                     <div>
                       <button

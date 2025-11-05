@@ -24,8 +24,8 @@ const AddAsana = () => {
     pages: '',
     annotation: '',
   });
-  const [photo, setPhoto] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
+  const [photos, setPhotos] = useState([]); // Массив выбранных фото
+  const [photoPreviews, setPhotoPreviews] = useState([]); // Массив превью фото
   const [names, setNames] = useState([]);
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,15 +51,32 @@ const AddAsana = () => {
   };
 
   const handlePhotoChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setPhoto(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      const newPhotos = [...photos, ...files];
+      setPhotos(newPhotos);
+      
+      // Создаем превью для новых файлов
+      const newPreviews = [...photoPreviews];
+      files.forEach((file) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          newPreviews.push({
+            file: file,
+            preview: reader.result
+          });
+          setPhotoPreviews([...newPreviews]);
+        };
+        reader.readAsDataURL(file);
+      });
     }
+  };
+
+  const removePhoto = (index) => {
+    const newPhotos = photos.filter((_, i) => i !== index);
+    const newPreviews = photoPreviews.filter((_, i) => i !== index);
+    setPhotos(newPhotos);
+    setPhotoPreviews(newPreviews);
   };
 
   const handleSubmit = async (e) => {
@@ -68,10 +85,43 @@ const AddAsana = () => {
     setLoading(true);
 
     try {
+      // Валидация перед отправкой
+      if (nameOption === 'existing' && !selectedName) {
+        setError('Пожалуйста, выберите существующее название асаны');
+        setLoading(false);
+        return;
+      }
+      
+      if (nameOption === 'new' && !newName.name_ru) {
+        setError('Пожалуйста, введите название асаны на русском');
+        setLoading(false);
+        return;
+      }
+      
+      if (sourceOption === 'existing' && !selectedSource) {
+        setError('Пожалуйста, выберите существующий источник');
+        setLoading(false);
+        return;
+      }
+      
+      if (sourceOption === 'new' && (!newSource.title || !newSource.author || !newSource.year)) {
+        setError('Пожалуйста, заполните все обязательные поля источника (название, автор, год)');
+        setLoading(false);
+        return;
+      }
+      
+      if (photos.length === 0) {
+        setError('Пожалуйста, загрузите хотя бы одну фотографию асаны');
+        setLoading(false);
+        return;
+      }
+
       const formData = new FormData();
       
-      formData.append('selected_name', nameOption === 'existing' ? selectedName : '');
-      formData.append('selected_source', sourceOption === 'existing' ? selectedSource : '');
+      // Отправляем "new" если выбрано новое название, иначе ID существующего
+      formData.append('selected_name', nameOption === 'existing' ? selectedName : 'new');
+      // Отправляем "new" если выбран новый источник, иначе ID существующего
+      formData.append('selected_source', sourceOption === 'existing' ? selectedSource : 'new');
       
       if (nameOption === 'new') {
         formData.append('new_name_ru', newName.name_ru);
@@ -89,9 +139,10 @@ const AddAsana = () => {
         if (newSource.annotation) formData.append('new_source_annotation', newSource.annotation);
       }
 
-      if (photo) {
-        formData.append('photo', photo);
-      }
+      // Добавляем все фото
+      photos.forEach((photo, index) => {
+        formData.append('photos', photo);
+      });
 
       await asanasAPI.add(formData);
       setSuccess(true);
@@ -384,25 +435,62 @@ const AddAsana = () => {
           </div>
 
           <div className="form-section">
-            <h2 className="form-section-title">Фотография</h2>
+            <h2 className="form-section-title">Фотографии</h2>
             <div className="form-group">
-              <label htmlFor="photo" className="form-label">
-                Фотография асаны *
+              <label htmlFor="photos" className="form-label">
+                Фотографии асаны * (можно выбрать несколько)
               </label>
               <input
                 type="file"
-                id="photo"
+                id="photos"
                 accept="image/*"
+                multiple
                 onChange={handlePhotoChange}
                 required
               />
-              <div className="file-preview">
-                {photoPreview ? (
-                  <img src={photoPreview} alt="Preview" />
-                ) : (
-                  <span className="file-preview-text">Выберите файл</span>
-                )}
-              </div>
+              {photoPreviews.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1em', marginTop: '1em' }}>
+                  {photoPreviews.map((preview, index) => (
+                    <div key={index} style={{ position: 'relative', display: 'inline-block' }}>
+                      <img 
+                        src={preview.preview} 
+                        alt={`Preview ${index + 1}`}
+                        style={{ 
+                          width: '150px', 
+                          height: '150px', 
+                          objectFit: 'cover',
+                          borderRadius: '8px',
+                          border: '2px solid #ddd'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(index)}
+                        style={{
+                          position: 'absolute',
+                          top: '5px',
+                          right: '5px',
+                          background: 'red',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '50%',
+                          width: '24px',
+                          height: '24px',
+                          cursor: 'pointer',
+                          fontSize: '16px',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        title="Удалить фото"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

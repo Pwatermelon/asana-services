@@ -103,3 +103,4 @@ class ModerationItem(Base):
     existing_name_id = Column(String(500), nullable=True)  # ID существующего названия (если найдено неполное совпадение)
     existing_name_ru = Column(String(500), nullable=True)  # Существующее название на русском
     moderation_type = Column(String(50), nullable=True)  # Тип модерации: 'error' или 'name_mismatch'
+    object_type = Column(String(50), nullable=True)  # Тип объекта: 'asana_name', 'source', 'asana'

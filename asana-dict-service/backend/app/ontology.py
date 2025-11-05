@@ -1,7 +1,7 @@
 from rdflib import Graph, Namespace, URIRef, Literal, RDF
 from app import config
 from app.s3_utils import get_s3_url
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import uuid
 import logging
 import os
@@ -107,57 +107,203 @@ def load_asanas():
     logger.info(f"Successfully loaded {len(asanas)} asanas")
     return asanas
 
-def add_asana(name_id: str, source_id: str, photo_path: str):
+def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
     """
-    Добавляет асану в онтологию.
+    Ищет существующую асану с таким же названием и источником.
     
     Args:
         name_id: ID названия асаны
         source_id: ID источника
-        photo_path: Путь к фото в S3 (формат: bucket/path/to/file) или base64 строка
+    
+    Returns:
+        ID асаны, если найдена, иначе None
     """
     try:
-        logger.info("Starting to add new asana")
-        logger.debug(f"Parameters: name_id={name_id}, source_id={source_id}, photo_path=<truncated>")
+        g = get_graph()
+        name_uri = URIRef(name_id)
+        source_uri = URIRef(source_id)
+        
+        # Находим все асаны с таким же названием
+        asanas_with_name = list(g.subjects(ASANA.hasName, name_uri))
+        
+        for asana_uri in asanas_with_name:
+            # Проверяем, есть ли у этой асаны фото с таким же источником
+            photo_objs = list(g.objects(asana_uri, ASANA.hasPhoto))
+            for photo_uri in photo_objs:
+                photo_source = g.value(photo_uri, ASANA.hasSource)
+                if photo_source == source_uri:
+                    logger.info(f"Found existing asana: {str(asana_uri)} with same name and source")
+                    return str(asana_uri)
+        
+        logger.debug(f"No existing asana found for name_id={name_id}, source_id={source_id}")
+        return None
+    except Exception as e:
+        logger.error(f"Error finding existing asana: {str(e)}", exc_info=True)
+        return None
+
+
+def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
+    """
+    Добавляет асану в онтологию или добавляет фото к существующей асане.
+    
+    Если уже существует асана с таким же названием (name_id) и источником (source_id),
+    то добавляет новые фото к этой асане вместо создания новой.
+    
+    Args:
+        name_id: ID названия асаны
+        source_id: ID источника
+        photo_paths: Список путей к фото в S3 (формат: bucket/path/to/file, например: images/asans/uuid.jpg)
+                     Если передан один путь (строка), преобразуется в список для обратной совместимости
+                     Поддержка base64 оставлена только для обратной совместимости со старыми данными
+    
+    Returns:
+        ID асаны (существующей или новой)
+    """
+    try:
+        # Поддержка обратной совместимости: если передан один путь (строка), преобразуем в список
+        if isinstance(photo_paths, str):
+            photo_paths = [photo_paths]
+        elif photo_paths is None:
+            photo_paths = []
+        
+        # Пропускаем пустые пути и проверяем, что это НЕ base64
+        logger.info(f"[DEBUG ONTOLOGY] Validating {len(photo_paths)} photo paths")
+        valid_paths = []
+        for idx, p in enumerate(photo_paths):
+            logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1}: type={type(p)}, value={p[:100] if isinstance(p, str) else str(p)[:100]}")
+            if not p:
+                logger.warning(f"[DEBUG ONTOLOGY] Photo path {idx+1} is empty, skipping")
+                continue
+            # Проверяем, что это НЕ base64
+            if isinstance(p, str) and p.startswith('data:'):
+                logger.error(f"[ERROR ONTOLOGY] Got base64 data URI in photo_paths! Value preview: {p[:200]}...")
+                raise ValueError(f"Base64 data URI found in photo_paths! Photo should be uploaded to S3 first!")
+            # Проверяем формат S3 пути
+            if isinstance(p, str) and not p.startswith('images/'):
+                logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {p[:100]}... Expected 'images/...'")
+                logger.error(f"[ERROR ONTOLOGY] Full path: {p}")
+                raise ValueError(f"Invalid photo path format. Expected S3 path (images/...), got: {p[:100]}")
+            valid_paths.append(p)
+            logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1} validated successfully: {p}")
+        
+        photo_paths = valid_paths
+        logger.info(f"[DEBUG ONTOLOGY] After validation: {len(photo_paths)} valid photo paths")
+        
+        # Асана может быть без фото, не пропускаем добавление
+        if not photo_paths:
+            logger.warning(f"[WARNING ONTOLOGY] No photos provided after validation, will add asana without photos")
+        
+        logger.info("Starting to add/update asana")
+        logger.debug(f"Parameters: name_id={name_id}, source_id={source_id}, photos_count={len(photo_paths)}")
         
         g = get_graph()
         
-        # Create new asana instance
-        asana_uri = URIRef(f"{ASANA}asana_{uuid.uuid4()}")
-        logger.debug(f"Created asana URI: {asana_uri}")
+        # Проверяем, существует ли уже асана с таким же названием и источником
+        existing_asana_id = find_existing_asana(name_id, source_id)
         
-        g.add((asana_uri, RDF.type, ASANA.Asana))
-        logger.debug("Added asana type triple")
-        
-        # Link existing name
-        name_uri = URIRef(name_id)
-        g.add((asana_uri, ASANA.hasName, name_uri))
-        logger.debug(f"Linked name: {name_uri}")
-        
-        # Create and link photo
-        photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
-        logger.debug(f"Created photo URI: {photo_uri}")
-        
-        g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
-        
-        # Добавляем фото: если путь содержит '/' и не начинается с 'data:', это S3 путь
-        if photo_path:
-            if '/' in photo_path and not photo_path.startswith('data:'):
-                g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
-                logger.debug("Added S3 photo path")
+        if existing_asana_id:
+            # Добавляем фото к существующей асане (если есть фото)
+            logger.info(f"[DEBUG ONTOLOGY] Found existing asana {existing_asana_id}, adding photos to it")
+            logger.info(f"[DEBUG ONTOLOGY] Photo paths to add: {photo_paths}")
+            asana_uri = URIRef(existing_asana_id)
+            source_uri = URIRef(source_id)
+            
+            # Если есть фото, добавляем их
+            if photo_paths:
+                for i, photo_path in enumerate(photo_paths):
+                    logger.info(f"[DEBUG ONTOLOGY] Processing photo {i+1}/{len(photo_paths)}: {photo_path}")
+                    photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
+                    logger.info(f"[DEBUG ONTOLOGY] Created photo URI: {photo_uri}")
+                    
+                    g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
+                    
+                    # Добавляем фото: ТОЛЬКО S3 путь, base64 НЕ принимаем!
+                    # S3 путь должен быть в формате bucket/path/to/file (например: images/asans/uuid.jpg)
+                    if not photo_path:
+                        logger.error(f"[ERROR ONTOLOGY] Photo path is empty for photo {i+1}")
+                        continue
+                    
+                    if photo_path.startswith('data:'):
+                        logger.error(f"[ERROR ONTOLOGY] Got base64 data URI instead of S3 path for photo {i+1}! This should not happen.")
+                        logger.error(f"[ERROR ONTOLOGY] Photo path preview: {photo_path[:200]}...")
+                        raise ValueError(f"Base64 data URI passed to add_asana instead of S3 path. Photo should be uploaded to S3 first!")
+                    
+                    # Проверяем, что это S3 путь (начинается с bucket name)
+                    if '/' in photo_path and photo_path.startswith('images/'):
+                        g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
+                        logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}")
+                    else:
+                        logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {photo_path[:100]}...")
+                        logger.error(f"[ERROR ONTOLOGY] Expected format: images/asans/uuid.jpg")
+                        raise ValueError(f"Invalid photo path format. Expected S3 path (images/...), got: {photo_path[:100]}")
+                    
+                    g.add((photo_uri, ASANA.hasSource, source_uri))
+                    g.add((asana_uri, ASANA.hasPhoto, photo_uri))
+                    logger.info(f"[DEBUG ONTOLOGY] Added photo and source triples for photo {i+1}")
             else:
-                g.add((photo_uri, ASANA.base64Photo, Literal(photo_path)))  # Store base64
-                logger.debug("Added base64 photo data")
-        
-        g.add((photo_uri, ASANA.hasSource, URIRef(source_id)))
-        g.add((asana_uri, ASANA.hasPhoto, photo_uri))
-        logger.debug("Added photo and source triples")
-        
-        logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
-        logger.info("Successfully saved graph")
-        
-        return str(asana_uri)
+                logger.info(f"[DEBUG ONTOLOGY] No photos to add to existing asana")
+            
+            logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
+            g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+            logger.info("Successfully saved graph with added photos")
+            
+            return existing_asana_id
+        else:
+            # Создаем новую асану
+            logger.info("Creating new asana")
+            asana_uri = URIRef(f"{ASANA}asana_{uuid.uuid4()}")
+            logger.debug(f"Created asana URI: {asana_uri}")
+            
+            g.add((asana_uri, RDF.type, ASANA.Asana))
+            logger.debug("Added asana type triple")
+            
+            # Link existing name
+            name_uri = URIRef(name_id)
+            g.add((asana_uri, ASANA.hasName, name_uri))
+            logger.debug(f"Linked name: {name_uri}")
+            
+            # Create and link photos (если есть)
+            source_uri = URIRef(source_id)
+            if photo_paths:
+                logger.info(f"[DEBUG ONTOLOGY] Creating {len(photo_paths)} photos for new asana")
+                for i, photo_path in enumerate(photo_paths):
+                    logger.info(f"[DEBUG ONTOLOGY] Processing photo {i+1}/{len(photo_paths)}: {photo_path}")
+                    photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
+                    logger.info(f"[DEBUG ONTOLOGY] Created photo URI: {photo_uri}")
+                    
+                    g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
+                    
+                    # Добавляем фото: ТОЛЬКО S3 путь, base64 НЕ принимаем!
+                    # S3 путь должен быть в формате bucket/path/to/file (например: images/asans/uuid.jpg)
+                    if not photo_path:
+                        logger.error(f"[ERROR ONTOLOGY] Photo path is empty for photo {i+1}")
+                        continue
+                    
+                    if photo_path.startswith('data:'):
+                        logger.error(f"[ERROR ONTOLOGY] Got base64 data URI instead of S3 path for photo {i+1}! This should not happen.")
+                        logger.error(f"[ERROR ONTOLOGY] Photo path preview: {photo_path[:200]}...")
+                        raise ValueError(f"Base64 data URI passed to add_asana instead of S3 path. Photo should be uploaded to S3 first!")
+                    
+                    # Проверяем, что это S3 путь (начинается с bucket name)
+                    if '/' in photo_path and photo_path.startswith('images/'):
+                        g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
+                        logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}")
+                    else:
+                        logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {photo_path[:100]}...")
+                        logger.error(f"[ERROR ONTOLOGY] Expected format: images/asans/uuid.jpg")
+                        raise ValueError(f"Invalid photo path format. Expected S3 path (images/...), got: {photo_path[:100]}")
+                    
+                    g.add((photo_uri, ASANA.hasSource, source_uri))
+                    g.add((asana_uri, ASANA.hasPhoto, photo_uri))
+                    logger.info(f"[DEBUG ONTOLOGY] Added photo and source triples for photo {i+1}")
+            else:
+                logger.info(f"[DEBUG ONTOLOGY] Creating new asana without photos")
+            
+            logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
+            g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+            logger.info("Successfully saved graph")
+            
+            return str(asana_uri)
     except Exception as e:
         logger.error(f"Error adding asana: {str(e)}", exc_info=True)
         raise
@@ -412,10 +558,17 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
             if not candidates:
                 raise Exception("Асана не найдена")
             asana_uri = candidates[0]
-        photo_base64 = base64.b64encode(photo_bytes).decode()
+        # Загружаем в S3 вместо сохранения base64
+        from app.s3_utils import upload_image_to_s3
+        logger.warning(f"[WARNING] add_photo_to_asana uses base64 - uploading to S3 instead!")
+        photo_s3_path = upload_image_to_s3(photo_bytes, prefix="asans")
+        logger.info(f"[DEBUG] Uploaded photo to S3: {photo_s3_path}")
+        
         photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
         g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
-        g.add((photo_uri, ASANA.base64Photo, Literal(photo_base64)))
+        # Сохраняем S3 путь вместо base64
+        g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_s3_path)))
+        logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path}")
         
         # Если указан источник, добавляем его
         if source_id:

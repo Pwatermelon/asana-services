@@ -55,10 +55,11 @@ const Navbar = () => {
     setIsDropdownOpen(false);
   };
 
-  const getRoleLabel = (login) => {
+  const getRoleLabel = () => {
     if (!user) return 'Гость';
-    if (user.isAdmin) return 'Администратор';
-    if (user.isExpert) return 'Эксперт';
+    // Используем role из user объекта, а не isAdmin/isExpert
+    if (user.role === 'admin') return 'Администратор';
+    if (user.role === 'expert') return 'Эксперт';
     return 'Гость';
   };
 
@@ -85,7 +86,7 @@ const Navbar = () => {
             <div className="user-dropdown">
               <div className="user-dropdown-role">
                 <span className="role-label">Роль:</span>
-                <span className="role-value">{getRoleLabel(user?.login)}</span>
+                <span className="role-value">{getRoleLabel()}</span>
               </div>
               <button 
                 className="user-dropdown-logout"
