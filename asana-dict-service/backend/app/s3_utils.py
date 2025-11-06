@@ -224,6 +224,11 @@ def upload_image_to_s3(image_data: bytes | str, prefix: str = "asans") -> str:
         except Exception as verify_error:
             logger.warning(f"[DEBUG S3] Could not verify file in S3: {verify_error}")
         
+        # Финальная проверка: убеждаемся что возвращаем путь, а не base64
+        if len(s3_path) > 1000:
+            raise ValueError(f"S3 path is too long ({len(s3_path)} chars), might be base64 data instead of path!")
+        if 'data:' in s3_path or s3_path.startswith('iVBORw0KGgo'):
+            raise ValueError(f"S3 path contains base64 data! Path preview: {s3_path[:100]}")
         logger.info(f"[DEBUG S3] Returning S3 path (NOT base64): {s3_path}")
         return s3_path
         

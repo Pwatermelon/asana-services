@@ -12,6 +12,8 @@ logger = logging.getLogger("asana_service.ontology")
 ASANA = Namespace("http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#")
 # Добавляем новое свойство для S3 пути к фото
 ASANA.s3PhotoPath = URIRef(f"{ASANA}s3PhotoPath")
+# Определяем base64Photo явно, чтобы контролировать его использование (только для чтения старых данных)
+ASANA.base64Photo = URIRef(f"{ASANA}base64Photo")
 
 def ensure_ontology_file_exists():
     """Создает файл онтологии, если он не существует"""
@@ -230,6 +232,11 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
                     
                     # Проверяем, что это S3 путь (начинается с bucket name)
                     if '/' in photo_path and photo_path.startswith('images/'):
+                        # ВАЖНО: Записываем ТОЛЬКО s3PhotoPath, НИКОГДА base64Photo!
+                        # Дополнительная проверка: убеждаемся что это НЕ base64
+                        if len(photo_path) > 1000 or 'data:' in photo_path or photo_path.startswith('iVBORw0KGgo'):
+                            logger.error(f"[ERROR ONTOLOGY] Photo path looks like base64! Length: {len(photo_path)}, preview: {photo_path[:100]}")
+                            raise ValueError(f"Photo path looks like base64 data! Expected S3 path, got suspicious data")
                         g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
                         logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}")
                     else:
@@ -286,6 +293,11 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
                     
                     # Проверяем, что это S3 путь (начинается с bucket name)
                     if '/' in photo_path and photo_path.startswith('images/'):
+                        # ВАЖНО: Записываем ТОЛЬКО s3PhotoPath, НИКОГДА base64Photo!
+                        # Дополнительная проверка: убеждаемся что это НЕ base64
+                        if len(photo_path) > 1000 or 'data:' in photo_path or photo_path.startswith('iVBORw0KGgo'):
+                            logger.error(f"[ERROR ONTOLOGY] Photo path looks like base64! Length: {len(photo_path)}, preview: {photo_path[:100]}")
+                            raise ValueError(f"Photo path looks like base64 data! Expected S3 path, got suspicious data")
                         g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
                         logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}")
                     else:
@@ -567,6 +579,11 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
         photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
         g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
         # Сохраняем S3 путь вместо base64
+        # ВАЖНО: Записываем ТОЛЬКО s3PhotoPath, НИКОГДА base64Photo!
+        # Дополнительная проверка: убеждаемся что это НЕ base64
+        if len(photo_s3_path) > 1000 or 'data:' in photo_s3_path or photo_s3_path.startswith('iVBORw0KGgo'):
+            logger.error(f"[ERROR ONTOLOGY] Photo path looks like base64! Length: {len(photo_s3_path)}, preview: {photo_s3_path[:100]}")
+            raise ValueError(f"Photo path looks like base64 data! Expected S3 path, got suspicious data")
         g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_s3_path)))
         logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path}")
         

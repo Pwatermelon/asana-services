@@ -17,50 +17,50 @@ from app.s3_utils import upload_image_to_s3
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+def is_base64_string(value: str) -> bool:
+    """
+    Проверяет, является ли строка валидной base64 строкой (без префикса data:).
+    Base64 строка должна быть достаточно длинной и содержать только допустимые символы.
+    """
+    if not isinstance(value, str):
+        return False
+    
+    # Убираем пробелы и переносы строк
+    value = value.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+    
+    # Base64 строка должна быть достаточно длинной (минимум 20 символов для маленького изображения)
+    if len(value) < 20:
+        return False
+    
+    # Base64 содержит только A-Z, a-z, 0-9, +, /, = (padding)
+    import re
+    base64_pattern = re.compile(r'^[A-Za-z0-9+/]+=*$')
+    if not base64_pattern.match(value):
+        return False
+    
+    # Проверяем, что это действительно base64 (попробуем декодировать)
+    try:
+        decoded = base64.b64decode(value, validate=True)
+        # Если декодирование успешно и результат не пустой - это base64
+        if len(decoded) > 0:
+            # Проверяем, что это похоже на изображение (проверяем магические байты)
+            if (decoded.startswith(b'\x89PNG') or  # PNG
+                decoded.startswith(b'\xff\xd8\xff') or  # JPEG
+                decoded.startswith(b'GIF8') or  # GIF
+                (decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12])):  # WebP
+                return True
+    except Exception:
+        pass
+    
+    return False
+
+
 def diagnose_image_type(img, row: int):
     """
     Диагностирует тип изображения в Excel - встроенное или ссылка.
-    Логирует все доступные атрибуты для отладки.
     """
-    logger.info(f"[DIAGNOSTIC] Row {row}: Analyzing image object")
-    logger.info(f"[DIAGNOSTIC] Row {row}: Image type: {type(img)}")
-    logger.info(f"[DIAGNOSTIC] Row {row}: Image dir: {[attr for attr in dir(img) if not attr.startswith('_')]}")
-    
-    # Проверяем ключевые атрибуты
-    if hasattr(img, 'ref'):
-        logger.info(f"[DIAGNOSTIC] Row {row}: img.ref exists, type: {type(img.ref)}")
-        if hasattr(img.ref, 'format'):
-            logger.info(f"[DIAGNOSTIC] Row {row}: img.ref.format = {img.ref.format}")
-        if hasattr(img.ref, 'size'):
-            logger.info(f"[DIAGNOSTIC] Row {row}: img.ref.size = {img.ref.size}")
-    else:
-        logger.warning(f"[DIAGNOSTIC] Row {row}: img.ref does NOT exist - image might be a link!")
-    
-    if hasattr(img, '_data'):
-        logger.info(f"[DIAGNOSTIC] Row {row}: img._data exists, type: {type(img._data)}, size: {len(img._data) if isinstance(img._data, bytes) else 'N/A'}")
-    else:
-        logger.warning(f"[DIAGNOSTIC] Row {row}: img._data does NOT exist")
-    
-    if hasattr(img, 'image'):
-        logger.info(f"[DIAGNOSTIC] Row {row}: img.image exists, type: {type(img.image)}")
-    else:
-        logger.warning(f"[DIAGNOSTIC] Row {row}: img.image does NOT exist")
-    
-    if hasattr(img, 'anchor'):
-        logger.info(f"[DIAGNOSTIC] Row {row}: img.anchor exists, type: {type(img.anchor)}")
-        if img.anchor:
-            anchor_info = {}
-            if hasattr(img.anchor, '_from'):
-                anchor_info['_from'] = str(img.anchor._from) if img.anchor._from else None
-            if hasattr(img.anchor, 'row'):
-                anchor_info['row'] = img.anchor.row if hasattr(img.anchor, 'row') else None
-            logger.info(f"[DIAGNOSTIC] Row {row}: anchor info: {anchor_info}")
-    else:
-        logger.warning(f"[DIAGNOSTIC] Row {row}: img.anchor does NOT exist")
-    
     # Проверяем, есть ли путь к файлу (это признак ссылки)
     if hasattr(img, 'path'):
-        logger.warning(f"[DIAGNOSTIC] Row {row}: img.path = {img.path} - THIS IS A LINK TO EXTERNAL FILE!")
         return "link"
     
     # Проверяем, есть ли данные изображения
@@ -74,10 +74,8 @@ def diagnose_image_type(img, row: int):
             has_data = True
     
     if has_data:
-        logger.info(f"[DIAGNOSTIC] Row {row}: Image appears to be EMBEDDED (has data)")
         return "embedded"
     else:
-        logger.warning(f"[DIAGNOSTIC] Row {row}: Image appears to be a LINK (no data found)")
         return "link"
 
 
@@ -95,10 +93,7 @@ def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
             return images
             
         if not ws._images:
-            logger.debug("No images found in worksheet")
             return images
-        
-        logger.info(f"Found {len(ws._images)} image objects in worksheet")
         
         for img_idx, img in enumerate(ws._images):
             try:
@@ -114,17 +109,12 @@ def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
                         row = img.anchor.row + 1
                 
                 if not row:
-                    logger.debug(f"Could not determine row for image {img_idx}: {img}")
-                    # Все равно пытаемся диагностировать
-                    diagnose_image_type(img, 0)
                     continue
                 
                 # Диагностируем тип изображения
                 image_type = diagnose_image_type(img, row)
                 if image_type == "link":
-                    logger.error(f"[ERROR] Row {row}: Image {img_idx} is a LINK to external file, not embedded! Cannot extract.")
-                    logger.error(f"[ERROR] Row {row}: You need to EMBED the image in Excel, not link to it.")
-                    logger.error(f"[ERROR] Row {row}: In Excel: Right-click image -> Format Picture -> Picture -> Reset -> Insert as Embedded")
+                    logger.error(f"Строка {row}: Изображение {img_idx} является ссылкой на внешний файл, не встроено! Невозможно извлечь.")
                     continue
                 
                 # Получаем данные изображения
@@ -190,13 +180,8 @@ def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
                     # Продолжаем все равно, может быть это другой формат
                 
                 # Конвертируем в base64
-                logger.info(f"[DEBUG] Extracting image from row {row}: raw data size = {len(img_data)} bytes")
-                logger.info(f"[DEBUG] First 20 bytes (hex): {img_data[:20].hex()}")
-                
                 try:
                     img_base64 = base64.b64encode(img_data).decode('utf-8')
-                    logger.info(f"[DEBUG] Base64 length: {len(img_base64)} chars")
-                    logger.info(f"[DEBUG] First 50 chars of base64: {img_base64[:50]}")
                     
                     # Определяем формат изображения для data URI
                     if img_data.startswith(b'\x89PNG'):
@@ -219,13 +204,11 @@ def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
                 if row not in images:
                     images[row] = []
                 images[row].append(img_data_uri)
-                logger.info(f"[DEBUG] Extracted image from row {row}: size={len(img_data)} bytes, base64_len={len(img_base64)}, data_uri_len={len(img_data_uri)}")
                 
             except Exception as e:
                 logger.warning(f"Failed to extract image: {e}", exc_info=True)
                 continue
         
-        logger.info(f"Successfully extracted {sum(len(photos) for photos in images.values())} images from {len(images)} rows")
         
     except Exception as e:
         logger.error(f"Failed to extract images from worksheet: {e}", exc_info=True)
@@ -326,16 +309,7 @@ def parse_excel_file(file_path: str) -> List[Dict[str, Any]]:
         ws = wb.active
         
         # Извлекаем все изображения из листа
-        logger.info(f"[EXCEL PARSE] Starting to extract images from worksheet")
-        logger.info(f"[EXCEL PARSE] Worksheet has _images attribute: {hasattr(ws, '_images')}")
-        if hasattr(ws, '_images'):
-            logger.info(f"[EXCEL PARSE] Worksheet._images count: {len(ws._images) if ws._images else 0}")
-            if ws._images:
-                logger.info(f"[EXCEL PARSE] First image type: {type(ws._images[0])}")
         images = extract_images_from_worksheet(ws)
-        logger.info(f"[EXCEL PARSE] Extracted {len(images)} image groups from {sum(len(photos) for photos in images.values())} total images before parsing rows")
-        if images:
-            logger.info(f"[EXCEL PARSE] Images found in rows: {list(images.keys())}")
         
         # Определяем заголовки (первая строка)
         headers = []
@@ -346,14 +320,28 @@ def parse_excel_file(file_path: str) -> List[Dict[str, Any]]:
         rows = []
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
             row_data = {}
+            photo_base64_from_cell = None
+            
             for col_idx, cell in enumerate(row):
                 header = headers[col_idx] if col_idx < len(headers) else f'column_{col_idx}'
                 
                 if cell.value is not None:
+                    # Проверяем, является ли ячейка с заголовком "photo" или похожим base64 строкой
+                    if header and ('photo' in header.lower() or 'фото' in header.lower()):
+                        cell_value = str(cell.value).strip()
+                        if is_base64_string(cell_value):
+                            photo_base64_from_cell = cell_value
+                            # Не добавляем в row_data, обработаем отдельно
+                            continue
+                    
                     row_data[header] = cell.value
             
-            # Проверяем наличие изображений в этой строке (по номеру строки)
-            if row_idx in images:
+            # Приоритет: сначала base64 из ячейки, потом встроенные изображения
+            if photo_base64_from_cell:
+                # Используем base64 из ячейки (без префикса data:, он будет добавлен позже)
+                row_data['photo'] = photo_base64_from_cell
+            elif row_idx in images:
+                # Используем встроенные изображения, если нет base64 в ячейке
                 photos_list = images[row_idx]
                 # Если одно фото, сохраняем как строку для обратной совместимости
                 # Если несколько фото, сохраняем как список
@@ -362,7 +350,6 @@ def parse_excel_file(file_path: str) -> List[Dict[str, Any]]:
                 else:
                     row_data['photos'] = photos_list
                     row_data['photo'] = photos_list[0]  # Первое фото для обратной совместимости
-                logger.debug(f"Found {len(photos_list)} image(s) in row {row_idx}")
             
             # Пропускаем пустые строки
             if any(row_data.values()):
@@ -495,7 +482,6 @@ def save_moderation_item(
         db.add(moderation_item)
         db.commit()
         db.close()
-        logger.info(f"Saved moderation item for row {row_number}: {asana_name} (type: {moderation_type})")
     except Exception as e:
         logger.error(f"Failed to save moderation item: {e}")
 
@@ -558,10 +544,7 @@ def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str]
             # Ищем существующее название асаны (только точное совпадение 100%, без учета регистра)
             name_id, _ = find_matching_asana_name(name_ru, fuzzy_threshold=1.0)
             
-            if name_id:
-                # Найдено точное совпадение (100%) - используем его
-                logger.info(f"Строка {idx}: найдено точное совпадение (100%) для '{name_ru}'")
-            else:
+            if not name_id:
                 # Если не найдено точное совпадение, отправляем в модерацию
                 error_msg = f"Строка {idx}: название '{name_ru}' не найдено в существующих (требуется 100% совпадение)"
                 errors.append(error_msg)
@@ -593,11 +576,33 @@ def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str]
                     # Преобразуем в base64 если нужно
                     if isinstance(photo_base64, bytes):
                         photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
-                    if not photo_base64.startswith('data:'):
-                        photo_base64 = f"data:image/png;base64,{photo_base64}"
+                    
+                    # Если это строка base64 без префикса data:, добавляем префикс
+                    photo_base64_str = str(photo_base64).strip()
+                    # Убираем пробелы и переносы строк из base64 (если они есть)
+                    photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
+                    
+                    if not photo_base64_str.startswith('data:'):
+                        # Определяем формат изображения по содержимому base64
+                        try:
+                            decoded = base64.b64decode(photo_base64_str, validate=True)
+                            if decoded.startswith(b'\x89PNG'):
+                                mime_type = 'image/png'
+                            elif decoded.startswith(b'\xff\xd8\xff'):
+                                mime_type = 'image/jpeg'
+                            elif decoded.startswith(b'GIF8'):
+                                mime_type = 'image/gif'
+                            elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
+                                mime_type = 'image/webp'
+                            else:
+                                mime_type = 'image/png'  # По умолчанию
+                        except Exception:
+                            mime_type = 'image/png'  # По умолчанию при ошибке
+                        
+                        photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
                     
                     # Загружаем в S3
-                    photo_s3_path = upload_image_to_s3(photo_base64, prefix="asans")
+                    photo_s3_path = upload_image_to_s3(photo_base64_str, prefix="asans")
                     photo_s3_paths.append(photo_s3_path)
                 except Exception as e:
                     error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
@@ -608,7 +613,6 @@ def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str]
             # Добавляем асану с путями к фото в S3
             add_asana(name_id, source_id, photo_s3_paths)
             imported += 1
-            logger.info(f"Imported asana: {name_ru}")
             
             # Обновляем прогресс
             if progress_callback:
@@ -692,7 +696,6 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
                 if cache_key in source_cache:
                     # Используем из кеша
                     current_source_id = source_cache[cache_key]
-                    logger.debug(f"Using cached source: '{source_data['title']}' (ID: {current_source_id})")
                 else:
                     # Проверяем, существует ли уже такой источник
                     existing_source_id = find_existing_source(source_data)
@@ -701,13 +704,11 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
                         # Используем существующий источник
                         current_source_id = existing_source_id
                         source_cache[cache_key] = current_source_id  # Сохраняем в кеш
-                        logger.info(f"Using existing source: '{source_data['title']}' (ID: {current_source_id})")
                     else:
                         # Создаем новый источник
                         current_source_id = add_source(source_data, check_existing=False)
                         source_cache[cache_key] = current_source_id  # Сохраняем в кеш
                         imported_sources += 1
-                        logger.info(f"Created new source: '{source_data['title']}' (ID: {current_source_id})")
             
             # Если нет текущего источника, пропускаем
             if not current_source_id:
@@ -719,12 +720,18 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
             # Проверяем обязательное поле для асаны
             name_ru = normalized.get('name_ru')
             if not name_ru:
+                error_msg = f"Строка {idx}: отсутствует название асаны"
+                errors.append(error_msg)
+                logger.warning(error_msg)
                 if progress_callback:
                     progress_callback(idx - 1, total_rows)
                 continue  # Пропускаем строки без названия асаны
             
             name_ru = str(name_ru).strip()
             if not name_ru:
+                error_msg = f"Строка {idx}: пустое название асаны"
+                errors.append(error_msg)
+                logger.warning(error_msg)
                 if progress_callback:
                     progress_callback(idx - 1, total_rows)
                 continue
@@ -732,13 +739,11 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
             # Ищем существующее название асаны (только точное совпадение 100%, без учета регистра)
             name_id, _ = find_matching_asana_name(name_ru, fuzzy_threshold=1.0)
             
-            if name_id:
-                # Найдено точное совпадение (100%) - используем его
-                logger.info(f"Строка {idx}: найдено точное совпадение (100%) для '{name_ru}'")
-            else:
+            if not name_id:
                 # Если не найдено точное совпадение, отправляем в модерацию
                 error_msg = f"Строка {idx}: название '{name_ru}' не найдено в существующих (требуется 100% совпадение)"
                 errors.append(error_msg)
+                logger.warning(error_msg)
                 save_moderation_item(
                     asana_name=name_ru,
                     source_id=current_source_id,
@@ -756,31 +761,42 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
             # Обрабатываем фото и загружаем в S3
             photo_s3_path = None
             photo_base64 = normalized.get('photo')
-            logger.info(f"[DEBUG] Строка {idx}: processing photo. Type: {type(photo_base64)}, Has photo: {bool(photo_base64)}")
             
             if photo_base64:
                 try:
-                    logger.info(f"[DEBUG] Строка {idx}: photo_base64 type={type(photo_base64)}, length={len(str(photo_base64)) if photo_base64 else 0}")
-                    
                     # Преобразуем в base64 если нужно
                     if isinstance(photo_base64, bytes):
-                        logger.info(f"[DEBUG] Строка {idx}: photo is bytes, encoding to base64. Size: {len(photo_base64)} bytes")
                         photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
-                        logger.info(f"[DEBUG] Строка {idx}: encoded to base64, length: {len(photo_base64)}")
                     
-                    if not photo_base64.startswith('data:'):
-                        logger.info(f"[DEBUG] Строка {idx}: adding data URI prefix")
-                        photo_base64 = f"data:image/png;base64,{photo_base64}"
+                    # Если это строка base64 без префикса data:, добавляем префикс
+                    photo_base64_str = str(photo_base64).strip()
+                    photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
                     
-                    logger.info(f"[DEBUG] Строка {idx}: uploading to S3. Data URI length: {len(photo_base64)}, first 100 chars: {photo_base64[:100]}")
+                    if not photo_base64_str.startswith('data:'):
+                        # Определяем формат изображения по содержимому base64
+                        try:
+                            decoded = base64.b64decode(photo_base64_str, validate=True)
+                            if decoded.startswith(b'\x89PNG'):
+                                mime_type = 'image/png'
+                            elif decoded.startswith(b'\xff\xd8\xff'):
+                                mime_type = 'image/jpeg'
+                            elif decoded.startswith(b'GIF8'):
+                                mime_type = 'image/gif'
+                            elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
+                                mime_type = 'image/webp'
+                            else:
+                                mime_type = 'image/png'
+                        except Exception:
+                            mime_type = 'image/png'
+                        
+                        photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
                     
                     # Загружаем в S3
-                    photo_s3_path = upload_image_to_s3(photo_base64, prefix="asans")
-                    logger.info(f"[DEBUG] Строка {idx}: successfully uploaded to S3, path: {photo_s3_path}")
+                    photo_s3_path = upload_image_to_s3(photo_base64_str, prefix="asans")
                     
                 except Exception as e:
                     error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
-                    logger.error(f"[DEBUG] Строка {idx}: ERROR uploading photo: {error_msg}", exc_info=True)
+                    logger.error(error_msg)
                     logger.warning(error_msg)
                     save_moderation_item(
                         asana_name=name_ru,
@@ -791,18 +807,11 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
                         user=user
                     )
                     photo_s3_path = None
-            else:
-                logger.info(f"[DEBUG] Строка {idx}: no photo found in normalized data")
             
             # Добавляем асану к текущему источнику с путем к фото в S3
             photo_paths = [photo_s3_path] if photo_s3_path else []
-            logger.info(f"[DEBUG] Строка {idx}: adding asana. name_id={name_id}, source_id={current_source_id}, photo_paths={photo_paths}, photo_count={len(photo_paths)}")
-            
             asana_id = add_asana(name_id, current_source_id, photo_paths)
-            logger.info(f"[DEBUG] Строка {idx}: asana added/updated. asana_id={asana_id}")
-            
             imported_asanas += 1
-            logger.info(f"Imported asana: {name_ru}")
             
             # Обновляем прогресс
             if progress_callback:
@@ -869,7 +878,6 @@ def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) ->
             existing_name_id, _ = find_matching_asana_name(name_ru, fuzzy_threshold=1.0)
             
             if existing_name_id:
-                logger.info(f"Строка {idx}: название '{name_ru}' уже существует (100% совпадение), пропускаем")
                 skipped += 1
                 continue
             
@@ -885,7 +893,6 @@ def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) ->
             
             add_asana_name(name_data)
             imported += 1
-            logger.info(f"Imported asana name: {name_ru}")
             
         except Exception as e:
             error_msg = f"Строка {idx}: {str(e)}"
