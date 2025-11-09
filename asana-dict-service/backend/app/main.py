@@ -444,31 +444,91 @@ async def post_asana(
             logger.error("Missing required source fields for new source")
             raise HTTPException(status_code=400, detail="При добавлении нового источника поля автора, названия и года обязательны")
 
-        # Обработка фото - загружаем все в S3
+        # Проверяем, существует ли уже асана с таким названием и источником
+        from app.ontology import find_existing_asana, get_graph, ASANA
+        from rdflib import URIRef
+        existing_asana_id = find_existing_asana(name_id, source_id)
+        
+        # Если асана уже существует, получаем существующие хеши ДО загрузки фото в S3
+        existing_photo_hashes = set()
+        if existing_asana_id:
+            g = get_graph()
+            asana_uri = URIRef(existing_asana_id)
+            source_uri = URIRef(source_id)
+            
+            # Получаем все фото этой асаны с этим источником
+            existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
+            for existing_photo_uri in existing_photos:
+                existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
+                if existing_photo_source == source_uri:
+                    # Приоритет: проверяем хеш, если есть
+                    existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
+                    if existing_hash:
+                        existing_photo_hashes.add(str(existing_hash))
+        
+        # Обработка фото - вычисляем хеши ДО загрузки в S3, загружаем только новые
         photo_s3_paths = []
+        photo_hashes = []
+        all_photos_were_duplicates = False
         if photos:
-            logger.info(f"[DEBUG MAIN] Processing {len(photos)} photo(s) upload to S3")
-            from app.s3_utils import upload_image_to_s3
+            logger.info(f"[DEBUG MAIN] Processing {len(photos)} photo(s)")
+            from app.s3_utils import upload_image_to_s3, compute_image_hash
+            processed_hashes = []  # Все хеши, включая дубликаты
             for idx, photo in enumerate(photos):
                 try:
                     photo_content = await photo.read()
                     logger.info(f"[DEBUG MAIN] Photo {idx+1}: read {len(photo_content)} bytes")
-                    # Загружаем bytes напрямую в S3 (upload_image_to_s3 поддерживает bytes)
-                    photo_s3_path = upload_image_to_s3(photo_content, prefix="asans")
-                    logger.info(f"[DEBUG MAIN] Photo {idx+1}: uploaded to S3, path={photo_s3_path}, type={type(photo_s3_path)}")
+                    
+                    # Вычисляем хеш ДО загрузки в S3
+                    photo_hash = compute_image_hash(photo_content)
+                    logger.info(f"[DEBUG MAIN] Photo {idx+1}: computed hash={photo_hash}")
+                    processed_hashes.append(photo_hash)
+                    
+                    # Проверяем, не является ли это дубликатом
+                    if existing_asana_id and photo_hash in existing_photo_hashes:
+                        logger.info(f"[INFO MAIN] Photo {idx+1} is duplicate (hash exists), skipping upload to S3")
+                        continue  # Пропускаем загрузку дубликата
+                    
+                    # Загружаем в S3 только если фото новое
+                    photo_s3_path, _ = upload_image_to_s3(photo_content, prefix="asans")
+                    logger.info(f"[DEBUG MAIN] Photo {idx+1}: uploaded to S3, path={photo_s3_path}, hash={photo_hash}")
                     photo_s3_paths.append(photo_s3_path)
+                    photo_hashes.append(photo_hash)
                     logger.info(f"[DEBUG MAIN] Photo {idx+1} added to list. Total paths: {len(photo_s3_paths)}")
                 except Exception as e:
-                    logger.error(f"[ERROR MAIN] Error uploading photo {idx+1} to S3: {e}", exc_info=True)
+                    logger.error(f"[ERROR MAIN] Error processing photo {idx+1}: {e}", exc_info=True)
                     # НЕ сохраняем base64! Пропускаем фото при ошибке
-                    logger.warning(f"[WARNING MAIN] Skipping photo {idx+1} due to upload error - will add asana without this photo")
+                    logger.warning(f"[WARNING MAIN] Skipping photo {idx+1} due to error - will add asana without this photo")
+            
+            # Проверяем, все ли фото были дубликатами
+            if existing_asana_id and processed_hashes and all(h in existing_photo_hashes for h in processed_hashes):
+                all_photos_were_duplicates = True
         else:
             logger.info(f"[DEBUG MAIN] No photos provided in request")
 
-        # Добавляем асану с несколькими фото
+        # Если асана уже существует, проверяем результат
+        if existing_asana_id:
+            # Проверяем, есть ли новые фото для добавления
+            if photo_hashes:
+                # Есть новые фото, добавляем их к существующей асане
+                logger.info(f"[INFO MAIN] Adding {len(photo_hashes)} new photo(s) to existing asana")
+                asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths, photo_hashes=photo_hashes)
+                return {"message": f"Added {len(photo_hashes)} new photo(s) to existing asana", "id": asana_id, "added_photos": len(photo_hashes)}
+            else:
+                # Все фото были дубликатами или фото нет в запросе
+                if all_photos_were_duplicates:
+                    # Были фото, но все дубликаты
+                    logger.info(f"[INFO MAIN] All photos are duplicates, skipping")
+                    return {"message": "Asana already exists with identical photos", "id": existing_asana_id, "skipped": True}
+                else:
+                    # Фото нет в запросе
+                    logger.info(f"[INFO MAIN] Asana already exists, no new photos provided, skipping")
+                    return {"message": "Asana already exists (identical record)", "id": existing_asana_id, "skipped": True}
+
+        # Асана не существует, создаем новую
         logger.info(f"[DEBUG MAIN] Adding asana to ontology with {len(photo_s3_paths)} photo path(s)")
         logger.info(f"[DEBUG MAIN] Photo paths to add: {photo_s3_paths}")
-        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths)
+        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths, photo_hashes=photo_hashes)
         logger.info(f"[DEBUG MAIN] Successfully created asana with ID: {asana_id} with {len(photo_s3_paths)} photo(s)")
         
         return {"message": "Asana added successfully", "id": asana_id}
@@ -988,23 +1048,57 @@ async def add_asana_from_moderation(
         if not item:
             raise HTTPException(status_code=404, detail="Запись не найдена")
         
+        # Проверяем, существует ли уже асана с таким названием и источником ДО обработки фото
+        from app.ontology import find_existing_asana, get_graph, ASANA
+        from rdflib import URIRef
+        existing_asana_id = find_existing_asana(name_id, source_id)
+        
+        # Если асана уже существует, получаем существующие хеши ДО загрузки фото в S3
+        existing_photo_hashes = set()
+        if existing_asana_id:
+            g = get_graph()
+            asana_uri = URIRef(existing_asana_id)
+            source_uri = URIRef(source_id)
+            
+            # Получаем все фото этой асаны с этим источником
+            existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
+            for existing_photo_uri in existing_photos:
+                existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
+                if existing_photo_source == source_uri:
+                    # Приоритет: проверяем хеш, если есть
+                    existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
+                    if existing_hash:
+                        existing_photo_hashes.add(str(existing_hash))
+        
         # Обработка фото
         photo_s3_path = None
+        photo_hash = None
         keep_photo = keep_photo_from_request.lower() == 'true'
         
         if photo:
-            # Если загружено новое фото, используем его
+            # Если загружено новое фото, вычисляем хеш ДО загрузки в S3
             try:
-                from app.s3_utils import upload_image_to_s3
+                from app.s3_utils import upload_image_to_s3, compute_image_hash
                 photo_content = await photo.read()
-                # Загружаем bytes напрямую в S3
-                photo_s3_path = upload_image_to_s3(photo_content, prefix="asans")
-                logger.info(f"Photo uploaded to S3: {photo_s3_path}")
+                
+                # Вычисляем хеш ДО загрузки в S3
+                photo_hash = compute_image_hash(photo_content)
+                logger.info(f"Photo computed hash: {photo_hash}")
+                
+                # Проверяем, не является ли это дубликатом
+                if existing_asana_id and photo_hash in existing_photo_hashes:
+                    logger.info(f"[INFO MAIN] Photo is duplicate (hash exists), skipping upload to S3")
+                    # Не загружаем в S3, но используем хеш для проверки
+                else:
+                    # Загружаем в S3 только если фото новое
+                    photo_s3_path, _ = upload_image_to_s3(photo_content, prefix="asans")
+                    logger.info(f"Photo uploaded to S3: {photo_s3_path}, hash: {photo_hash}")
             except Exception as e:
-                logger.error(f"Error uploading photo to S3: {e}", exc_info=True)
+                logger.error(f"Error processing photo: {e}", exc_info=True)
                 # НЕ сохраняем base64! Оставляем None при ошибке
                 photo_s3_path = None
-                logger.warning(f"Failed to upload photo - will add asana without photo")
+                photo_hash = None
+                logger.warning(f"Failed to process photo - will add asana without photo")
         elif keep_photo and item.import_data:
             # Парсим JSON если это строка
             import json
@@ -1029,22 +1123,87 @@ async def add_asana_from_moderation(
                         logger.warning(f"Photo was removed from import_data (reason: {photo_info})")
                     elif isinstance(photo_data, str) and photo_data.startswith('data:'):
                         try:
-                            from app.s3_utils import upload_image_to_s3
-                            logger.info(f"[DEBUG] Uploading photo from import data. Length: {len(photo_data)}, preview: {photo_data[:100]}")
-                            photo_s3_path = upload_image_to_s3(photo_data, prefix="asans")
-                            logger.info(f"[DEBUG] Successfully uploaded photo to S3: {photo_s3_path}")
+                            from app.s3_utils import upload_image_to_s3, compute_image_hash
+                            logger.info(f"[DEBUG] Processing photo from import data. Length: {len(photo_data)}, preview: {photo_data[:100]}")
+                            
+                            # Вычисляем хеш ДО загрузки в S3
+                            photo_hash = compute_image_hash(photo_data)
+                            logger.info(f"[DEBUG] Photo computed hash: {photo_hash}")
+                            
+                            # Проверяем, не является ли это дубликатом
+                            if existing_asana_id and photo_hash in existing_photo_hashes:
+                                logger.info(f"[INFO MAIN] Photo from import is duplicate (hash exists), skipping upload to S3")
+                                # Не загружаем в S3, но используем хеш для проверки
+                            else:
+                                # Загружаем в S3 только если фото новое
+                                photo_s3_path, _ = upload_image_to_s3(photo_data, prefix="asans")
+                                logger.info(f"[DEBUG] Successfully uploaded photo to S3: {photo_s3_path}, hash: {photo_hash}")
                         except Exception as e:
-                            logger.error(f"Error uploading photo from import data: {e}", exc_info=True)
+                            logger.error(f"Error processing photo from import data: {e}", exc_info=True)
                             logger.error(f"Photo data preview (first 200 chars): {photo_data[:200] if len(photo_data) > 200 else photo_data}")
                             # Не сохраняем base64 как путь S3, оставляем None
                             photo_s3_path = None
-                            logger.warning(f"Photo upload failed, will continue without photo")
+                            photo_hash = None
+                            logger.warning(f"Photo processing failed, will continue without photo")
             except Exception as e:
                 logger.error(f"Error parsing import_data: {e}")
         
-        # Добавляем асану
         photo_paths = [photo_s3_path] if photo_s3_path else []
-        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths)
+        photo_hashes = [photo_hash] if photo_hash else []
+        
+        # Если асана уже существует, проверяем результат
+        if existing_asana_id:
+            # Проверяем, идентичны ли фото по хешам
+            if photo_hash:
+                # Есть фото в запросе
+                if photo_hash in existing_photo_hashes:
+                    # Фото идентично по хешу
+                    logger.info(f"[INFO MAIN] Asana from moderation already exists with identical photo (by hash), skipping")
+                    item.resolved = True
+                    item.resolved_by = user
+                    from datetime import datetime
+                    item.resolved_at = datetime.now().isoformat()
+                    db.commit()
+                    return {"message": "Asana already exists with identical photo", "id": existing_asana_id, "skipped": True}
+                elif photo_s3_path in existing_photo_paths:
+                    # Фото идентично - запись полностью идентична
+                    logger.info(f"[INFO MAIN] Asana from moderation already exists with identical photo, skipping")
+                    # Отмечаем как решенную
+                    item.resolved = True
+                    item.resolved_by = user
+                    from datetime import datetime
+                    item.resolved_at = datetime.now().isoformat()
+                    db.commit()
+                    return {"message": "Asana already exists with identical photo", "id": existing_asana_id, "skipped": True}
+                else:
+                    # Фото новое, добавляем его к существующей асане
+                    logger.info(f"[INFO MAIN] Adding new photo to existing asana from moderation")
+                    photo_hashes_list = [photo_hash] if photo_hash else []
+                    asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
+            else:
+                # Фото нет в запросе
+                if existing_photo_hashes or existing_photo_paths:
+                    # У асаны есть фото, в запросе нет - пропускаем
+                    logger.info(f"[INFO MAIN] Asana from moderation already exists with photos, skipping")
+                    item.resolved = True
+                    item.resolved_by = user
+                    from datetime import datetime
+                    item.resolved_at = datetime.now().isoformat()
+                    db.commit()
+                    return {"message": "Asana already exists with photos", "id": existing_asana_id, "skipped": True}
+                else:
+                    # У асаны нет фото и в запросе нет - идентичная запись
+                    logger.info(f"[INFO MAIN] Asana from moderation already exists without photos, skipping identical record")
+                    item.resolved = True
+                    item.resolved_by = user
+                    from datetime import datetime
+                    item.resolved_at = datetime.now().isoformat()
+                    db.commit()
+                    return {"message": "Asana already exists (identical record)", "id": existing_asana_id, "skipped": True}
+        
+        # Асана не существует, создаем новую
+        photo_hashes_list = [photo_hash] if photo_hash else []
+        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
         
         # Отмечаем как решенную
         item.resolved = True

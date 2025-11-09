@@ -84,12 +84,12 @@ def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
     Извлекает все изображения из листа Excel и возвращает словарь {row_number: [base64, ...]}.
     Привязывает изображения к строке, в которой они находятся.
     Поддерживает несколько изображений в одной строке.
+    Использует упрощенную логику извлечения через img._data().
     """
     images = {}
     try:
         # Проверяем наличие изображений в листе
         if not hasattr(ws, '_images'):
-            logger.debug("Worksheet has no _images attribute")
             return images
             
         if not ws._images:
@@ -97,121 +97,61 @@ def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
         
         for img_idx, img in enumerate(ws._images):
             try:
-                # Получаем координаты ячейки
+                # Получаем координаты ячейки (используем логику из рабочего скрипта)
                 row = None
                 
                 if hasattr(img, 'anchor') and img.anchor:
-                    # openpyxl использует TwoCellAnchor для позиционирования
                     if hasattr(img.anchor, '_from'):
                         if hasattr(img.anchor._from, 'row'):
                             row = img.anchor._from.row + 1  # +1 потому что openpyxl индексирует с 0
+                    elif hasattr(img.anchor, 'min_row'):
+                        row = img.anchor.min_row
                     elif hasattr(img.anchor, 'row'):
                         row = img.anchor.row + 1
                 
-                if not row:
+                if not row or row == 1:
                     continue
                 
-                # Диагностируем тип изображения
-                image_type = diagnose_image_type(img, row)
-                if image_type == "link":
-                    logger.error(f"Строка {row}: Изображение {img_idx} является ссылкой на внешний файл, не встроено! Невозможно извлечь.")
-                    continue
-                
-                # Получаем данные изображения
+                # Получаем данные изображения через _data() (как в рабочем скрипте)
                 img_data = None
-                
-                # Попробуем разные способы получения данных
-                if hasattr(img, 'ref'):
-                    # ref может быть PIL Image объектом
-                    if hasattr(img.ref, 'save'):
-                        img_bytes = BytesIO()
-                        try:
-                            img.ref.save(img_bytes, format='PNG')
-                            img_bytes.seek(0)
-                            img_data = img_bytes.read()
-                        except Exception as e:
-                            logger.warning(f"Failed to save image to BytesIO: {e}")
-                    elif hasattr(img.ref, 'read'):
-                        try:
-                            img_data = img.ref.read()
-                        except Exception as e:
-                            logger.warning(f"Failed to read image ref: {e}")
-                    elif isinstance(img.ref, bytes):
-                        img_data = img.ref
-                
-                # Если не получилось через ref, пробуем другие способы
-                if not img_data:
-                    if hasattr(img, '_data') and img._data:
-                        img_data = img._data
-                    elif hasattr(img, 'image') and img.image:
-                        if hasattr(img.image, 'save'):
-                            img_bytes = BytesIO()
-                            try:
-                                img.image.save(img_bytes, format='PNG')
-                                img_bytes.seek(0)
-                                img_data = img_bytes.read()
-                            except Exception as e:
-                                logger.warning(f"Failed to save image.image to BytesIO: {e}")
-                        elif isinstance(img.image, bytes):
-                            img_data = img.image
+                try:
+                    if hasattr(img, '_data'):
+                        # Пробуем вызвать как функцию
+                        if callable(img._data):
+                            img_data = img._data()
+                        else:
+                            img_data = img._data
+                except Exception as e:
+                    logger.warning(f"Строка {row}: не удалось извлечь данные изображения через _data(): {e}")
+                    continue
                 
                 if not img_data:
-                    logger.warning(f"Could not extract image data for row {row}")
+                    logger.warning(f"Строка {row}: данные изображения пустые")
                     continue
                 
                 # Проверяем, что данные не пустые и достаточно большие
                 if len(img_data) < 100:
-                    logger.warning(f"Image data for row {row} is too small ({len(img_data)} bytes), skipping")
+                    logger.warning(f"Строка {row}: данные изображения слишком маленькие ({len(img_data)} байт), пропускаем")
                     continue
                 
-                # Проверяем, что это действительно изображение (проверяем магические байты)
-                is_valid_image = False
-                if img_data.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
-                    is_valid_image = True
-                elif img_data.startswith(b'\xff\xd8\xff'):  # JPEG
-                    is_valid_image = True
-                elif img_data.startswith(b'GIF8'):  # GIF
-                    is_valid_image = True
-                elif img_data.startswith(b'RIFF') and b'WEBP' in img_data[:12]:  # WebP
-                    is_valid_image = True
-                
-                if not is_valid_image:
-                    logger.warning(f"Image data for row {row} doesn't appear to be a valid image format. First bytes: {img_data[:20].hex()}")
-                    # Продолжаем все равно, может быть это другой формат
-                
-                # Конвертируем в base64
+                # Конвертируем в base64 (без префикса data:, как в рабочем скрипте)
                 try:
-                    img_base64 = base64.b64encode(img_data).decode('utf-8')
-                    
-                    # Определяем формат изображения для data URI
-                    if img_data.startswith(b'\x89PNG'):
-                        mime_type = 'image/png'
-                    elif img_data.startswith(b'\xff\xd8\xff'):
-                        mime_type = 'image/jpeg'
-                    elif img_data.startswith(b'GIF8'):
-                        mime_type = 'image/gif'
-                    elif img_data.startswith(b'RIFF') and b'WEBP' in img_data[:12]:
-                        mime_type = 'image/webp'
-                    else:
-                        mime_type = 'image/png'  # По умолчанию PNG
-                    
-                    img_data_uri = f"data:{mime_type};base64,{img_base64}"
+                    base64_str = base64.b64encode(img_data).decode('utf-8')
                 except Exception as e:
-                    logger.error(f"Failed to encode image to base64 for row {row}: {e}")
+                    logger.error(f"Строка {row}: ошибка кодирования изображения в base64: {e}")
                     continue
                 
                 # Добавляем изображение в список для этой строки (поддерживаем несколько фото)
                 if row not in images:
                     images[row] = []
-                images[row].append(img_data_uri)
+                images[row].append(base64_str)
                 
             except Exception as e:
-                logger.warning(f"Failed to extract image: {e}", exc_info=True)
+                logger.warning(f"Строка {row if 'row' in locals() else '?'}: ошибка при обработке изображения: {e}")
                 continue
         
-        
     except Exception as e:
-        logger.error(f"Failed to extract images from worksheet: {e}", exc_info=True)
+        logger.error(f"Ошибка при извлечении изображений из листа: {e}", exc_info=True)
     
     return images
 
@@ -308,8 +248,13 @@ def parse_excel_file(file_path: str) -> List[Dict[str, Any]]:
         wb = load_workbook(file_path, data_only=False)
         ws = wb.active
         
-        # Извлекаем все изображения из листа
-        images = extract_images_from_worksheet(ws)
+        # Извлекаем все изображения из листа (если ошибка - продолжаем без изображений)
+        images = {}
+        try:
+            images = extract_images_from_worksheet(ws)
+        except Exception as img_error:
+            logger.warning(f"Ошибка при извлечении изображений из Excel (продолжаем без изображений): {img_error}")
+            images = {}
         
         # Определяем заголовки (первая строка)
         headers = []
@@ -562,57 +507,156 @@ def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str]
                     progress_callback(idx - 1, total_rows)
                 continue  # Пропускаем эту строку
             
-            # Обрабатываем фото и загружаем в S3 (поддерживаем несколько фото)
-            photo_s3_paths = []
-            photos_list = normalized.get('photos') or []
-            # Если есть одно фото в старом формате, добавляем его в список
-            if normalized.get('photo') and not photos_list:
-                photos_list = [normalized.get('photo')]
+            # Проверяем, существует ли уже асана с таким названием и источником
+            from app.ontology import find_existing_asana
+            existing_asana_id = find_existing_asana(name_id, source_id)
             
-            for photo_base64 in photos_list:
-                if not photo_base64:
-                    continue
-                try:
-                    # Преобразуем в base64 если нужно
-                    if isinstance(photo_base64, bytes):
-                        photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
-                    
-                    # Если это строка base64 без префикса data:, добавляем префикс
-                    photo_base64_str = str(photo_base64).strip()
-                    # Убираем пробелы и переносы строк из base64 (если они есть)
-                    photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
-                    
-                    if not photo_base64_str.startswith('data:'):
-                        # Определяем формат изображения по содержимому base64
-                        try:
-                            decoded = base64.b64decode(photo_base64_str, validate=True)
-                            if decoded.startswith(b'\x89PNG'):
-                                mime_type = 'image/png'
-                            elif decoded.startswith(b'\xff\xd8\xff'):
-                                mime_type = 'image/jpeg'
-                            elif decoded.startswith(b'GIF8'):
-                                mime_type = 'image/gif'
-                            elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
-                                mime_type = 'image/webp'
-                            else:
-                                mime_type = 'image/png'  # По умолчанию
-                        except Exception:
-                            mime_type = 'image/png'  # По умолчанию при ошибке
+            if existing_asana_id:
+                # Асана уже существует, проверяем фото
+                from rdflib import Graph, URIRef
+                from app.ontology import get_graph, ASANA
+                g = get_graph()
+                asana_uri = URIRef(existing_asana_id)
+                source_uri = URIRef(source_id)
+                
+                # Получаем все фото этой асаны с этим источником
+                existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
+                existing_photo_hashes = set()
+                existing_photo_paths = set()  # Для обратной совместимости
+                for existing_photo_uri in existing_photos:
+                    existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
+                    if existing_photo_source == source_uri:
+                        # Приоритет: проверяем хеш, если есть
+                        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
+                        if existing_hash:
+                            existing_photo_hashes.add(str(existing_hash))
+                        # Для обратной совместимости также сохраняем пути
+                        existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
+                        if existing_s3_path:
+                            existing_photo_paths.add(str(existing_s3_path))
+                
+                # Обрабатываем фото из импорта
+                photo_s3_paths = []
+                photo_hashes = []
+                photos_list = normalized.get('photos') or []
+                if normalized.get('photo') and not photos_list:
+                    photos_list = [normalized.get('photo')]
+                
+                for photo_base64 in photos_list:
+                    if not photo_base64:
+                        continue
+                    try:
+                        # Преобразуем в base64 если нужно
+                        if isinstance(photo_base64, bytes):
+                            photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
                         
-                        photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
-                    
-                    # Загружаем в S3
-                    photo_s3_path = upload_image_to_s3(photo_base64_str, prefix="asans")
-                    photo_s3_paths.append(photo_s3_path)
-                except Exception as e:
-                    error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
-                    logger.warning(error_msg)
-                    # Продолжаем с другими фото
-                    continue
-            
-            # Добавляем асану с путями к фото в S3
-            add_asana(name_id, source_id, photo_s3_paths)
-            imported += 1
+                        # Если это строка base64 без префикса data:, добавляем префикс
+                        photo_base64_str = str(photo_base64).strip()
+                        photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
+                        
+                        if not photo_base64_str.startswith('data:'):
+                            # Определяем формат изображения по содержимому base64
+                            try:
+                                decoded = base64.b64decode(photo_base64_str, validate=True)
+                                if decoded.startswith(b'\x89PNG'):
+                                    mime_type = 'image/png'
+                                elif decoded.startswith(b'\xff\xd8\xff'):
+                                    mime_type = 'image/jpeg'
+                                elif decoded.startswith(b'GIF8'):
+                                    mime_type = 'image/gif'
+                                elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
+                                    mime_type = 'image/webp'
+                                else:
+                                    mime_type = 'image/png'
+                            except Exception:
+                                mime_type = 'image/png'
+                            
+                            photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
+                        
+                        # Вычисляем хеш ДО загрузки в S3
+                        from app.s3_utils import compute_image_hash
+                        photo_hash = compute_image_hash(photo_base64_str)
+                        
+                        # Проверяем, не является ли это фото идентичным уже существующему (по хешу)
+                        if photo_hash not in existing_photo_hashes:
+                            # Загружаем в S3 только если фото новое
+                            photo_s3_path, _ = upload_image_to_s3(photo_base64_str, prefix="asans")
+                            photo_s3_paths.append(photo_s3_path)
+                            photo_hashes.append(photo_hash)
+                        else:
+                            logger.info(f"Строка {idx}: фото уже существует для асаны '{name_ru}' (по хешу), пропускаем загрузку в S3")
+                    except Exception as e:
+                        error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
+                        logger.warning(error_msg)
+                        continue
+                
+                # Проверяем, есть ли новые фото для добавления
+                if photo_s3_paths:
+                    # Есть новые фото, добавляем их к существующей асане
+                    add_asana(name_id, source_id, photo_s3_paths, photo_hashes)
+                    logger.info(f"Строка {idx}: добавлено новое фото к существующей асане '{name_ru}'")
+                elif photos_list:
+                    # Все фото были дубликатами - идентичная запись, пропускаем
+                    logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичными фото, пропускаем")
+                else:
+                    # Фото нет в импорте
+                    if existing_photo_paths:
+                        # У асаны есть фото, в импорте нет - пропускаем
+                        logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует с фото, пропускаем (в импорте фото нет)")
+                    else:
+                        # У асаны нет фото и в импорте нет - идентичная запись, пропускаем
+                        logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует без фото, пропускаем (идентичная запись)")
+            else:
+                # Асана не существует, обрабатываем фото и создаем новую
+                photo_s3_paths = []
+                photo_hashes = []
+                photos_list = normalized.get('photos') or []
+                if normalized.get('photo') and not photos_list:
+                    photos_list = [normalized.get('photo')]
+                
+                for photo_base64 in photos_list:
+                    if not photo_base64:
+                        continue
+                    try:
+                        # Преобразуем в base64 если нужно
+                        if isinstance(photo_base64, bytes):
+                            photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
+                        
+                        # Если это строка base64 без префикса data:, добавляем префикс
+                        photo_base64_str = str(photo_base64).strip()
+                        photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
+                        
+                        if not photo_base64_str.startswith('data:'):
+                            # Определяем формат изображения по содержимому base64
+                            try:
+                                decoded = base64.b64decode(photo_base64_str, validate=True)
+                                if decoded.startswith(b'\x89PNG'):
+                                    mime_type = 'image/png'
+                                elif decoded.startswith(b'\xff\xd8\xff'):
+                                    mime_type = 'image/jpeg'
+                                elif decoded.startswith(b'GIF8'):
+                                    mime_type = 'image/gif'
+                                elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
+                                    mime_type = 'image/webp'
+                                else:
+                                    mime_type = 'image/png'
+                            except Exception:
+                                mime_type = 'image/png'
+                            
+                            photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
+                        
+                        # Загружаем в S3 (возвращает кортеж (путь, хеш))
+                        photo_s3_path, photo_hash = upload_image_to_s3(photo_base64_str, prefix="asans")
+                        photo_s3_paths.append(photo_s3_path)
+                        photo_hashes.append(photo_hash)
+                    except Exception as e:
+                        error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
+                        logger.warning(error_msg)
+                        continue
+                
+                # Создаем новую асану
+                add_asana(name_id, source_id, photo_s3_paths, photo_hashes)
+                imported += 1
             
             # Обновляем прогресс
             if progress_callback:
@@ -758,60 +802,175 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
                     progress_callback(idx - 1, total_rows)
                 continue  # Пропускаем эту строку
             
-            # Обрабатываем фото и загружаем в S3
-            photo_s3_path = None
-            photo_base64 = normalized.get('photo')
+            # Проверяем, существует ли уже асана с таким названием и источником
+            from app.ontology import find_existing_asana
+            existing_asana_id = find_existing_asana(name_id, current_source_id)
             
-            if photo_base64:
-                try:
-                    # Преобразуем в base64 если нужно
-                    if isinstance(photo_base64, bytes):
-                        photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
-                    
-                    # Если это строка base64 без префикса data:, добавляем префикс
-                    photo_base64_str = str(photo_base64).strip()
-                    photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
-                    
-                    if not photo_base64_str.startswith('data:'):
-                        # Определяем формат изображения по содержимому base64
-                        try:
-                            decoded = base64.b64decode(photo_base64_str, validate=True)
-                            if decoded.startswith(b'\x89PNG'):
-                                mime_type = 'image/png'
-                            elif decoded.startswith(b'\xff\xd8\xff'):
-                                mime_type = 'image/jpeg'
-                            elif decoded.startswith(b'GIF8'):
-                                mime_type = 'image/gif'
-                            elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
-                                mime_type = 'image/webp'
-                            else:
-                                mime_type = 'image/png'
-                        except Exception:
-                            mime_type = 'image/png'
+            if existing_asana_id:
+                # Асана уже существует, проверяем фото
+                from rdflib import Graph, URIRef
+                from app.ontology import get_graph, ASANA
+                g = get_graph()
+                asana_uri = URIRef(existing_asana_id)
+                source_uri = URIRef(current_source_id)
+                
+                # Получаем все фото этой асаны с этим источником
+                existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
+                existing_photo_hashes = set()
+                existing_photo_paths = set()  # Для обратной совместимости
+                for existing_photo_uri in existing_photos:
+                    existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
+                    if existing_photo_source == source_uri:
+                        # Приоритет: проверяем хеш, если есть
+                        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
+                        if existing_hash:
+                            existing_photo_hashes.add(str(existing_hash))
+                        # Для обратной совместимости также сохраняем пути
+                        existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
+                        if existing_s3_path:
+                            existing_photo_paths.add(str(existing_s3_path))
+                
+                # Обрабатываем фото из импорта
+                photo_s3_path = None
+                photo_hash = None
+                photo_base64 = normalized.get('photo')
+                
+                if photo_base64:
+                    try:
+                        # Преобразуем в base64 если нужно
+                        if isinstance(photo_base64, bytes):
+                            photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
                         
-                        photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
-                    
-                    # Загружаем в S3
-                    photo_s3_path = upload_image_to_s3(photo_base64_str, prefix="asans")
-                    
-                except Exception as e:
-                    error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
-                    logger.error(error_msg)
-                    logger.warning(error_msg)
-                    save_moderation_item(
-                        asana_name=name_ru,
-                        source_id=current_source_id,
-                        error_message=error_msg,
-                        row_number=idx,
-                        import_data=normalized,
-                        user=user
-                    )
-                    photo_s3_path = None
-            
-            # Добавляем асану к текущему источнику с путем к фото в S3
-            photo_paths = [photo_s3_path] if photo_s3_path else []
-            asana_id = add_asana(name_id, current_source_id, photo_paths)
-            imported_asanas += 1
+                        # Если это строка base64 без префикса data:, добавляем префикс
+                        photo_base64_str = str(photo_base64).strip()
+                        photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
+                        
+                        if not photo_base64_str.startswith('data:'):
+                            # Определяем формат изображения по содержимому base64
+                            try:
+                                decoded = base64.b64decode(photo_base64_str, validate=True)
+                                if decoded.startswith(b'\x89PNG'):
+                                    mime_type = 'image/png'
+                                elif decoded.startswith(b'\xff\xd8\xff'):
+                                    mime_type = 'image/jpeg'
+                                elif decoded.startswith(b'GIF8'):
+                                    mime_type = 'image/gif'
+                                elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
+                                    mime_type = 'image/webp'
+                                else:
+                                    mime_type = 'image/png'
+                            except Exception:
+                                mime_type = 'image/png'
+                            
+                            photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
+                        
+                        # Вычисляем хеш ДО загрузки в S3
+                        from app.s3_utils import compute_image_hash
+                        photo_hash = compute_image_hash(photo_base64_str)
+                        
+                        # Проверяем, не является ли это фото идентичным уже существующему (по хешу)
+                        if photo_hash and photo_hash in existing_photo_hashes:
+                            logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (по хешу), пропускаем загрузку в S3")
+                            if progress_callback:
+                                progress_callback(idx - 1, total_rows)
+                            continue  # Пропускаем идентичную запись, НЕ загружаем в S3
+                        
+                        # Загружаем в S3 только если фото новое
+                        photo_s3_path, _ = upload_image_to_s3(photo_base64_str, prefix="asans")
+                        
+                    except Exception as e:
+                        error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
+                        logger.error(error_msg)
+                        logger.warning(error_msg)
+                        save_moderation_item(
+                            asana_name=name_ru,
+                            source_id=current_source_id,
+                            error_message=error_msg,
+                            row_number=idx,
+                            import_data=normalized,
+                            user=user
+                        )
+                        photo_s3_path = None
+                        photo_hash = None
+                else:
+                    # Если фото нет в импорте, проверяем есть ли у асаны фото
+                    if existing_photo_paths:
+                        # У асаны уже есть фото, а в импорте нет - это не идентичная запись, но пропускаем
+                        logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует с фото, пропускаем (в импорте фото нет)")
+                        if progress_callback:
+                            progress_callback(idx - 1, total_rows)
+                        continue
+                    else:
+                        # У асаны нет фото и в импорте нет - идентичная запись, пропускаем
+                        logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует без фото, пропускаем (идентичная запись)")
+                        if progress_callback:
+                            progress_callback(idx - 1, total_rows)
+                        continue
+                
+                # Если дошли сюда - фото новое, добавляем его к существующей асане
+                photo_paths = [photo_s3_path] if photo_s3_path else []
+                photo_hashes_list = [photo_hash] if photo_hash else []
+                asana_id = add_asana(name_id, current_source_id, photo_paths, photo_hashes_list)
+                logger.info(f"Строка {idx}: добавлено новое фото к существующей асане '{name_ru}'")
+            else:
+                # Асана не существует, обрабатываем фото и создаем новую
+                photo_s3_path = None
+                photo_hash = None
+                photo_base64 = normalized.get('photo')
+                
+                if photo_base64:
+                    try:
+                        # Преобразуем в base64 если нужно
+                        if isinstance(photo_base64, bytes):
+                            photo_base64 = base64.b64encode(photo_base64).decode('utf-8')
+                        
+                        # Если это строка base64 без префикса data:, добавляем префикс
+                        photo_base64_str = str(photo_base64).strip()
+                        photo_base64_str = photo_base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
+                        
+                        if not photo_base64_str.startswith('data:'):
+                            # Определяем формат изображения по содержимому base64
+                            try:
+                                decoded = base64.b64decode(photo_base64_str, validate=True)
+                                if decoded.startswith(b'\x89PNG'):
+                                    mime_type = 'image/png'
+                                elif decoded.startswith(b'\xff\xd8\xff'):
+                                    mime_type = 'image/jpeg'
+                                elif decoded.startswith(b'GIF8'):
+                                    mime_type = 'image/gif'
+                                elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
+                                    mime_type = 'image/webp'
+                                else:
+                                    mime_type = 'image/png'
+                            except Exception:
+                                mime_type = 'image/png'
+                            
+                            photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
+                        
+                        # Загружаем в S3 (возвращает кортеж (путь, хеш))
+                        photo_s3_path, photo_hash = upload_image_to_s3(photo_base64_str, prefix="asans")
+                        
+                    except Exception as e:
+                        error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
+                        logger.error(error_msg)
+                        logger.warning(error_msg)
+                        save_moderation_item(
+                            asana_name=name_ru,
+                            source_id=current_source_id,
+                            error_message=error_msg,
+                            row_number=idx,
+                            import_data=normalized,
+                            user=user
+                        )
+                        photo_s3_path = None
+                        photo_hash = None
+                        photo_hash = None
+                
+                # Создаем новую асану
+                photo_paths = [photo_s3_path] if photo_s3_path else []
+                photo_hashes_list = [photo_hash] if photo_hash else []
+                asana_id = add_asana(name_id, current_source_id, photo_paths, photo_hashes_list)
+                imported_asanas += 1
             
             # Обновляем прогресс
             if progress_callback:

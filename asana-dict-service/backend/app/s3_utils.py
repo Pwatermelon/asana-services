@@ -3,6 +3,7 @@
 """
 import base64
 import uuid
+import hashlib
 from io import BytesIO
 from typing import Optional, Tuple
 from minio import Minio
@@ -128,16 +129,60 @@ def detect_image_format(image_data: bytes) -> Tuple[str, str]:
     return ("png", "image/png")
 
 
-def upload_image_to_s3(image_data: bytes | str, prefix: str = "asans") -> str:
+def compute_image_hash(image_data: bytes | str) -> str:
     """
-    Загружает изображение в S3 и возвращает путь к файлу.
+    Вычисляет MD5 хеш изображения БЕЗ загрузки в S3.
+    Используется для проверки дубликатов перед загрузкой.
+    
+    Args:
+        image_data: Изображение в виде bytes или base64 строка (может быть с префиксом data:image/...)
+    
+    Returns:
+        MD5 хеш в формате hex строка
+    """
+    try:
+        # Если передан bytes, используем напрямую
+        if isinstance(image_data, bytes):
+            image_bytes = image_data
+        else:
+            # Если передан base64
+            image_base64 = image_data
+            if ',' in image_base64:
+                image_base64 = image_base64.split(',')[1]
+            
+            # Очищаем base64 от пробелов, переносов строк и других недопустимых символов
+            image_base64 = image_base64.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+            
+            if not image_base64:
+                raise ValueError("Base64 строка пустая после очистки")
+            
+            # Декодируем base64
+            image_bytes = base64.b64decode(image_base64, validate=True)
+        
+        if len(image_bytes) == 0:
+            raise ValueError("Данные изображения пустые")
+        
+        # Вычисляем MD5 хеш
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        return image_hash
+        
+    except Exception as e:
+        logger.error(f"[DEBUG S3] Error computing image hash: {e}", exc_info=True)
+        raise
+
+
+def upload_image_to_s3(image_data: bytes | str, prefix: str = "asans") -> Tuple[str, str]:
+    """
+    Загружает изображение в S3 и возвращает путь к файлу и хеш изображения.
     
     Args:
         image_data: Изображение в виде bytes или base64 строка (может быть с префиксом data:image/...)
         prefix: Префикс для пути файла (по умолчанию "asans")
     
     Returns:
-        Путь к файлу в S3 в формате: {bucket_name}/{prefix}/{uuid}.{extension}
+        Кортеж (путь к файлу в S3, хеш изображения MD5)
+        Путь в формате: {bucket_name}/{prefix}/{uuid}.{extension}
+        Хеш в формате: hex строка MD5
     """
     try:
         minio_client = get_minio_client()
@@ -229,8 +274,12 @@ def upload_image_to_s3(image_data: bytes | str, prefix: str = "asans") -> str:
             raise ValueError(f"S3 path is too long ({len(s3_path)} chars), might be base64 data instead of path!")
         if 'data:' in s3_path or s3_path.startswith('iVBORw0KGgo'):
             raise ValueError(f"S3 path contains base64 data! Path preview: {s3_path[:100]}")
+        
+        # Вычисляем MD5 хеш изображения для сравнения дубликатов
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        logger.info(f"[DEBUG S3] Image hash (MD5): {image_hash}")
         logger.info(f"[DEBUG S3] Returning S3 path (NOT base64): {s3_path}")
-        return s3_path
+        return s3_path, image_hash
         
     except S3Error as e:
         logger.error(f"[DEBUG S3] S3Error uploading to S3: {e}", exc_info=True)
@@ -238,6 +287,54 @@ def upload_image_to_s3(image_data: bytes | str, prefix: str = "asans") -> str:
     except Exception as e:
         logger.error(f"[DEBUG S3] Unexpected error uploading to S3: {e}", exc_info=True)
         raise
+
+
+def delete_file_from_s3(s3_path: str) -> bool:
+    """
+    Удаляет файл из S3 по пути.
+    
+    Args:
+        s3_path: Путь к файлу в формате bucket/path/to/file (например: images/asans/uuid.jpg)
+    
+    Returns:
+        True если файл удален, False если файл не найден
+    """
+    try:
+        minio_client = get_minio_client()
+        
+        # Парсим путь: images/asans/uuid.jpg -> bucket=images, object=asans/uuid.jpg
+        if '/' not in s3_path:
+            logger.error(f"[DEBUG S3] Invalid S3 path format: {s3_path}")
+            return False
+        
+        parts = s3_path.split('/', 1)
+        bucket_name = parts[0]
+        object_name = parts[1] if len(parts) > 1 else ''
+        
+        if not object_name:
+            logger.error(f"[DEBUG S3] Invalid S3 path format (no object name): {s3_path}")
+            return False
+        
+        # Проверяем существование файла
+        try:
+            minio_client.stat_object(bucket_name, object_name)
+        except S3Error as e:
+            if e.code == 'NoSuchKey':
+                logger.warning(f"[DEBUG S3] File not found in S3: {s3_path}")
+                return False
+            raise
+        
+        # Удаляем файл
+        minio_client.remove_object(bucket_name, object_name)
+        logger.info(f"[DEBUG S3] Successfully deleted file from S3: {s3_path}")
+        return True
+        
+    except S3Error as e:
+        logger.error(f"[DEBUG S3] S3Error deleting file from S3: {e}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"[DEBUG S3] Unexpected error deleting file from S3: {e}", exc_info=True)
+        return False
 
 
 def get_s3_url(s3_path: str) -> str:

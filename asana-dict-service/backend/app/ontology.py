@@ -12,6 +12,8 @@ logger = logging.getLogger("asana_service.ontology")
 ASANA = Namespace("http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#")
 # Добавляем новое свойство для S3 пути к фото
 ASANA.s3PhotoPath = URIRef(f"{ASANA}s3PhotoPath")
+# Добавляем свойство для хеша изображения (для сравнения дубликатов)
+ASANA.photoHash = URIRef(f"{ASANA}photoHash")
 # Определяем base64Photo явно, чтобы контролировать его использование (только для чтения старых данных)
 ASANA.base64Photo = URIRef(f"{ASANA}base64Photo")
 
@@ -134,8 +136,17 @@ def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
             for photo_uri in photo_objs:
                 photo_source = g.value(photo_uri, ASANA.hasSource)
                 if photo_source == source_uri:
-                    logger.info(f"Found existing asana: {str(asana_uri)} with same name and source")
+                    logger.info(f"Found existing asana: {str(asana_uri)} with same name and source (has photo with this source)")
                     return str(asana_uri)
+            
+            # Если у асаны нет фото с этим источником, но есть асана с таким названием,
+            # это может быть та же асана, к которой нужно добавить фото
+            # Возвращаем первую найденную асану с таким названием (если у неё есть хотя бы одно фото)
+            # Это позволяет добавлять фото к существующей асане, даже если у неё фото с другим источником
+            if photo_objs:
+                # У асаны есть фото, но с другим источником - это может быть та же асана
+                logger.info(f"Found existing asana: {str(asana_uri)} with same name but different source photos")
+                return str(asana_uri)
         
         logger.debug(f"No existing asana found for name_id={name_id}, source_id={source_id}")
         return None
@@ -144,7 +155,7 @@ def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
         return None
 
 
-def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
+def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo_hashes: List[str] = None):
     """
     Добавляет асану в онтологию или добавляет фото к существующей асане.
     
@@ -156,7 +167,8 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
         source_id: ID источника
         photo_paths: Список путей к фото в S3 (формат: bucket/path/to/file, например: images/asans/uuid.jpg)
                      Если передан один путь (строка), преобразуется в список для обратной совместимости
-                     Поддержка base64 оставлена только для обратной совместимости со старыми данными
+        photo_hashes: Список MD5 хешей изображений (опционально, для сравнения дубликатов)
+                     Должен соответствовать по индексу photo_paths
     
     Returns:
         ID асаны (существующей или новой)
@@ -168,9 +180,16 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
         elif photo_paths is None:
             photo_paths = []
         
+        # Нормализуем photo_hashes
+        if photo_hashes is None:
+            photo_hashes = []
+        elif isinstance(photo_hashes, str):
+            photo_hashes = [photo_hashes]
+        
         # Пропускаем пустые пути и проверяем, что это НЕ base64
         logger.info(f"[DEBUG ONTOLOGY] Validating {len(photo_paths)} photo paths")
         valid_paths = []
+        valid_hashes = []
         for idx, p in enumerate(photo_paths):
             logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1}: type={type(p)}, value={p[:100] if isinstance(p, str) else str(p)[:100]}")
             if not p:
@@ -186,10 +205,16 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
                 logger.error(f"[ERROR ONTOLOGY] Full path: {p}")
                 raise ValueError(f"Invalid photo path format. Expected S3 path (images/...), got: {p[:100]}")
             valid_paths.append(p)
+            # Сохраняем соответствующий хеш, если есть
+            if idx < len(photo_hashes):
+                valid_hashes.append(photo_hashes[idx])
+            else:
+                valid_hashes.append(None)
             logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1} validated successfully: {p}")
         
         photo_paths = valid_paths
-        logger.info(f"[DEBUG ONTOLOGY] After validation: {len(photo_paths)} valid photo paths")
+        photo_hashes = valid_hashes
+        logger.info(f"[DEBUG ONTOLOGY] After validation: {len(photo_paths)} valid photo paths, {len([h for h in photo_hashes if h])} hashes")
         
         # Асана может быть без фото, не пропускаем добавление
         if not photo_paths:
@@ -210,10 +235,43 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
             asana_uri = URIRef(existing_asana_id)
             source_uri = URIRef(source_id)
             
-            # Если есть фото, добавляем их
+            # Если есть фото, добавляем их (проверяем на дубликаты)
             if photo_paths:
+                # Получаем список уже существующих фото с этим источником для проверки дубликатов
+                existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
+                existing_photo_hashes = set()
+                existing_photo_paths = set()  # Для обратной совместимости
+                for existing_photo_uri in existing_photos:
+                    existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
+                    if existing_photo_source == source_uri:
+                        # Приоритет: проверяем хеш, если есть
+                        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
+                        if existing_hash:
+                            existing_photo_hashes.add(str(existing_hash))
+                        # Для обратной совместимости также сохраняем пути
+                        existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
+                        if existing_s3_path:
+                            existing_photo_paths.add(str(existing_s3_path))
+                
                 for i, photo_path in enumerate(photo_paths):
                     logger.info(f"[DEBUG ONTOLOGY] Processing photo {i+1}/{len(photo_paths)}: {photo_path}")
+                    
+                    # Получаем хеш для этого фото, если передан
+                    photo_hash = photo_hashes[i] if i < len(photo_hashes) else None
+                    
+                    # Проверяем, не существует ли уже такое фото (по хешу, если есть, иначе по пути)
+                    is_duplicate = False
+                    if photo_hash and photo_hash in existing_photo_hashes:
+                        logger.warning(f"[WARNING ONTOLOGY] Photo with hash '{photo_hash}' already exists for this asana and source, skipping duplicate")
+                        is_duplicate = True
+                    elif photo_path in existing_photo_paths:
+                        # Для обратной совместимости: если хеша нет, проверяем по пути
+                        logger.warning(f"[WARNING ONTOLOGY] Photo with path '{photo_path}' already exists for this asana and source, skipping duplicate")
+                        is_duplicate = True
+                    
+                    if is_duplicate:
+                        continue
+                    
                     photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
                     logger.info(f"[DEBUG ONTOLOGY] Created photo URI: {photo_uri}")
                     
@@ -238,7 +296,12 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
                             logger.error(f"[ERROR ONTOLOGY] Photo path looks like base64! Length: {len(photo_path)}, preview: {photo_path[:100]}")
                             raise ValueError(f"Photo path looks like base64 data! Expected S3 path, got suspicious data")
                         g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
-                        logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}")
+                        # Сохраняем хеш изображения, если передан
+                        if photo_hash:
+                            g.add((photo_uri, ASANA.photoHash, Literal(photo_hash)))
+                            logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}, hash: {photo_hash}")
+                        else:
+                            logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path} (no hash provided)")
                     else:
                         logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {photo_path[:100]}...")
                         logger.error(f"[ERROR ONTOLOGY] Expected format: images/asans/uuid.jpg")
@@ -275,6 +338,10 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
                 logger.info(f"[DEBUG ONTOLOGY] Creating {len(photo_paths)} photos for new asana")
                 for i, photo_path in enumerate(photo_paths):
                     logger.info(f"[DEBUG ONTOLOGY] Processing photo {i+1}/{len(photo_paths)}: {photo_path}")
+                    
+                    # Получаем хеш для этого фото, если передан
+                    photo_hash = photo_hashes[i] if i < len(photo_hashes) else None
+                    
                     photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
                     logger.info(f"[DEBUG ONTOLOGY] Created photo URI: {photo_uri}")
                     
@@ -299,7 +366,12 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None):
                             logger.error(f"[ERROR ONTOLOGY] Photo path looks like base64! Length: {len(photo_path)}, preview: {photo_path[:100]}")
                             raise ValueError(f"Photo path looks like base64 data! Expected S3 path, got suspicious data")
                         g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_path)))  # Store S3 path
-                        logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}")
+                        # Сохраняем хеш изображения, если передан
+                        if photo_hash:
+                            g.add((photo_uri, ASANA.photoHash, Literal(photo_hash)))
+                            logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}, hash: {photo_hash}")
+                        else:
+                            logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path} (no hash provided)")
                     else:
                         logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {photo_path[:100]}...")
                         logger.error(f"[ERROR ONTOLOGY] Expected format: images/asans/uuid.jpg")
@@ -543,9 +615,15 @@ def delete_asana_from_ontology(asana_id: str) -> bool:
                 print(f'Асана не найдена: {asana_id}')
                 return False
             asana_uri = candidates[0]
-        # Найти все связанные фото
+        # Найти все связанные фото и удалить их из S3
         photo_uris = list(g.objects(asana_uri, ASANA.hasPhoto))
+        from app.s3_utils import delete_file_from_s3
         for photo_uri in photo_uris:
+            # Получаем S3 путь фото перед удалением
+            s3_path = g.value(photo_uri, ASANA.s3PhotoPath)
+            if s3_path:
+                # Удаляем файл из S3
+                delete_file_from_s3(str(s3_path))
             # Удалить все триплеты, где фигурирует фото
             g.remove((photo_uri, None, None))
             g.remove((None, None, photo_uri))
@@ -573,8 +651,8 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
         # Загружаем в S3 вместо сохранения base64
         from app.s3_utils import upload_image_to_s3
         logger.warning(f"[WARNING] add_photo_to_asana uses base64 - uploading to S3 instead!")
-        photo_s3_path = upload_image_to_s3(photo_bytes, prefix="asans")
-        logger.info(f"[DEBUG] Uploaded photo to S3: {photo_s3_path}")
+        photo_s3_path, photo_hash = upload_image_to_s3(photo_bytes, prefix="asans")
+        logger.info(f"[DEBUG] Uploaded photo to S3: {photo_s3_path}, hash: {photo_hash}")
         
         photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
         g.add((photo_uri, RDF.type, ASANA.AsanaPhoto))
@@ -585,7 +663,12 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
             logger.error(f"[ERROR ONTOLOGY] Photo path looks like base64! Length: {len(photo_s3_path)}, preview: {photo_s3_path[:100]}")
             raise ValueError(f"Photo path looks like base64 data! Expected S3 path, got suspicious data")
         g.add((photo_uri, ASANA.s3PhotoPath, Literal(photo_s3_path)))
-        logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path}")
+        # Сохраняем хеш изображения
+        if photo_hash:
+            g.add((photo_uri, ASANA.photoHash, Literal(photo_hash)))
+            logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path}, hash: {photo_hash}")
+        else:
+            logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path} (no hash)")
         
         # Если указан источник, добавляем его
         if source_id:
