@@ -84,6 +84,22 @@ services:
       - asana-network
 
   # ============================================
+  # Сервис с нейронкой (asana-network-service)
+  # ============================================
+  server-network:
+    build: 
+      context: ./asana-network-service
+      dockerfile: Dockerfile
+    image: server-network
+    container_name: server-network
+    ports:
+      - "8002:8001"
+    restart: "always"
+    environment:
+      - HOST_SERVER=${HOST_NETWORK_SERVER}
+      - PORT_SERVER=${PORT_NETWORK_SERVER}
+  
+  # ============================================
   # База данных PostgreSQL (общая для всех сервисов)
   # ============================================
   postgres:
