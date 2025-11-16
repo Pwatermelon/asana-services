@@ -4,7 +4,7 @@ export const settingsAPI = {
   uploadOntology: async (file) => {
     const formData = new FormData();
     formData.append('ontology_file', file);
-    const response = await apiClient.post('/upload-ontology', formData, {
+    const response = await apiClient.post('/api/upload-ontology', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -13,7 +13,7 @@ export const settingsAPI = {
   },
 
   downloadOntology: async () => {
-    const response = await apiClient.get('/download-ontology', {
+    const response = await apiClient.get('/api/download-ontology', {
       responseType: 'blob', // Важно для скачивания файла
     });
     const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -31,7 +31,7 @@ export const settingsAPI = {
     formData.append('file', file);
     formData.append('source_id', sourceId);
     
-    const response = await apiClient.post('/import/asanas', formData, {
+    const response = await apiClient.post('/api/import/asanas', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -43,7 +43,7 @@ export const settingsAPI = {
     const formData = new FormData();
     formData.append('file', file);
     
-    const response = await apiClient.post('/import/full', formData, {
+    const response = await apiClient.post('/api/import/full', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -52,7 +52,7 @@ export const settingsAPI = {
   },
   
   getModerationCount: async () => {
-    const response = await apiClient.get('/moderation/items/count');
+    const response = await apiClient.get('/api/moderation/items/count');
     return response.data;
   },
 
@@ -60,7 +60,7 @@ export const settingsAPI = {
     const formData = new FormData();
     formData.append('file', file);
     
-    const response = await apiClient.post('/import/asana-names', formData, {
+    const response = await apiClient.post('/api/import/asana-names', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -69,7 +69,7 @@ export const settingsAPI = {
   },
 
   getImportStatus: async (taskId) => {
-    const response = await apiClient.get(`/import/status/${taskId}`);
+    const response = await apiClient.get(`/api/import/status/${taskId}`);
     return response.data;
   },
 };

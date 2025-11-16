@@ -65,7 +65,10 @@ app = FastAPI(
     title=config.APP_NAME,
     description=config.APP_DESCRIPTION,
     version=config.APP_VERSION,
-    contact={"email": config.APP_CONTACT_EMAIL}
+    contact={"email": config.APP_CONTACT_EMAIL},
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 # Разрешаем CORS для всех источников (для разработки)
@@ -281,7 +284,7 @@ def create_default_users():
 # @app.get("/logout")
 
 # Маршруты для асан
-@app.get("/asanas", tags=["asana"])
+@app.get("/api/asanas", tags=["asana"])
 async def get_asanas():
     """Получить все асаны (доступно всем)"""
     logger.info("Getting asanas list for all users")
@@ -289,7 +292,7 @@ async def get_asanas():
     logger.info(f"Retrieved {len(asanas)} asanas")
     return asanas
 
-@app.get("/asana/{asana_id}", tags=["asana"])
+@app.get("/api/asana/{asana_id}", tags=["asana"])
 async def get_asana_by_id_endpoint(asana_id: str = Path(...)):
     """Получить асану по ID (доступно всем)"""
     logger.info(f"Getting asana by ID: {asana_id}")
@@ -307,21 +310,21 @@ async def get_asana_by_id_endpoint(asana_id: str = Path(...)):
     logger.info(f"Found asana: {asana.get('name', {}).get('name_ru', 'Unknown')}")
     return asana
 
-@app.get("/asanas/by-letter/{letter}", tags=["asana"])
+@app.get("/api/asanas/by-letter/{letter}", tags=["asana"])
 async def get_asanas_by_letter(letter: str):
     """Получить асаны, начинающиеся с определенной буквы (доступно всем)"""
     logger.info(f"Getting asanas starting with letter: {letter}")
     asanas = get_asanas_by_first_letter(letter)
     return asanas
 
-@app.get("/asanas/by-source/{source_id}", tags=["asana"])
+@app.get("/api/asanas/by-source/{source_id}", tags=["asana"])
 async def get_source_asanas(source_id: str):
     """Получить асаны из определенного источника (доступно всем)"""
     logger.info(f"Getting asanas from source: {source_id}")
     asanas = get_asanas_by_source(source_id)
     return asanas
 
-@app.get("/asanas/search", tags=["asana"])
+@app.get("/api/asanas/search", tags=["asana"])
 async def search_asanas(query: str, fuzzy: bool = True):
     """Поиск асан по названию (доступно всем)"""
     logger.info(f"Searching asanas with query: {query}, fuzzy: {fuzzy}")
@@ -360,7 +363,7 @@ def add_asana_page(request: Request):
         }
     )
 
-@app.post("/asana", tags=["asana"])
+@app.post("/api/asana", tags=["asana"])
 async def post_asana(
     selected_name: str = Form(...),
     new_name_ru: Optional[str] = Form(None),
@@ -536,7 +539,7 @@ async def post_asana(
         logger.error(f"Error adding asana: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.delete("/asanas")
+@app.delete("/api/asanas")
 async def delete_asana(user: str = Depends(is_expert_or_admin), uri: str = Query(...)):
     """Удалить асану (только эксперты и админы)"""
     try:
@@ -551,7 +554,7 @@ async def delete_asana(user: str = Depends(is_expert_or_admin), uri: str = Query
         logger.error(f"Error deleting asana: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/asana/{asana_id}/add-photo")
+@app.post("/api/asana/{asana_id}/add-photo")
 async def add_asana_photo_endpoint(
     asana_id: str, 
     source_id: str = Form(...),
@@ -571,7 +574,7 @@ async def add_asana_photo_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 # Маршруты для источников
-@app.get("/sources")
+@app.get("/api/sources")
 async def get_sources():
     """Получить все источники (доступно всем)"""
     logger.info("Getting sources list for all users")
@@ -579,7 +582,7 @@ async def get_sources():
     logger.info(f"Retrieved {len(sources)} sources")
     return sources
 
-@app.post("/sources")
+@app.post("/api/sources")
 async def post_source(source: SourceCreate, user: str = Depends(is_expert_or_admin)):
     """Добавить новый источник (только эксперты и админы)"""
     logger.info(f"Adding new source by user: {user}")
@@ -594,8 +597,8 @@ async def post_source(source: SourceCreate, user: str = Depends(is_expert_or_adm
         logger.error(f"Error adding source: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.delete("/delete-source")
-@app.delete("/delete-source/")
+@app.delete("/api/delete-source")
+@app.delete("/api/delete-source/")
 async def delete_source(user: str = Depends(is_expert_or_admin), uri: str = Query(...)):
     """Удалить источник (только эксперты и админы)"""
     logger.info(f"Deleting source with URI: {uri} by user: {user}")
@@ -611,7 +614,7 @@ async def delete_source(user: str = Depends(is_expert_or_admin), uri: str = Quer
         raise HTTPException(status_code=400, detail=str(e))
 
 # Маршруты для названий асан
-@app.get("/asana-names")
+@app.get("/api/asana-names")
 async def get_asana_names():
     """Получить все названия асан (доступно всем)"""
     logger.info("Getting asana names list for all users")
@@ -619,7 +622,7 @@ async def get_asana_names():
     logger.info(f"Retrieved {len(names)} asana names")
     return names
 
-@app.post("/asana-names")
+@app.post("/api/asana-names")
 async def post_asana_name(name: AsanaNameCreate, user: str = Depends(is_expert_or_admin)):
     """Добавить новое название асаны (только эксперты и админы)"""
     logger.info(f"Adding new asana name by user: {user}")
@@ -634,8 +637,8 @@ async def post_asana_name(name: AsanaNameCreate, user: str = Depends(is_expert_o
         logger.error(f"Error adding asana name: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.delete("/delete-asana-name")
-@app.delete("/delete-asana-name/")
+@app.delete("/api/delete-asana-name")
+@app.delete("/api/delete-asana-name/")
 async def delete_asana_name(user: str = Depends(is_expert_or_admin), uri: str = Query(...)):
     """Удалить название асаны (только эксперты и админы)"""
     logger.info(f"Deleting asana name with URI: {uri} by user: {user}")
@@ -651,7 +654,7 @@ async def delete_asana_name(user: str = Depends(is_expert_or_admin), uri: str = 
         raise HTTPException(status_code=400, detail=str(e))
 
 # Маршруты для информации о проекте и инструкций
-@app.get("/about-project")
+@app.get("/api/about-project")
 async def get_about_project():
     """Получить информацию о проекте (доступно всем)"""
     logger.info("Getting about project info")
@@ -662,7 +665,7 @@ async def get_about_project():
         return {"content": "Информация о проекте отсутствует"}
     return {"content": about.content}
 
-@app.post("/about-project")
+@app.post("/api/about-project")
 async def update_about_project(data: TextContent, user: str = Depends(is_admin)):
     """Обновить информацию о проекте (только админ)"""
     logger.info(f"Updating about project info by user: {user}")
@@ -677,7 +680,7 @@ async def update_about_project(data: TextContent, user: str = Depends(is_admin))
     db.close()
     return {"message": "About project info updated successfully"}
 
-@app.get("/expert-instructions")
+@app.get("/api/expert-instructions")
 async def get_expert_instructions():
     """Получить инструкции для экспертов (доступно всем)"""
     logger.info("Getting expert instructions")
@@ -688,7 +691,7 @@ async def get_expert_instructions():
         return {"content": "Инструкции для экспертов отсутствуют"}
     return {"content": instructions.content}
 
-@app.post("/expert-instructions")
+@app.post("/api/expert-instructions")
 async def update_expert_instructions(data: TextContent, user: str = Depends(is_admin)):
     """Обновить инструкции для экспертов (только админ)"""
     logger.info(f"Updating expert instructions by user: {user}")
@@ -704,7 +707,7 @@ async def update_expert_instructions(data: TextContent, user: str = Depends(is_a
     return {"message": "Expert instructions updated successfully"}
 
 # Маршрут для скачивания/загрузки онтологии
-@app.get("/download-ontology")
+@app.get("/api/download-ontology")
 async def download_ontology(user: str = Depends(is_admin)):
     """Скачать файл онтологии (только админ)"""
     logger.info(f"Downloading ontology file by user: {user}")
@@ -718,7 +721,7 @@ async def download_ontology(user: str = Depends(is_admin)):
         media_type="application/rdf+xml"
     )
 
-@app.post("/upload-ontology")
+@app.post("/api/upload-ontology")
 async def upload_ontology(ontology_file: UploadFile = File(...), user: str = Depends(is_admin)):
     """Загрузить файл онтологии (только админ)"""
     logger.info(f"Uploading ontology file by user: {user}")
@@ -768,7 +771,7 @@ def run_import_asanas_task(task_id: str, tmp_path: str, source_id: str, user: st
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-@app.post("/import/asanas")
+@app.post("/api/import/asanas")
 async def import_asanas(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -843,7 +846,7 @@ def run_import_full_task(task_id: str, tmp_path: str, user: str):
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-@app.post("/import/full")
+@app.post("/api/import/full")
 async def import_full(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -880,7 +883,7 @@ async def import_full(
         logger.error(f"Error starting import task: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Ошибка при запуске импорта: {str(e)}")
 
-@app.get("/import/status/{task_id}")
+@app.get("/api/import/status/{task_id}")
 async def get_import_status(
     task_id: str = Path(...), 
     user: str = Depends(is_expert_or_admin)
@@ -910,7 +913,7 @@ async def get_import_status(
     
     return response
 
-@app.post("/import/asana-names")
+@app.post("/api/import/asana-names")
 async def import_asana_names(
     file: UploadFile = File(...),
     user: str = Depends(is_expert_or_admin)
@@ -946,11 +949,9 @@ async def import_asana_names(
         raise HTTPException(status_code=400, detail=f"Ошибка при импорте названий асан: {str(e)}")
 
 # API для модерации
-@app.get("/moderation/items")
+@app.get("/api/moderation/items")
 async def get_moderation_items(
     resolved: Optional[bool] = None,
-    moderation_type: Optional[str] = Query(None, description="Тип модерации: error, name_mismatch, duplicate_name, duplicate_source"),
-    object_type: Optional[str] = Query(None, description="Тип объекта: asana_name, source, asana"),
     user: str = Depends(is_expert_or_admin)
 ):
     """Получить список записей на модерацию (только для экспертов и админов)"""
@@ -963,14 +964,7 @@ async def get_moderation_items(
             # По умолчанию показываем нерешенные
             query = query.filter(ModerationItem.resolved == False)
         
-        # Фильтр по типу модерации
-        if moderation_type:
-            query = query.filter(ModerationItem.moderation_type == moderation_type)
-        
-        # Фильтр по типу объекта
-        if object_type:
-            query = query.filter(ModerationItem.object_type == object_type)
-        
+        # Сортировка по времени создания (новые сначала)
         items = query.order_by(ModerationItem.created_at.desc()).all()
         
         result = []
@@ -1022,7 +1016,7 @@ async def get_moderation_items(
     finally:
         db.close()
 
-@app.get("/moderation/items/count")
+@app.get("/api/moderation/items/count")
 async def get_moderation_items_count(user: str = Depends(is_expert_or_admin)):
     """Получить количество нерешенных записей на модерацию"""
     db = SessionLocal()
@@ -1032,7 +1026,7 @@ async def get_moderation_items_count(user: str = Depends(is_expert_or_admin)):
     finally:
         db.close()
 
-@app.post("/moderation/items/{item_id}/add-asana")
+@app.post("/api/moderation/items/{item_id}/add-asana")
 async def add_asana_from_moderation(
     item_id: int,
     name_id: str = Form(...),
@@ -1055,6 +1049,7 @@ async def add_asana_from_moderation(
         
         # Если асана уже существует, получаем существующие хеши ДО загрузки фото в S3
         existing_photo_hashes = set()
+        existing_photo_paths = set()
         if existing_asana_id:
             g = get_graph()
             asana_uri = URIRef(existing_asana_id)
@@ -1069,6 +1064,10 @@ async def add_asana_from_moderation(
                     existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
                     if existing_hash:
                         existing_photo_hashes.add(str(existing_hash))
+                    # Также сохраняем пути для обратной совместимости
+                    existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
+                    if existing_s3_path:
+                        existing_photo_paths.add(str(existing_s3_path))
         
         # Обработка фото
         photo_s3_path = None
@@ -1179,7 +1178,20 @@ async def add_asana_from_moderation(
                     # Фото новое, добавляем его к существующей асане
                     logger.info(f"[INFO MAIN] Adding new photo to existing asana from moderation")
                     photo_hashes_list = [photo_hash] if photo_hash else []
-                    asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
+                    try:
+                        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
+                        # Успешно добавлено - отмечаем как решенную
+                        item.resolved = True
+                        item.resolved_by = user
+                        from datetime import datetime
+                        item.resolved_at = datetime.now().isoformat()
+                        db.commit()
+                        return {"message": "Фото добавлено к существующей асане", "id": asana_id}
+                    except Exception as e:
+                        logger.error(f"Error adding photo to existing asana: {e}", exc_info=True)
+                        db.rollback()
+                        # НЕ помечаем как решенную - оставляем в модерации
+                        raise HTTPException(status_code=400, detail=f"Ошибка при добавлении асаны: {str(e)}")
             else:
                 # Фото нет в запросе
                 if existing_photo_hashes or existing_photo_paths:
@@ -1203,20 +1215,24 @@ async def add_asana_from_moderation(
         
         # Асана не существует, создаем новую
         photo_hashes_list = [photo_hash] if photo_hash else []
-        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
-        
-        # Отмечаем как решенную
-        item.resolved = True
-        item.resolved_by = user
-        from datetime import datetime
-        item.resolved_at = datetime.now().isoformat()
-        
-        db.commit()
-        return {"message": "Запись отмечена как решенная"}
+        try:
+            asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
+            # Успешно создано - отмечаем как решенную
+            item.resolved = True
+            item.resolved_by = user
+            from datetime import datetime
+            item.resolved_at = datetime.now().isoformat()
+            db.commit()
+            return {"message": "Запись отмечена как решенная", "id": asana_id}
+        except Exception as e:
+            logger.error(f"Error adding asana from moderation: {e}", exc_info=True)
+            db.rollback()
+            # НЕ помечаем как решенную - оставляем в модерации
+            raise HTTPException(status_code=400, detail=f"Ошибка при добавлении асаны: {str(e)}")
     finally:
         db.close()
 
-@app.get("/asana/{asana_id}/photo-by-source/{source_id}")
+@app.get("/api/asana/{asana_id}/photo-by-source/{source_id}")
 async def get_asana_photo_by_source(asana_id: str, source_id: str):
     """
     Получить фото асаны из конкретного источника (если есть)
@@ -1441,7 +1457,7 @@ def add_source_page(request: Request):
     )
 
 # API routes
-@app.get("/api/asanas/search")
+# Дубликат удаляем, уже есть выше
 async def api_search_asanas(query: str, fuzzy: bool = True):
     """Поиск асан по имени"""
     try:

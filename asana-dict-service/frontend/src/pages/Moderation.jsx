@@ -8,8 +8,6 @@ const Moderation = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [resolvedFilter, setResolvedFilter] = useState(false);
-  const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'error', 'name_mismatch', 'duplicate_name', 'duplicate_source'
-  const [objectTypeFilter, setObjectTypeFilter] = useState('all'); // 'all', 'asana_name', 'source', 'asana'
   const [resolving, setResolving] = useState({});
   const [addingAsana, setAddingAsana] = useState({});
   const [showAddForm, setShowAddForm] = useState({});
@@ -22,7 +20,7 @@ const Moderation = () => {
     loadItems();
     loadSources();
     loadNames();
-  }, [resolvedFilter, typeFilter, objectTypeFilter]);
+  }, [resolvedFilter]);
 
   const loadSources = async () => {
     try {
@@ -45,9 +43,7 @@ const Moderation = () => {
   const loadItems = async () => {
     setLoading(true);
     try {
-      const typeFilterParam = typeFilter === 'all' ? null : typeFilter;
-      const objectTypeFilterParam = objectTypeFilter === 'all' ? null : objectTypeFilter;
-      const data = await moderationAPI.getItems(resolvedFilter, typeFilterParam, objectTypeFilterParam);
+      const data = await moderationAPI.getItems(resolvedFilter);
       setItems(data);
     } catch (error) {
       console.error('Error loading moderation items:', error);
@@ -138,36 +134,8 @@ const Moderation = () => {
               Показать решенные
             </label>
           </div>
-          <div className="filter-group">
-            <label>
-              Тип модерации:
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                style={{ marginLeft: '0.5em', padding: '0.25em' }}
-              >
-                <option value="all">Все типы</option>
-                <option value="error">Ошибки</option>
-                <option value="name_mismatch">Несовпадение названия</option>
-                <option value="duplicate_name">Дубликат названия</option>
-                <option value="duplicate_source">Дубликат источника</option>
-              </select>
-            </label>
-          </div>
-          <div className="filter-group">
-            <label>
-              Тип объекта:
-              <select
-                value={objectTypeFilter}
-                onChange={(e) => setObjectTypeFilter(e.target.value)}
-                style={{ marginLeft: '0.5em', padding: '0.25em' }}
-              >
-                <option value="all">Все объекты</option>
-                <option value="asana_name">Название Асаны</option>
-                <option value="source">Источник</option>
-                <option value="asana">Асана</option>
-              </select>
-            </label>
+          <div className="filter-group" style={{ marginLeft: '1em', color: '#666', fontSize: '0.9em' }}>
+            Записи отсортированы по времени создания (новые сначала)
           </div>
         </div>
 

@@ -243,6 +243,29 @@ const AsanaDetail = () => {
                 </div>
               )}
             </div>
+            
+            {asana.sources && asana.sources.length > 0 && (
+              <div className="detail-section">
+                <h2 className="detail-title">Источники</h2>
+                {asana.sources.map((source, index) => {
+                  const sourceId = source.id?.split('#').pop() || source.id;
+                  const shortSourceId = sourceId.replace('source_', '');
+                  return (
+                    <div key={index} className="detail-item">
+                      <a 
+                        href={`/sources/${sourceId}/asanas`}
+                        style={{ color: '#007bff', textDecoration: 'none' }}
+                        onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+                        onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                      >
+                        <strong>{source.author}</strong> - {source.title}
+                        {source.year && ` (${source.year})`}
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="asana-photos">
@@ -263,6 +286,9 @@ const AsanaDetail = () => {
                     return photoData;
                   };
                   
+                  const photoSource = typeof photo === 'object' && photo.source ? photo.source : null;
+                  const sourceId = photoSource ? (typeof photoSource === 'string' ? photoSource.split('#').pop() : photoSource.id?.split('#').pop() || photoSource.id) : null;
+                  
                   return (
                     <div key={index} className="photo-container">
                       {typeof photo === 'object' && photo.image ? (
@@ -272,17 +298,15 @@ const AsanaDetail = () => {
                             alt={asana.name?.name_ru}
                             className="gallery-item"
                           />
-                          {photo.source && (
+                          {photoSource && (
                             <div className="photo-source">
-                              {typeof photo.source === 'object' ? (
-                                <a href={`/sources/${photo.source.id.split('#').pop()}`}>
-                                  {photo.source.author} - {photo.source.title}
-                                </a>
-                              ) : (
-                                <a href={`/sources/${photo.source.split('#').pop()}`}>
-                                  Источник {photo.source.split('#').pop()}
-                                </a>
-                              )}
+                              <a href={`/sources/${sourceId}/asanas`} style={{ color: '#007bff', textDecoration: 'none' }}>
+                                {typeof photoSource === 'object' && photoSource.author ? (
+                                  `${photoSource.author} - ${photoSource.title}`
+                                ) : (
+                                  `Источник ${sourceId?.replace('source_', '') || sourceId}`
+                                )}
+                              </a>
                             </div>
                           )}
                         </>

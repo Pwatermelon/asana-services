@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.yoga.dict.test.app-mergeDebugAndroidTestResources-32:/values-v16/values-v16.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\Zhuk2\\.gradle\\caches\\transforms-3\\41b1885d53f01ae62d640b3a7e5e3a3d\\transformed\\core-1.12.0\\res\\values-v16\\values-v16.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "65",
+                        "endOffsets": "116"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -2,12 +2,12 @@ import apiClient from './client';
 
 export const asanasAPI = {
   getAll: async () => {
-    const response = await apiClient.get('/asanas');
+    const response = await apiClient.get('/api/asanas');
     return response.data;
   },
 
   getByLetter: async (letter) => {
-    const response = await apiClient.get(`/asanas/by-letter/${letter}`);
+    const response = await apiClient.get(`/api/asanas/by-letter/${letter}`);
     return response.data;
   },
 
@@ -20,7 +20,7 @@ export const asanasAPI = {
     
     try {
       // Пробуем использовать API endpoint
-      const response = await apiClient.get(`/asana/${encodeURIComponent(cleanId)}`);
+      const response = await apiClient.get(`/api/asana/${encodeURIComponent(cleanId)}`);
       return response.data;
     } catch (error) {
       // Fallback: получаем все асаны и находим нужную
@@ -45,19 +45,19 @@ export const asanasAPI = {
   },
 
   search: async (query, fuzzy = true) => {
-    const response = await apiClient.get('/asanas/search', {
+    const response = await apiClient.get('/api/asanas/search', {
       params: { query, fuzzy },
     });
     return response.data;
   },
 
   getBySource: async (sourceId) => {
-    const response = await apiClient.get(`/asanas/by-source/${sourceId}`);
+    const response = await apiClient.get(`/api/asanas/by-source/${sourceId}`);
     return response.data;
   },
 
   add: async (formData) => {
-    const response = await apiClient.post('/asana', formData, {
+    const response = await apiClient.post('/api/asana', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -66,7 +66,7 @@ export const asanasAPI = {
   },
 
   delete: async (asanaId) => {
-    const response = await apiClient.delete('/asanas', {
+    const response = await apiClient.delete('/api/asanas', {
       params: { uri: asanaId },
     });
     return response.data;
@@ -78,7 +78,7 @@ export const asanasAPI = {
     formData.append('source_id', sourceId);
     
     const shortId = asanaId.split('#').pop().replace('asana_', '');
-    const response = await apiClient.post(`/asana/${shortId}/add-photo`, formData, {
+    const response = await apiClient.post(`/api/asana/${shortId}/add-photo`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -88,7 +88,7 @@ export const asanasAPI = {
 
   checkPhoto: async (asanaId, sourceId) => {
     const shortId = asanaId.split('#').pop().replace('asana_', '');
-    const response = await apiClient.get(`/asana/${shortId}/check-photo/${sourceId}`);
+    const response = await apiClient.get(`/api/asana/${shortId}/check-photo/${sourceId}`);
     return response.data;
   },
 };

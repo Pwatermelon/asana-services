@@ -2,7 +2,7 @@ import apiClient from './client';
 
 export const sourcesAPI = {
   getAll: async () => {
-    const response = await apiClient.get('/sources');
+    const response = await apiClient.get('/api/sources');
     return response.data;
   },
 
@@ -16,19 +16,19 @@ export const sourcesAPI = {
   },
 
   search: async (query) => {
-    const response = await apiClient.get('/sources/search', {
+    const response = await apiClient.get('/api/sources/search', {
       params: { query },
     });
     return response.data;
   },
 
   add: async (sourceData) => {
-    const response = await apiClient.post('/sources', sourceData);
+    const response = await apiClient.post('/api/sources', sourceData);
     return response.data;
   },
 
   delete: async (sourceId) => {
-    const response = await apiClient.delete('/delete-source', {
+    const response = await apiClient.delete('/api/delete-source', {
       params: { uri: sourceId },
     });
     return response.data;

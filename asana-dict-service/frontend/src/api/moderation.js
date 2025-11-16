@@ -1,25 +1,19 @@
 import apiClient from './client';
 
 export const moderationAPI = {
-  getItems: async (resolved = false, moderation_type = null, object_type = null) => {
+  getItems: async (resolved = false) => {
     const params = { resolved: resolved };
-    if (moderation_type) {
-      params.moderation_type = moderation_type;
-    }
-    if (object_type) {
-      params.object_type = object_type;
-    }
-    const response = await apiClient.get('/moderation/items', { params });
+    const response = await apiClient.get('/api/moderation/items', { params });
     return response.data;
   },
 
   getItemsCount: async () => {
-    const response = await apiClient.get('/moderation/items/count');
+    const response = await apiClient.get('/api/moderation/items/count');
     return response.data;
   },
 
   resolveItem: async (itemId) => {
-    const response = await apiClient.patch(`/moderation/items/${itemId}/resolve`);
+    const response = await apiClient.patch(`/api/moderation/items/${itemId}/resolve`);
     return response.data;
   },
 
@@ -32,7 +26,7 @@ export const moderationAPI = {
       formData.append('photo', photoFile);
     }
     
-    const response = await apiClient.post(`/moderation/items/${itemId}/add-asana`, formData, {
+    const response = await apiClient.post(`/api/moderation/items/${itemId}/add-asana`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },

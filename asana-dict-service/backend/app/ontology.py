@@ -73,38 +73,54 @@ def load_asanas():
             "transliteration": str(g.value(name_obj, ASANA.nameInTranslit)) if name_obj and g.value(name_obj, ASANA.nameInTranslit) else "",
             "definition": str(g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a)) if name_obj and g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a) else ""
         }
-        source_obj = None
-        if photo_objs:
-            source_obj = g.value(photo_objs[0], ASANA.hasSource)
-            logger.debug(f"Source object: {source_obj}")
-        source_data = {}
-        if source_obj:
+        # Собираем все уникальные источники из всех фото
+        sources_set = set()
+        photos_with_sources = []
+        for photo in photo_objs:
+            source_obj = g.value(photo, ASANA.hasSource)
+            if source_obj:
+                sources_set.add(source_obj)
+            
+            # Получаем фото: сначала пробуем S3 путь, потом base64 (для обратной совместимости)
+            s3_path = g.value(photo, ASANA.s3PhotoPath)
+            base64_photo = g.value(photo, ASANA.base64Photo)
+            
+            photo_data = {
+                "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
+                "source": str(source_obj) if source_obj else None
+            }
+            if photo_data["image"]:
+                photos_with_sources.append(photo_data)
+        
+        # Формируем список источников с полной информацией
+        sources_list = []
+        for source_obj in sources_set:
+            source_id = str(source_obj)
             source_data = {
-                "title": str(g.value(source_obj, ASANA.sourseTitle)),
-                "author": str(g.value(source_obj, ASANA.sourceAuthor)),
-                "year": int(g.value(source_obj, ASANA.sourceYear)),
+                "id": source_id,
+                "title": str(g.value(source_obj, ASANA.sourseTitle)) if g.value(source_obj, ASANA.sourseTitle) else "",
+                "author": str(g.value(source_obj, ASANA.sourceAuthor)) if g.value(source_obj, ASANA.sourceAuthor) else "",
+                "year": int(g.value(source_obj, ASANA.sourceYear)) if g.value(source_obj, ASANA.sourceYear) else None,
                 "publisher": str(g.value(source_obj, ASANA.sourcePublisher)) if g.value(source_obj, ASANA.sourcePublisher) else "",
                 "pages": int(g.value(source_obj, ASANA.sourcePages)) if g.value(source_obj, ASANA.sourcePages) else 0,
                 "annotation": str(g.value(source_obj, ASANA.sourceAnnotation)) if g.value(source_obj, ASANA.sourceAnnotation) else ""
             }
-        # Получаем фото: сначала пробуем S3 путь, потом base64 (для обратной совместимости)
-        photos = []
-        for photo in photo_objs:
-            s3_path = g.value(photo, ASANA.s3PhotoPath)
-            base64_photo = g.value(photo, ASANA.base64Photo)
-            
-            if s3_path:
-                photos.append(get_s3_url(str(s3_path)))  # Use S3 URL
-            elif base64_photo:
-                photos.append(str(base64_photo))
+            sources_list.append(source_data)
         
-        logger.debug(f"Photos count: {len(photos)}")
+        # Для обратной совместимости оставляем первый источник в source
+        source_data = sources_list[0] if sources_list else {}
+        
+        # Формируем список фото (для обратной совместимости)
+        photos = [p["image"] for p in photos_with_sources if p["image"]]
+        
+        logger.debug(f"Photos count: {len(photos)}, Sources count: {len(sources_list)}")
         asana_data = {
             "id": str(asana),
             "name": name_data,
-            "source": source_data,
-            "photos": photos,
-            "photo": photos[0] if photos else ""
+            "source": source_data,  # Первый источник для обратной совместимости
+            "sources": sources_list,  # Все источники
+            "photos": photos_with_sources,  # Фото с источниками
+            "photo": photos[0] if photos else ""  # Первое фото для обратной совместимости
         }
         logger.debug(f"Adding asana with ID: {asana_data['id']}")
         asanas.append(asana_data)
@@ -113,14 +129,16 @@ def load_asanas():
 
 def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
     """
-    Ищет существующую асану с таким же названием и источником.
+    Ищет существующую асану с таким же названием И источником.
+    Фото добавляется к асане ТОЛЬКО если совпадают и название, и источник.
+    Если название совпадает, но источник другой - создается новая асана.
     
     Args:
         name_id: ID названия асаны
         source_id: ID источника
     
     Returns:
-        ID асаны, если найдена, иначе None
+        ID асаны, если найдена асана с таким же названием И источником, иначе None
     """
     try:
         g = get_graph()
@@ -132,6 +150,7 @@ def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
         
         for asana_uri in asanas_with_name:
             # Проверяем, есть ли у этой асаны фото с таким же источником
+            # ТОЛЬКО если есть фото с таким же источником - это та же асана
             photo_objs = list(g.objects(asana_uri, ASANA.hasPhoto))
             for photo_uri in photo_objs:
                 photo_source = g.value(photo_uri, ASANA.hasSource)
@@ -139,16 +158,10 @@ def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
                     logger.info(f"Found existing asana: {str(asana_uri)} with same name and source (has photo with this source)")
                     return str(asana_uri)
             
-            # Если у асаны нет фото с этим источником, но есть асана с таким названием,
-            # это может быть та же асана, к которой нужно добавить фото
-            # Возвращаем первую найденную асану с таким названием (если у неё есть хотя бы одно фото)
-            # Это позволяет добавлять фото к существующей асане, даже если у неё фото с другим источником
-            if photo_objs:
-                # У асаны есть фото, но с другим источником - это может быть та же асана
-                logger.info(f"Found existing asana: {str(asana_uri)} with same name but different source photos")
-                return str(asana_uri)
+            # Если у асаны нет фото с этим источником - это НЕ та же асана
+            # Создадим новую асану с тем же названием, но новым источником
         
-        logger.debug(f"No existing asana found for name_id={name_id}, source_id={source_id}")
+        logger.debug(f"No existing asana found for name_id={name_id}, source_id={source_id} - will create new asana")
         return None
     except Exception as e:
         logger.error(f"Error finding existing asana: {str(e)}", exc_info=True)
@@ -159,8 +172,9 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
     """
     Добавляет асану в онтологию или добавляет фото к существующей асане.
     
-    Если уже существует асана с таким же названием (name_id) и источником (source_id),
+    Если уже существует асана с таким же названием И источником (source_id),
     то добавляет новые фото к этой асане вместо создания новой.
+    Если название совпадает, но источник другой - создается новая асана с тем же названием, но новым источником.
     
     Args:
         name_id: ID названия асаны

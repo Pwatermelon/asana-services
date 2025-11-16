@@ -189,6 +189,28 @@ const AsanaCard = ({ asana, isExpertOrAdmin, onDelete }) => {
           {asana.name?.name_sanskrit && (
             <p className="sanskrit-name">{asana.name.name_sanskrit}</p>
           )}
+          {asana.sources && asana.sources.length > 0 && (
+            <div className="asana-sources" style={{ marginTop: '0.5em', fontSize: '0.9em', color: '#666' }}>
+              <strong>Источники:</strong>{' '}
+              {asana.sources.map((source, index) => {
+                const sourceId = source.id?.split('#').pop() || source.id;
+                return (
+                  <span key={index}>
+                    {index > 0 && ', '}
+                    <a 
+                      href={`/sources/${sourceId}/asanas`}
+                      style={{ color: '#007bff', textDecoration: 'none' }}
+                      onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+                      onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                    >
+                      {source.author}
+                      {source.year && ` (${source.year})`}
+                    </a>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div className="asana-actions">
           <Link
