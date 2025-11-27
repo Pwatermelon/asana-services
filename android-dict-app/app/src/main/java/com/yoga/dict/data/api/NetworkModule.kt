@@ -43,13 +43,39 @@ object NetworkModule {
             }
         }
         
+        // Кэш для токена, чтобы избежать блокирующих вызовов в interceptor
+        var cachedToken: String? = null
+        var tokenCacheTime: Long = 0
+        val TOKEN_CACHE_DURATION = 5 * 60 * 1000L // 5 минут
+        
         val authInterceptor = okhttp3.Interceptor { chain ->
             val requestBuilder = chain.request().newBuilder()
             
-            // Получаем токен
-            val token = runBlocking { authPreferences.getTokenSync() }
-            if (token != null) {
-                requestBuilder.addHeader("Authorization", "Bearer $token")
+            // Используем кэшированный токен, если он еще актуален
+            val currentTime = System.currentTimeMillis()
+            if (cachedToken != null && (currentTime - tokenCacheTime) < TOKEN_CACHE_DURATION) {
+                requestBuilder.addHeader("Authorization", "Bearer $cachedToken")
+            } else {
+                // Пытаемся получить токен, но не блокируем главный поток
+                try {
+                    // Используем runBlocking только если мы не на главном потоке
+                    if (android.os.Looper.getMainLooper().thread != Thread.currentThread()) {
+                        val token = runBlocking { 
+                            try {
+                                authPreferences.getTokenSync()
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                        if (token != null) {
+                            cachedToken = token
+                            tokenCacheTime = currentTime
+                            requestBuilder.addHeader("Authorization", "Bearer $token")
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Игнорируем ошибки получения токена
+                }
             }
             
             // Добавляем заголовок схемы БД для auth endpoints

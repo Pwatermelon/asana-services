@@ -144,7 +144,7 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] C:\Users\Zhuk2\.gradle\cach
 	android:usesCleartextTraffic
 		ADDED from F:\sstu-asana-services\android-dict-app\app\src\main\AndroidManifest.xml:18:9-44
 	android:name
-		ADDED from F:\sstu-asana-services\android-dict-app\app\src\main\AndroidManifest.xml:9:9-36
+		ADDED from F:\sstu-asana-services\android-dict-app\app\src\main\AndroidManifest.xml:9:9-44
 activity#com.yoga.dict.MainActivity
 ADDED from F:\sstu-asana-services\android-dict-app\app\src\main\AndroidManifest.xml:20:9-28:20
 	android:exported

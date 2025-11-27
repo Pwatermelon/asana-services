@@ -8,6 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -30,11 +31,20 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
                     
                     val authViewModel: com.yoga.dict.ui.viewmodel.AuthViewModel = hiltViewModel()
-                    val isAuthenticated by authViewModel.isAuthenticated.collectAsStateWithLifecycle()
+                    val isAuthenticated by authViewModel.isAuthenticated.collectAsStateWithLifecycle(initialValue = false)
+                    
+                    // Используем LaunchedEffect для навигации при изменении состояния аутентификации
+                    LaunchedEffect(isAuthenticated) {
+                        if (isAuthenticated && navController.currentDestination?.route != "asana_list") {
+                            navController.navigate("asana_list") {
+                                popUpTo("login") { inclusive = true }
+                            }
+                        }
+                    }
                     
                     NavHost(
                         navController = navController,
-                        startDestination = if (isAuthenticated) "asana_list" else "login"
+                        startDestination = "login" // Всегда начинаем с login, навигация произойдет через LaunchedEffect
                     ) {
                         composable("login") {
                             LoginScreen(

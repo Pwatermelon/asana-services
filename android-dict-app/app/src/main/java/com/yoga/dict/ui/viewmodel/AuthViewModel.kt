@@ -39,38 +39,78 @@ class AuthViewModel @Inject constructor(
         get() = isAdmin || isExpert
     
     init {
-        checkAuth()
+        // Отложенная проверка аутентификации, чтобы избежать проблем при инициализации
+        viewModelScope.launch {
+            try {
+                checkAuth()
+            } catch (e: Exception) {
+                // Если что-то пошло не так при инициализации, просто устанавливаем состояние "не аутентифицирован"
+                _isAuthenticated.value = false
+                _uiState.value = AuthUiState.NotAuthenticated
+            }
+        }
     }
     
     fun checkAuth() {
         viewModelScope.launch {
-            _uiState.value = AuthUiState.Loading
-            authRepository.checkAuth()
-                .onSuccess { authCheck ->
-                    if (authCheck.is_authenticated && authCheck.role != null) {
-                        _isAuthenticated.value = true
-                        _userRole.value = authCheck.role
-                        authPreferences.setAuthenticated(true)
-                        authPreferences.saveUserRole(authCheck.role)
-                        
-                        // Получаем информацию о пользователе
-                        authRepository.getUserInfo()
-                            .onSuccess { userInfo ->
-                                _userLogin.value = userInfo.login
-                                authPreferences.saveUserLogin(userInfo.login)
+            try {
+                _uiState.value = AuthUiState.Loading
+                
+                // Добавляем небольшую задержку, чтобы убедиться, что все зависимости инициализированы
+                kotlinx.coroutines.delay(100)
+                
+                authRepository.checkAuth()
+                    .onSuccess { authCheck ->
+                        try {
+                            if (authCheck.is_authenticated && authCheck.role != null) {
+                                _isAuthenticated.value = true
+                                _userRole.value = authCheck.role
+                                try {
+                                    authPreferences.setAuthenticated(true)
+                                    authPreferences.saveUserRole(authCheck.role)
+                                } catch (e: Exception) {
+                                    // Игнорируем ошибки сохранения в preferences
+                                }
+                                
+                                // Получаем информацию о пользователе
+                                authRepository.getUserInfo()
+                                    .onSuccess { userInfo ->
+                                        try {
+                                            _userLogin.value = userInfo.login
+                                            try {
+                                                authPreferences.saveUserLogin(userInfo.login)
+                                            } catch (e: Exception) {
+                                                // Игнорируем ошибки сохранения
+                                            }
+                                        } catch (e: Exception) {
+                                            // Игнорируем ошибки установки логина
+                                        }
+                                    }
+                                    .onFailure {
+                                        // Игнорируем ошибки получения информации о пользователе
+                                    }
+                                
+                                _uiState.value = AuthUiState.Authenticated
+                            } else {
+                                _isAuthenticated.value = false
+                                _userRole.value = null
+                                _uiState.value = AuthUiState.NotAuthenticated
                             }
-                        
-                        _uiState.value = AuthUiState.Authenticated
-                    } else {
+                        } catch (e: Exception) {
+                            // Обрабатываем ошибки при обработке результата
+                            _isAuthenticated.value = false
+                            _uiState.value = AuthUiState.NotAuthenticated
+                        }
+                    }
+                    .onFailure { error ->
                         _isAuthenticated.value = false
-                        _userRole.value = null
                         _uiState.value = AuthUiState.NotAuthenticated
                     }
-                }
-                .onFailure {
-                    _isAuthenticated.value = false
-                    _uiState.value = AuthUiState.NotAuthenticated
-                }
+            } catch (e: Exception) {
+                // Обрабатываем любые неожиданные исключения
+                _isAuthenticated.value = false
+                _uiState.value = AuthUiState.NotAuthenticated
+            }
         }
     }
     

@@ -15,8 +15,8 @@ interface AuthApiService {
         @Body request: RegisterRequest
     ): Response<AuthResponse>
     
-    @GET("api/auth/check")
-    suspend fun checkAuth(): Response<AuthCheckResponse>
+    // Используем /api/users/me для проверки аутентификации
+    // checkAuth теперь использует getUserInfo
     
     @POST("api/auth/logout")
     suspend fun logout(): Response<Unit>

@@ -22,8 +22,11 @@ android {
             useSupportLibrary = true
         }
 
-        // API Base URL - измените на IP вашего сервера
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000\"")
+        // API Base URL
+        // Для Android эмулятора используйте: http://10.0.2.2:80
+        // Для реального устройства используйте: http://ВАШ_IP_КОМПЬЮТЕРА:80
+        // Чтобы узнать IP компьютера: ipconfig (Windows) или ifconfig (Linux/Mac)
+        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:80\"")
     }
 
     buildTypes {

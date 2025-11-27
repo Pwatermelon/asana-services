@@ -59,14 +59,32 @@ class AuthRepository @Inject constructor(
     
     suspend fun checkAuth(): Result<AuthCheckResponse> {
         return try {
-            val response = authApi.checkAuth()
+            // Используем /api/users/me для проверки аутентификации
+            val response = authApi.getUserInfo()
             if (response.isSuccessful) {
-                Result.success(response.body() ?: AuthCheckResponse(false, null))
+                val userInfo = response.body()
+                if (userInfo != null) {
+                    // Определяем роль пользователя
+                    val role = when {
+                        userInfo.is_admin -> "admin"
+                        userInfo.permission_study -> "expert"
+                        else -> "guest"
+                    }
+                    Result.success(AuthCheckResponse(true, role))
+                } else {
+                    Result.success(AuthCheckResponse(false, null))
+                }
             } else {
-                Result.failure(Exception("Auth check failed: ${response.code()}"))
+                // Если 401 или 403 - пользователь не аутентифицирован
+                if (response.code() == 401 || response.code() == 403) {
+                    Result.success(AuthCheckResponse(false, null))
+                } else {
+                    Result.failure(Exception("Auth check failed: ${response.code()}"))
+                }
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            // При любой ошибке считаем, что пользователь не аутентифицирован
+            Result.success(AuthCheckResponse(false, null))
         }
     }
     
