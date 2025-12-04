@@ -35,11 +35,13 @@ import coil.request.ImageRequest
 import com.yoga.dict.data.model.Asana
 import com.yoga.dict.ui.viewmodel.AsanaViewModel
 import com.yoga.dict.ui.viewmodel.AsanaUiState
+import com.yoga.dict.ui.viewmodel.AuthViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AsanaListScreen(
     viewModel: AsanaViewModel = hiltViewModel(),
+    authViewModel: AuthViewModel = hiltViewModel(),
     onAsanaClick: (Asana) -> Unit,
     onNavigateToSources: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {}
@@ -47,10 +49,25 @@ fun AsanaListScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val asanaList by viewModel.asanaList.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val isExpertOrAdmin = authViewModel.isExpertOrAdmin
     
     var showSearchBar by remember { mutableStateOf(false) }
     var showContextMenu by remember { mutableStateOf<Asana?>(null) }
     var contextMenuPosition by remember { mutableStateOf(0 to 0) }
+    
+    // Для обычных пользователей - объединяем асаны с одинаковым названием
+    val mergedAsanas = remember(asanaList, isExpertOrAdmin) {
+        if (isExpertOrAdmin) return@remember asanaList
+        
+        val merged = mutableMapOf<String, Asana>()
+        asanaList.forEach { asana ->
+            val nameKey = asana.name.name_ru.lowercase().trim()
+            if (!merged.containsKey(nameKey)) {
+                merged[nameKey] = asana
+            }
+        }
+        merged.values.toList()
+    }
     
     Scaffold(
         topBar = {
@@ -72,11 +89,13 @@ fun AsanaListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { /* TODO: Добавить асану */ },
-                containerColor = MaterialTheme.colorScheme.tertiary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Добавить")
+            if (isExpertOrAdmin) {
+                FloatingActionButton(
+                    onClick = { /* TODO: Добавить асану */ },
+                    containerColor = MaterialTheme.colorScheme.tertiary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить")
+                }
             }
         },
         bottomBar = {
@@ -144,13 +163,16 @@ fun AsanaListScreen(
                     )
                 }
                 is AsanaUiState.Success -> {
+                    // Одинаковый список для всех, но для обычных пользователей показываем объединенные карточки
                     AsanaList(
-                        asanas = asanaList,
+                        asanas = if (isExpertOrAdmin) asanaList else mergedAsanas,
                         onAsanaClick = onAsanaClick,
                         onLongPress = { asana, position ->
                             showContextMenu = asana
                             contextMenuPosition = position
                         },
+                        showSources = isExpertOrAdmin,
+                        showPhoto = isExpertOrAdmin,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -179,6 +201,8 @@ fun AsanaList(
     asanas: List<Asana>,
     onAsanaClick: (Asana) -> Unit,
     onLongPress: (Asana, Pair<Int, Int>) -> Unit,
+    showSources: Boolean = true,
+    showPhoto: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -194,6 +218,8 @@ fun AsanaList(
                 asana = asana,
                 onClick = { onAsanaClick(asana) },
                 onLongPress = { x, y -> onLongPress(asana, x to y) },
+                showSources = showSources,
+                showPhoto = showPhoto,
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -205,6 +231,8 @@ fun AsanaCard(
     asana: Asana,
     onClick: () -> Unit,
     onLongPress: (Int, Int) -> Unit,
+    showSources: Boolean = true,
+    showPhoto: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var isPressed by remember { mutableStateOf(false) }
@@ -234,31 +262,33 @@ fun AsanaCard(
                 .padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Фото асаны
-            asana.photos.firstOrNull()?.let { photo ->
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(photo.url)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = asana.name.displayName,
+            // Фото асаны - показываем только если showPhoto = true
+            if (showPhoto) {
+                asana.photos.firstOrNull()?.let { photo ->
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(photo.url)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = asana.name.displayName,
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } ?: Box(
                     modifier = Modifier
                         .size(80.dp)
-                        .clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Crop
-                )
-            } ?: Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Image,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Image,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             
             // Информация
@@ -284,14 +314,17 @@ fun AsanaCard(
                     )
                 }
                 
-                asana.sources.firstOrNull()?.let { source ->
-                    Text(
-                        text = source.displayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                // Источник только для админов/экспертов
+                if (showSources) {
+                    asana.sources.firstOrNull()?.let { source ->
+                        Text(
+                            text = source.displayName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
             
@@ -451,4 +484,3 @@ fun ContextMenu(
         }
     )
 }
-

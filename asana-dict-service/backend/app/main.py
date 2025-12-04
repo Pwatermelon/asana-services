@@ -17,7 +17,7 @@ from app.ontology import (
     add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
     delete_source_from_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology, 
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
-    get_photo_of_asana_from_source
+    get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object
 )
 from app.config import logger
 from fastapi.middleware.cors import CORSMiddleware
@@ -254,22 +254,6 @@ def create_default_users():
         )
         db.add(expert_user)
         logger.info(f"Created default expert user: {expert_login}")
-    
-    # Создаем guest пользователя
-    guest_login = os.getenv("GUEST_USERNAME", "guest")
-    guest_password = os.getenv("GUEST_PASSWORD", "guest123")
-    
-    if not db.query(User).filter(User.login == guest_login).first():
-        guest_user = User(
-            login=guest_login,
-            mail=f"{guest_login}@example.com",
-            password=hash_password(guest_password),
-            is_admin=False,
-            permission_study=False,
-            is_verify=True
-        )
-        db.add(guest_user)
-        logger.info(f"Created default guest user: {guest_login}")
     
     db.commit()
     db.close()
@@ -1242,16 +1226,80 @@ async def get_asana_photo_by_source(asana_id: str, source_id: str):
         return {"photo": photo}
     return {"photo": None}
 
+
+# API для работы с isSameAsObject (аналогичные асаны)
+
+class SameAsRequest(BaseModel):
+    target_asana_id: str
+
+@app.get("/api/asana/{asana_id}/similar", tags=["asana"])
+async def get_asana_similar(asana_id: str = Path(...)):
+    """
+    Получить список аналогичных асан (связанных через isSameAsObject).
+    Доступно всем пользователям.
+    """
+    logger.info(f"Getting similar asanas for: {asana_id}")
+    try:
+        similar = get_similar_asanas(asana_id)
+        return similar
+    except Exception as e:
+        logger.error(f"Error getting similar asanas: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/asana/{asana_id}/same-as", tags=["asana"])
+async def add_asana_same_as(
+    asana_id: str = Path(...),
+    request: SameAsRequest = None,
+    user: str = Depends(is_expert_or_admin)
+):
+    """
+    Указать совпадение между двумя асанами (только эксперты и админы).
+    Добавляет связь isSameAsObject в онтологию.
+    """
+    logger.info(f"Adding isSameAsObject: {asana_id} -> {request.target_asana_id} by user: {user}")
+    try:
+        success = add_same_as_object(asana_id, request.target_asana_id)
+        if success:
+            return {"message": "Совпадение успешно указано"}
+        else:
+            raise HTTPException(status_code=400, detail="Не удалось добавить связь")
+    except Exception as e:
+        logger.error(f"Error adding same as object: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/asana/{asana_id}/same-as/{target_asana_id}", tags=["asana"])
+async def remove_asana_same_as(
+    asana_id: str = Path(...),
+    target_asana_id: str = Path(...),
+    user: str = Depends(is_expert_or_admin)
+):
+    """
+    Удалить связь isSameAsObject между двумя асанами (только эксперты и админы).
+    """
+    logger.info(f"Removing isSameAsObject: {asana_id} <-> {target_asana_id} by user: {user}")
+    try:
+        success = remove_same_as_object(asana_id, target_asana_id)
+        if success:
+            return {"message": "Связь успешно удалена"}
+        else:
+            raise HTTPException(status_code=400, detail="Не удалось удалить связь")
+    except Exception as e:
+        logger.error(f"Error removing same as object: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 templates = Jinja2Templates(directory="frontend/app/templates")
 
 def get_user_role_from_request(request: Request) -> str:
     """
     Получает роль пользователя из токена через server-module API.
     Если сервис недоступен, использует fallback на локальную проверку токена.
+    Возвращает None для неавторизованных пользователей (вместо 'guest').
     """
     token = request.cookies.get('access_token') or request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
     if not token:
-        return 'guest'
+        return None
     
     try:
         # Пробуем получить информацию о пользователе через server-module
@@ -1260,13 +1308,14 @@ def get_user_role_from_request(request: Request) -> str:
         if user_data:
             is_admin = user_data.get("is_admin", False)
             permission_study = user_data.get("permission_study", False)
-            # Маппинг: is_admin → admin, permission_study → expert, иначе → guest
+            # Маппинг: is_admin → admin, permission_study → expert
             if is_admin:
                 return 'admin'
             elif permission_study:
                 return 'expert'
             else:
-                return 'guest'
+                # Обычный пользователь (не админ и не эксперт) = неавторизованный
+                return None
     except Exception as e:
         logger.warning(f"Failed to get user role from auth service: {str(e)}, using fallback")
     
@@ -1274,12 +1323,12 @@ def get_user_role_from_request(request: Request) -> str:
     try:
         payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
         role = payload.get('role')
-        if role:
+        if role and role in ['admin', 'expert']:
             return role
-        # Если роли нет в токене, возвращаем guest
-        return 'guest'
+        # Если роли нет в токене или это не админ/эксперт, возвращаем None
+        return None
     except JWTError:
-        return 'guest'
+        return None
 
 def get_asana_by_id(asana_id: str):
     """
@@ -1317,7 +1366,7 @@ def asanas_page(request: Request, search_query: str = '', current_letter: str = 
     
     # Получаем роль пользователя
     user_role = get_user_role_from_request(request)
-    is_authenticated = user_role != 'guest'
+    is_authenticated = user_role is not None
     is_expert_or_admin = user_role in ['admin', 'expert']
     
     return templates.TemplateResponse(
@@ -1410,7 +1459,7 @@ def about_page(request: Request):
             "request": request, 
             "content": content, 
             "user_role": user_role,
-            "is_authenticated": user_role != 'guest',
+            "is_authenticated": user_role is not None,
             "is_expert_or_admin": user_role in ['admin', 'expert'],
             "is_admin": user_role == 'admin'
         }
@@ -1431,7 +1480,7 @@ def expert_instructions_page(request: Request):
             "request": request,
             "content": content,
             "user_role": user_role,
-            "is_authenticated": user_role != 'guest',
+            "is_authenticated": user_role is not None,
             "is_expert_or_admin": user_role in ['admin', 'expert'],
             "is_admin": user_role == 'admin'
         }
@@ -1481,9 +1530,190 @@ async def check_auth(request: Request):
         }
     
     user_role = get_user_role_from_request(request)
-    # Если есть валидный токен - пользователь авторизован (включая guest)
-    # guest - это авторизованный пользователь с ограниченными правами
+    # Если есть валидный токен - пользователь авторизован (admin или expert)
     return {
         "is_authenticated": True,
         "role": user_role
     }
+
+# API для управления пользователями (только для админа)
+class UserCreate(BaseModel):
+    login: str
+    mail: str
+    password: str
+    is_admin: bool = False
+    permission_study: bool = False
+
+class UserUpdate(BaseModel):
+    is_admin: Optional[bool] = None
+    permission_study: Optional[bool] = None
+
+@app.get("/api/users", tags=["users"])
+async def get_all_users(request: Request, user: str = Depends(is_admin)):
+    """Получить список всех пользователей (только для админа)"""
+    import httpx
+    token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+    
+    try:
+        # Делаем запрос к server-module для получения всех пользователей
+        # Если такого endpoint нет, работаем напрямую с БД
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{config.AUTH_SERVICE_URL}/api/users",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-DB-Schema": "public"  # Пользователи в основной схеме
+                }
+            )
+            if response.status_code == 200:
+                return response.json()
+    except Exception as e:
+        logger.warning(f"Failed to get users from server-module: {str(e)}, using direct DB access")
+    
+    # Fallback: работаем напрямую с БД
+    # Пользователи хранятся в схеме dict_schema для asana-dict-service
+    db = SessionLocal()
+    try:
+        # Получаем пользователей из схемы dict_schema
+        users = db.query(User).filter(User.is_verify == True).all()
+        result = []
+        for u in users:
+            result.append({
+                "id": u.id,
+                "login": u.login,
+                "mail": u.mail,
+                "is_admin": u.is_admin,
+                "permission_study": u.permission_study,
+                "is_verify": u.is_verify
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Error getting users from DB: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении пользователей: {str(e)}")
+    finally:
+        db.close()
+
+@app.post("/api/users", tags=["users"])
+async def create_user(user_data: UserCreate, user: str = Depends(is_admin)):
+    """Создать нового пользователя (только для админа)"""
+    from passlib.context import CryptContext
+    
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    
+    db = SessionLocal()
+    try:
+        # Проверяем, что пользователь с таким login не существует
+        existing_user = db.query(User).filter(User.login == user_data.login).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Пользователь с таким логином уже существует")
+        
+        # Проверяем, что пользователь с таким mail не существует
+        existing_mail = db.query(User).filter(User.mail == user_data.mail).first()
+        if existing_mail:
+            raise HTTPException(status_code=400, detail="Пользователь с таким email уже существует")
+        
+        # Создаем нового пользователя
+        hashed_password = pwd_context.hash(user_data.password)
+        new_user = User(
+            login=user_data.login,
+            mail=user_data.mail,
+            password=hashed_password,
+            is_admin=user_data.is_admin,
+            permission_study=user_data.permission_study,
+            is_verify=True  # Админ создает сразу верифицированных пользователей
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        logger.info(f"Admin {user} created new user: {user_data.login}")
+        return {
+            "id": new_user.id,
+            "login": new_user.login,
+            "mail": new_user.mail,
+            "is_admin": new_user.is_admin,
+            "permission_study": new_user.permission_study,
+            "is_verify": new_user.is_verify
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при создании пользователя: {str(e)}")
+    finally:
+        db.close()
+
+@app.patch("/api/users/{user_id}", tags=["users"])
+async def update_user(user_id: int, user_update: UserUpdate, request: Request, user: str = Depends(is_admin)):
+    """Обновить роль пользователя (только для админа)"""
+    db = SessionLocal()
+    try:
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        
+        # Не позволяем изменять самого себя
+        token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+        current_user_data = get_user_info_from_token_sync(token)
+        if current_user_data and current_user_data.get("login") == target_user.login:
+            raise HTTPException(status_code=400, detail="Нельзя изменить роль самого себя")
+        
+        if user_update.is_admin is not None:
+            target_user.is_admin = user_update.is_admin
+        if user_update.permission_study is not None:
+            target_user.permission_study = user_update.permission_study
+        
+        db.commit()
+        db.refresh(target_user)
+        
+        logger.info(f"Admin {user} updated user {target_user.login}: is_admin={target_user.is_admin}, permission_study={target_user.permission_study}")
+        return {
+            "id": target_user.id,
+            "login": target_user.login,
+            "mail": target_user.mail,
+            "is_admin": target_user.is_admin,
+            "permission_study": target_user.permission_study,
+            "is_verify": target_user.is_verify
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при обновлении пользователя: {str(e)}")
+    finally:
+        db.close()
+
+@app.delete("/api/users/{user_id}", tags=["users"])
+async def delete_user(user_id: int, request: Request, user: str = Depends(is_admin)):
+    """Удалить пользователя (только для админа)"""
+    db = SessionLocal()
+    try:
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        
+        # Не позволяем удалить самого себя
+        token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+        current_user_data = get_user_info_from_token_sync(token)
+        if current_user_data and current_user_data.get("login") == target_user.login:
+            raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
+        
+        user_login = target_user.login
+        db.delete(target_user)
+        db.commit()
+        
+        logger.info(f"Admin {user} deleted user: {user_login}")
+        return {"message": f"Пользователь {user_login} успешно удален"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при удалении пользователя: {str(e)}")
+    finally:
+        db.close()

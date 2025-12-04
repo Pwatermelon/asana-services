@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { useAuth } from '../contexts/AuthContext';
@@ -41,6 +41,45 @@ const AsanasList = () => {
     }
   };
 
+  // Для обычных пользователей - объединяем асаны с одинаковым названием в одну карточку
+  const mergedAsanasForUsers = useMemo(() => {
+    if (isExpertOrAdmin) return null;
+    
+    const merged = new Map();
+    asanas.forEach((asana) => {
+      const nameKey = asana.name?.name_ru?.toLowerCase().trim() || '';
+      if (!merged.has(nameKey)) {
+        // Берем первую асану как основу, но сохраняем все ID для загрузки на странице деталей
+        merged.set(nameKey, {
+          ...asana,
+          allAsanaIds: [asana.id] // Массив всех ID асан с этим названием
+        });
+      } else {
+        // Добавляем ID к существующей группе
+        const existing = merged.get(nameKey);
+        existing.allAsanaIds.push(asana.id);
+      }
+    });
+    
+    // Преобразуем в массив и группируем по буквам
+    const mergedArray = Array.from(merged.values());
+    const byLetter = {};
+    mergedArray.forEach((asana) => {
+      const firstLetter = asana.name?.name_ru?.[0]?.toUpperCase() || '?';
+      if (!byLetter[firstLetter]) {
+        byLetter[firstLetter] = [];
+      }
+      byLetter[firstLetter].push(asana);
+    });
+    
+    // Сортировка
+    Object.keys(byLetter).forEach((letter) => {
+      byLetter[letter].sort((a, b) => (a.name?.name_ru || '').localeCompare(b.name?.name_ru || '', 'ru'));
+    });
+    
+    return byLetter;
+  }, [asanas, isExpertOrAdmin]);
+
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) {
@@ -73,14 +112,71 @@ const AsanasList = () => {
 
   const getAsanaId = (asana) => {
     const id = asana.id.split('#').pop();
-    // Сохраняем asana_ для правильного поиска в AsanaDetail
-    return id; // Не удаляем asana_, оставляем как есть
+    return id;
   };
 
   if (loading) {
     return <div className="container">Загрузка...</div>;
   }
 
+  // Для обычных пользователей - показываем объединенные карточки
+  if (!isExpertOrAdmin && !searchResults) {
+    return (
+      <div className="container">
+        <div className="page-header">
+          <h1 className="page-title">Каталог асан</h1>
+          <p className="page-description">
+            Полный каталог асан с описаниями, фотографиями и источниками.
+          </p>
+
+          <div className="search-form-container">
+            <form onSubmit={handleSearch} className="search-form">
+              <div className="search-input-container">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Поиск асан..."
+                  className="search-input"
+                />
+                <button type="submit" className="search-button">
+                  Найти
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div className="alphabet-nav">
+          {Object.keys(mergedAsanasForUsers || {}).sort().map((letter) => (
+            <a key={letter} href={`#letter-${letter}`} className="alphabet-link">
+              {letter}
+            </a>
+          ))}
+        </div>
+
+        {Object.entries(mergedAsanasForUsers || {})
+          .sort()
+          .map(([letter, letterAsanas]) => (
+            <div key={letter} className="letter-section" id={`letter-${letter}`}>
+              <h2 className="letter-heading">{letter}</h2>
+              <div className="asana-grid">
+                {letterAsanas.map((asana) => (
+                  <AsanaCard
+                    key={asana.id}
+                    asana={asana}
+                    isExpertOrAdmin={false}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+      </div>
+    );
+  }
+
+  // Для админов/экспертов или при поиске - оригинальный вид
   const displayAsanas = searchResults || Object.values(groupedAsanas).flat();
 
   return (
@@ -164,34 +260,38 @@ const AsanasList = () => {
   );
 };
 
+// Карточка асаны - источники показываются только для админов/экспертов
 const AsanaCard = ({ asana, isExpertOrAdmin, onDelete }) => {
   const getAsanaId = (asana) => {
     const id = asana.id.split('#').pop();
-    // Сохраняем asana_ для правильного поиска в AsanaDetail
-    return id; // Не удаляем asana_, оставляем как есть
+    return id;
   };
 
   return (
     <div className="asana-card">
-      <div className="asana-image">
-        {asana.photo ? (
-          <img
-            src={asana.photo.startsWith('http') || asana.photo.startsWith('data:') ? asana.photo : `data:image/jpeg;base64,${asana.photo}`}
-            alt={asana.name?.name_ru}
-          />
-        ) : (
-          <div className="no-image">Нет фото</div>
-        )}
-      </div>
+      {/* Фото показываем только для админов/экспертов */}
+      {isExpertOrAdmin && (
+        <div className="asana-image">
+          {asana.photo ? (
+            <img
+              src={asana.photo.startsWith('http') || asana.photo.startsWith('data:') ? asana.photo : `data:image/jpeg;base64,${asana.photo}`}
+              alt={asana.name?.name_ru}
+            />
+          ) : (
+            <div className="no-image">Нет фото</div>
+          )}
+        </div>
+      )}
       <div className="asana-content">
         <h3 className="asana-title">{asana.name?.name_ru}</h3>
         <div className="asana-details">
           {asana.name?.name_sanskrit && (
             <p className="sanskrit-name">{asana.name.name_sanskrit}</p>
           )}
-          {asana.sources && asana.sources.length > 0 && (
+          {/* Источник показываем только для админов/экспертов */}
+          {isExpertOrAdmin && asana.sources && asana.sources.length > 0 && (
             <div className="asana-sources" style={{ marginTop: '0.5em', fontSize: '0.9em', color: '#666' }}>
-              <strong>Источники:</strong>{' '}
+              <strong>Источник:</strong>{' '}
               {asana.sources.map((source, index) => {
                 const sourceId = source.id?.split('#').pop() || source.id;
                 return (
@@ -234,4 +334,3 @@ const AsanaCard = ({ asana, isExpertOrAdmin, onDelete }) => {
 };
 
 export default AsanasList;
-

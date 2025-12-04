@@ -276,7 +276,7 @@ const AddAsana = () => {
                 </div>
                 <div className="form-group">
                   <label htmlFor="definition" className="form-label">
-                    Пояснение
+                    Перевод
                   </label>
                   <textarea
                     id="definition"

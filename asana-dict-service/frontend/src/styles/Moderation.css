@@ -135,3 +135,23 @@
   font-weight: 500;
 }
 
+.moderation-item-import-data {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--background);
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.moderation-photo-preview {
+  display: inline-block;
+}
+
+.moderation-photo-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+

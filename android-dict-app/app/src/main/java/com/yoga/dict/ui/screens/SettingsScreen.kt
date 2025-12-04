@@ -54,13 +54,15 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Пользователь: ${userLogin ?: "Гость"}",
+                        text = "Пользователь: ${userLogin ?: "Неавторизованный пользователь"}",
                         style = MaterialTheme.typography.titleMedium
                     )
-                    Text(
-                        text = "Роль: ${userRole ?: "guest"}",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    userRole?.let { role ->
+                        Text(
+                            text = "Роль: ${if (role == "admin") "Администратор" else if (role == "expert") "Эксперт" else role}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
             }
             

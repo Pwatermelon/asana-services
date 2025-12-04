@@ -160,9 +160,413 @@
   .asana-header {
     flex-direction: column;
     align-items: flex-start;
+    gap: 1em;
   }
 
   .photo-gallery {
+    grid-template-columns: 1fr;
+    gap: 1em;
+  }
+  
+  .asana-detail {
+    padding: 1.5em;
+    margin: 1em 0;
+    gap: 1.5em;
+    border-radius: 12px;
+  }
+  
+  .asana-title {
+    font-size: 1.75em;
+  }
+  
+  .detail-section {
+    margin-bottom: 1.5em;
+    padding-bottom: 1.5em;
+  }
+  
+  .detail-title {
+    font-size: 1.25em;
+    margin-bottom: 1em;
+  }
+  
+  .detail-item {
+    padding: 0.625em 0.875em;
+    font-size: 0.9375em;
+  }
+  
+  .detail-item strong {
+    min-width: 100px;
+    display: block;
+    margin-bottom: 0.25em;
+  }
+  
+  .add-photo-form {
+    padding: 1.5em;
+    margin-top: 1.5em;
+  }
+  
+  .form-title {
+    font-size: 1.25em;
+    margin-bottom: 1em;
+  }
+  
+  .admin-actions {
+    width: 100%;
+  }
+  
+  .admin-actions .btn-primary {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .asana-detail {
+    padding: 1em;
+    margin: 0.5em 0;
+  }
+  
+  .asana-title {
+    font-size: 1.5em;
+  }
+  
+  .detail-item strong {
+    font-size: 0.875em;
+  }
+  
+  .photo-container {
+    border-radius: 10px;
+  }
+  
+  .gallery-item {
+    border-radius: 10px;
+  }
+}
+
+/* Стили для секций по источникам (для обычных пользователей) */
+.source-section {
+  margin-bottom: 2em;
+  padding: 1.5em;
+  background: var(--card-background);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.source-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1em;
+  padding-bottom: 0.75em;
+  border-bottom: 2px solid var(--border-light);
+}
+
+.source-section-title {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0;
+}
+
+.source-section-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.source-section-title a:hover {
+  text-decoration: underline;
+}
+
+.source-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1em;
+}
+
+.source-photo {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.source-photo img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Стили для блока аналогичных асан */
+.similar-asanas-section {
+  margin-top: 2em;
+  padding: 1.5em;
+  background: var(--card-background);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.similar-asanas-title {
+  font-size: 1.25em;
+  font-weight: 700;
+  color: var(--primary-color);
+  margin: 0 0 1em 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.similar-asanas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1em;
+}
+
+.similar-asana-card {
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.similar-asana-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.similar-asana-photo {
+  height: 120px;
+  background: var(--background-alt);
+  overflow: hidden;
+}
+
+.similar-asana-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.similar-asana-info {
+  padding: 0.75em;
+}
+
+.similar-asana-name {
+  font-size: 0.9375em;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.25em 0;
+}
+
+.similar-asana-source {
+  font-size: 0.75em;
+  color: var(--text-muted);
+}
+
+.similar-asana-remove {
+  margin-top: 0.5em;
+  padding: 0.375em 0.75em;
+  background: #fee2e2;
+  color: var(--danger-color);
+  border: 1px solid var(--danger-light);
+  border-radius: 6px;
+  font-size: 0.75em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.similar-asana-remove:hover {
+  background: var(--danger-color);
+  color: white;
+}
+
+/* Кнопка "Указать совпадение" */
+.match-asana-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.625em 1.25em;
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  color: #92400e;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9375em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
+}
+
+.match-asana-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+}
+
+/* Модальное окно выбора асаны */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1em;
+}
+
+.modal-content {
+  background: var(--card-background);
+  border-radius: 16px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  padding: 1.5em;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 1.25em;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5em;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25em;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: 1.5em;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.modal-search {
+  margin-bottom: 1em;
+}
+
+.modal-search input {
+  width: 100%;
+  padding: 0.75em 1em;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 1em;
+}
+
+.modal-asanas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.modal-asana-item {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  padding: 0.75em;
+  background: var(--background-alt);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 2px solid transparent;
+}
+
+.modal-asana-item:hover {
+  background: var(--card-hover);
+  border-color: var(--primary-light);
+}
+
+.modal-asana-item.selected {
+  border-color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.modal-asana-thumb {
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--border-light);
+}
+
+.modal-asana-info {
+  flex: 1;
+}
+
+.modal-asana-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modal-asana-source {
+  font-size: 0.875em;
+  color: var(--text-muted);
+}
+
+.modal-footer {
+  padding: 1em 1.5em;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75em;
+}
+
+@media (max-width: 768px) {
+  .source-section {
+    padding: 1em;
+  }
+  
+  .source-photos {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  .similar-asanas-section {
+    padding: 1em;
+  }
+  
+  .similar-asanas-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  .modal-content {
+    max-height: 90vh;
+  }
+  
+  .modal-header, .modal-body, .modal-footer {
+    padding: 1em;
+  }
+}
+
+@media (max-width: 480px) {
+  .source-photos {
+    grid-template-columns: 1fr;
+  }
+  
+  .similar-asanas-grid {
     grid-template-columns: 1fr;
   }
 }

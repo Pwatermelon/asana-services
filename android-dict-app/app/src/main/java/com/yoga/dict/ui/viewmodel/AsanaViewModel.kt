@@ -25,11 +25,18 @@ class AsanaViewModel @Inject constructor(
     private val _selectedAsana = MutableStateFlow<Asana?>(null)
     val selectedAsana: StateFlow<Asana?> = _selectedAsana.asStateFlow()
     
+    private val _similarAsanas = MutableStateFlow<List<Asana>>(emptyList())
+    val similarAsanas: StateFlow<List<Asana>> = _similarAsanas.asStateFlow()
+    
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
     
     private val _selectedLetter = MutableStateFlow<String?>(null)
     val selectedLetter: StateFlow<String?> = _selectedLetter.asStateFlow()
+    
+    // Группировка асан по названиям для обычных пользователей
+    private val _groupedAsanasByName = MutableStateFlow<Map<String, AsanaNameGroup>>(emptyMap())
+    val groupedAsanasByName: StateFlow<Map<String, AsanaNameGroup>> = _groupedAsanasByName.asStateFlow()
     
     init {
         loadAsanas()
@@ -41,6 +48,7 @@ class AsanaViewModel @Inject constructor(
             repository.getAllAsanas()
                 .onSuccess { asanas ->
                     _asanaList.value = asanas
+                    groupAsanasByName(asanas)
                     _uiState.value = AsanaUiState.Success(asanas)
                 }
                 .onFailure { error ->
@@ -49,18 +57,52 @@ class AsanaViewModel @Inject constructor(
         }
     }
     
+    private fun groupAsanasByName(asanas: List<Asana>) {
+        val groups = mutableMapOf<String, AsanaNameGroup>()
+        asanas.forEach { asana ->
+            val nameKey = asana.name.name_ru.lowercase().trim()
+            val group = groups.getOrPut(nameKey) {
+                AsanaNameGroup(
+                    nameRu = asana.name.name_ru,
+                    nameSanskrit = asana.name.name_sanskrit,
+                    transliteration = asana.name.transliteration,
+                    asanas = mutableListOf()
+                )
+            }
+            (group.asanas as MutableList).add(asana)
+        }
+        _groupedAsanasByName.value = groups
+    }
+    
     fun loadAsanaById(id: String) {
         viewModelScope.launch {
             _uiState.value = AsanaUiState.Loading
             repository.getAsanaById(id)
                 .onSuccess { asana ->
                     _selectedAsana.value = asana
+                    loadSimilarAsanas(asana.id)
                     _uiState.value = AsanaUiState.Success(listOf(asana))
                 }
                 .onFailure { error ->
                     _uiState.value = AsanaUiState.Error(error.message ?: "Unknown error")
                 }
         }
+    }
+    
+    private fun loadSimilarAsanas(asanaId: String) {
+        viewModelScope.launch {
+            repository.getSimilarAsanas(asanaId)
+                .onSuccess { asanas ->
+                    _similarAsanas.value = asanas
+                }
+                .onFailure {
+                    _similarAsanas.value = emptyList()
+                }
+        }
+    }
+    
+    suspend fun getSimilarAsanasForAsana(asanaId: String): List<Asana> {
+        return repository.getSimilarAsanas(asanaId).getOrElse { emptyList() }
     }
     
     fun searchAsanas(query: String) {
@@ -75,6 +117,7 @@ class AsanaViewModel @Inject constructor(
             repository.searchAsanas(query, fuzzy = true)
                 .onSuccess { asanas ->
                     _asanaList.value = asanas
+                    groupAsanasByName(asanas)
                     _uiState.value = AsanaUiState.Success(asanas)
                 }
                 .onFailure { error ->
@@ -90,6 +133,7 @@ class AsanaViewModel @Inject constructor(
             repository.getAsanasByLetter(letter)
                 .onSuccess { asanas ->
                     _asanaList.value = asanas
+                    groupAsanasByName(asanas)
                     _uiState.value = AsanaUiState.Success(asanas)
                 }
                 .onFailure { error ->
@@ -106,12 +150,48 @@ class AsanaViewModel @Inject constructor(
     
     fun selectAsana(asana: Asana) {
         _selectedAsana.value = asana
+        loadSimilarAsanas(asana.id)
+    }
+    
+    // Методы для работы с isSameAsObject
+    fun setSameAsObject(targetAsanaId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val currentAsana = _selectedAsana.value ?: return
+        viewModelScope.launch {
+            repository.setSameAsObject(currentAsana.id, targetAsanaId)
+                .onSuccess {
+                    loadSimilarAsanas(currentAsana.id)
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    onError(error.message ?: "Ошибка при указании совпадения")
+                }
+        }
+    }
+    
+    fun removeSameAsObject(targetAsanaId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val currentAsana = _selectedAsana.value ?: return
+        viewModelScope.launch {
+            repository.removeSameAsObject(currentAsana.id, targetAsanaId)
+                .onSuccess {
+                    loadSimilarAsanas(currentAsana.id)
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    onError(error.message ?: "Ошибка при удалении связи")
+                }
+        }
     }
 }
+
+data class AsanaNameGroup(
+    val nameRu: String,
+    val nameSanskrit: String?,
+    val transliteration: String?,
+    val asanas: List<Asana>
+)
 
 sealed class AsanaUiState {
     object Loading : AsanaUiState()
     data class Success(val asanas: List<Asana>) : AsanaUiState()
     data class Error(val message: String) : AsanaUiState()
 }
-

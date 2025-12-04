@@ -20,6 +20,7 @@ import AboutProject from './pages/AboutProject';
 import ExpertInstructions from './pages/ExpertInstructions';
 import Settings from './pages/Settings';
 import Moderation from './pages/Moderation';
+import Users from './pages/Users';
 
 // Защищенные маршруты
 import PrivateRoute from './components/PrivateRoute';
@@ -90,6 +91,15 @@ function App() {
                   <ExpertRoute>
                     <Moderation />
                   </ExpertRoute>
+                }
+              />
+              
+              <Route
+                path="/users"
+                element={
+                  <AdminRoute>
+                    <Users />
+                  </AdminRoute>
                 }
               />
             </Routes>

@@ -91,5 +91,32 @@ export const asanasAPI = {
     const response = await apiClient.get(`/api/asana/${shortId}/check-photo/${sourceId}`);
     return response.data;
   },
-};
 
+  // Методы для работы с isSameAsObject
+  getSimilarAsanas: async (asanaId) => {
+    try {
+      const shortId = asanaId.split('#').pop();
+      const response = await apiClient.get(`/api/asana/${encodeURIComponent(shortId)}/similar`);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting similar asanas:', error);
+      return [];
+    }
+  },
+
+  setSameAsObject: async (asanaId, targetAsanaId) => {
+    const shortId = asanaId.split('#').pop();
+    const targetShortId = targetAsanaId.split('#').pop();
+    const response = await apiClient.post(`/api/asana/${encodeURIComponent(shortId)}/same-as`, {
+      target_asana_id: targetShortId,
+    });
+    return response.data;
+  },
+
+  removeSameAsObject: async (asanaId, targetAsanaId) => {
+    const shortId = asanaId.split('#').pop();
+    const targetShortId = targetAsanaId.split('#').pop();
+    const response = await apiClient.delete(`/api/asana/${encodeURIComponent(shortId)}/same-as/${encodeURIComponent(targetShortId)}`);
+    return response.data;
+  },
+};

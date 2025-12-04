@@ -65,12 +65,18 @@ class AuthRepository @Inject constructor(
                 val userInfo = response.body()
                 if (userInfo != null) {
                     // Определяем роль пользователя
+                    // Обычный пользователь (не админ и не эксперт) = неавторизованный
                     val role = when {
                         userInfo.is_admin -> "admin"
                         userInfo.permission_study -> "expert"
-                        else -> "guest"
+                        else -> null // Обычный пользователь = неавторизованный
                     }
-                    Result.success(AuthCheckResponse(true, role))
+                    if (role != null) {
+                        Result.success(AuthCheckResponse(true, role))
+                    } else {
+                        // Обычный пользователь = неавторизованный
+                        Result.success(AuthCheckResponse(false, null))
+                    }
                 } else {
                     Result.success(AuthCheckResponse(false, null))
                 }

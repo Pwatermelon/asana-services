@@ -56,11 +56,11 @@ const Navbar = () => {
   };
 
   const getRoleLabel = () => {
-    if (!user) return 'Гость';
+    if (!user) return null;
     // Используем role из user объекта, а не isAdmin/isExpert
     if (user.role === 'admin') return 'Администратор';
     if (user.role === 'expert') return 'Эксперт';
-    return 'Гость';
+    return null; // Обычный пользователь = неавторизованный
   };
 
   const getInitials = (login) => {
@@ -84,10 +84,21 @@ const Navbar = () => {
           </div>
           {isDropdownOpen && (
             <div className="user-dropdown">
-              <div className="user-dropdown-role">
-                <span className="role-label">Роль:</span>
-                <span className="role-value">{getRoleLabel()}</span>
-              </div>
+              {getRoleLabel() && (
+                <div className="user-dropdown-role">
+                  <span className="role-label">Роль:</span>
+                  <span className="role-value">{getRoleLabel()}</span>
+                </div>
+              )}
+              {isAdmin && (
+                <Link
+                  to="/users"
+                  className="user-dropdown-link"
+                  onClick={() => setIsDropdownOpen(false)}
+                >
+                  Пользователи
+                </Link>
+              )}
               <button 
                 className="user-dropdown-logout"
                 onClick={handleLogout}

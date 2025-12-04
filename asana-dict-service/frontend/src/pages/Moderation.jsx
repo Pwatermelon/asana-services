@@ -212,11 +212,71 @@ const Moderation = () => {
                     </>
                   )}
                   
-                  {item.import_data && (
-                    <details className="moderation-item-details">
-                      <summary>Данные импорта</summary>
-                      <pre>{JSON.stringify(item.import_data, null, 2)}</pre>
-                    </details>
+                  {/* Показываем поля из import_data */}
+                  {item.import_data && typeof item.import_data === 'object' && (
+                    <div className="moderation-item-import-data">
+                      {Object.entries(item.import_data).map(([key, value]) => {
+                        // Пропускаем фото - показываем отдельно
+                        if (key === 'photo' || key === 'photo_url' || key === 'photo_base64') {
+                          return null;
+                        }
+                        
+                        // Пропускаем пустые значения
+                        if (!value || value === '' || (Array.isArray(value) && value.length === 0)) {
+                          return null;
+                        }
+                        
+                        // Форматируем ключ для отображения
+                        const displayKey = key
+                          .replace(/_/g, ' ')
+                          .replace(/\b\w/g, l => l.toUpperCase());
+                        
+                        return (
+                          <div key={key} className="moderation-item-field">
+                            <strong>{displayKey}:</strong>{' '}
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                          </div>
+                        );
+                      })}
+                      
+                      {/* Показываем фото если есть */}
+                      {(item.import_data.photo || item.import_data.photo_url || item.import_data.photo_base64) && (
+                        <div className="moderation-item-field">
+                          <strong>Фотография из запроса:</strong>
+                          <div className="moderation-photo-preview" style={{ marginTop: '0.5em' }}>
+                            {item.import_data.photo_url ? (
+                              <img 
+                                src={item.import_data.photo_url} 
+                                alt="Фото из запроса"
+                                style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
+                              />
+                            ) : item.import_data.photo_base64 ? (
+                              <img 
+                                src={`data:image/jpeg;base64,${item.import_data.photo_base64}`} 
+                                alt="Фото из запроса"
+                                style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
+                              />
+                            ) : item.import_data.photo ? (
+                              typeof item.import_data.photo === 'string' ? (
+                                item.import_data.photo.startsWith('http') || item.import_data.photo.startsWith('data:') ? (
+                                  <img 
+                                    src={item.import_data.photo} 
+                                    alt="Фото из запроса"
+                                    style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
+                                  />
+                                ) : (
+                                  <img 
+                                    src={`data:image/jpeg;base64,${item.import_data.photo}`} 
+                                    alt="Фото из запроса"
+                                    style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
+                                  />
+                                )
+                              ) : null
+                            ) : null}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
                 

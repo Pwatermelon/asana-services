@@ -24,13 +24,13 @@ export const authAPI = {
         headers: { Authorization: `Bearer ${token}` }
       });
       const user = response.data;
-      // Маппинг: is_admin → admin, permission_study → expert, иначе → guest
+      // Маппинг: is_admin → admin, permission_study → expert, иначе → null (неавторизованный)
       if (user.is_admin) return 'admin';
       if (user.permission_study) return 'expert';
-      return 'guest';
+      return null; // Обычный пользователь = неавторизованный
     } catch (error) {
       console.error('Failed to get user role:', error);
-      return 'guest';
+      return null; // Неавторизованный пользователь
     }
   },
 
@@ -91,16 +91,23 @@ export const authAPI = {
       try {
         const response = await apiClient.get('/api/users/me');
         const user = response.data;
-        // Маппинг ролей: is_admin → admin, permission_study → expert, иначе → guest
-        let role = 'guest';
+        // Маппинг ролей: is_admin → admin, permission_study → expert, иначе → null (неавторизованный)
+        let role = null;
         if (user.is_admin) role = 'admin';
         else if (user.permission_study) role = 'expert';
         
-        localStorage.setItem('user_role', role);
-        return { 
-          isAuthenticated: true, 
-          role: role 
-        };
+        if (role) {
+          localStorage.setItem('user_role', role);
+          return { 
+            isAuthenticated: true, 
+            role: role 
+          };
+        } else {
+          // Обычный пользователь = неавторизованный
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('user_role');
+          return { isAuthenticated: false, role: null };
+        }
       } catch (error) {
         // Если токен невалиден (401), очищаем
         if (error.response?.status === 401 || error.response?.status === 403) {

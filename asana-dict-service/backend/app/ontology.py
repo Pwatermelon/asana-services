@@ -16,6 +16,8 @@ ASANA.s3PhotoPath = URIRef(f"{ASANA}s3PhotoPath")
 ASANA.photoHash = URIRef(f"{ASANA}photoHash")
 # Определяем base64Photo явно, чтобы контролировать его использование (только для чтения старых данных)
 ASANA.base64Photo = URIRef(f"{ASANA}base64Photo")
+# Свойство для указания идентичных/аналогичных асан
+ASANA.isSameAsObject = URIRef(f"{ASANA}isSameAsObject")
 
 def ensure_ontology_file_exists():
     """Создает файл онтологии, если он не существует"""
@@ -850,3 +852,167 @@ def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:
             if base64_photo:
                 return str(base64_photo)
     return None
+
+
+# Функции для работы с isSameAsObject (аналогичные асаны)
+
+def get_similar_asanas(asana_id: str) -> List[Dict]:
+    """
+    Получает список асан, которые связаны с указанной через isSameAsObject.
+    Возвращает данные в том же формате, что и load_asanas().
+    """
+    logger.info(f"Getting similar asanas for: {asana_id}")
+    g = get_graph()
+    
+    # Формируем полный URI если нужно
+    if not asana_id.startswith('http://'):
+        if not asana_id.startswith('asana_'):
+            asana_id = f"asana_{asana_id}"
+        asana_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{asana_id}"
+    
+    asana_uri = URIRef(asana_id)
+    similar_asanas = []
+    
+    # Ищем связи в обе стороны (asana -> similar и similar -> asana)
+    # isSameAsObject симметричен
+    similar_uris = set()
+    
+    # Асаны, на которые ссылается текущая
+    for similar_uri in g.objects(asana_uri, ASANA.isSameAsObject):
+        similar_uris.add(similar_uri)
+    
+    # Асаны, которые ссылаются на текущую
+    for similar_uri in g.subjects(ASANA.isSameAsObject, asana_uri):
+        similar_uris.add(similar_uri)
+    
+    logger.debug(f"Found {len(similar_uris)} similar asanas")
+    
+    # Загружаем данные для каждой найденной асаны
+    for similar_uri in similar_uris:
+        if (similar_uri, RDF.type, ASANA.Asana) not in g:
+            continue
+            
+        name_obj = g.value(similar_uri, ASANA.hasName)
+        photo_objs = list(g.objects(similar_uri, ASANA.hasPhoto))
+        
+        name_data = {
+            "name_ru": str(g.value(name_obj, ASANA.nameInRussian)) if name_obj else "",
+            "name_sanskrit": str(g.value(name_obj, ASANA.nameInSanskrit)) if name_obj and g.value(name_obj, ASANA.nameInSanskrit) else "",
+            "transliteration": str(g.value(name_obj, ASANA.nameInTranslit)) if name_obj and g.value(name_obj, ASANA.nameInTranslit) else "",
+            "definition": str(g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a)) if name_obj and g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a) else ""
+        }
+        
+        # Собираем источники и фото
+        sources_set = set()
+        photos_with_sources = []
+        for photo in photo_objs:
+            source_obj = g.value(photo, ASANA.hasSource)
+            if source_obj:
+                sources_set.add(source_obj)
+            
+            s3_path = g.value(photo, ASANA.s3PhotoPath)
+            base64_photo = g.value(photo, ASANA.base64Photo)
+            
+            photo_data = {
+                "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
+                "source": str(source_obj) if source_obj else None
+            }
+            if photo_data["image"]:
+                photos_with_sources.append(photo_data)
+        
+        # Формируем список источников
+        sources_list = []
+        for source_obj in sources_set:
+            source_data = {
+                "id": str(source_obj),
+                "title": str(g.value(source_obj, ASANA.sourseTitle)) if g.value(source_obj, ASANA.sourseTitle) else "",
+                "author": str(g.value(source_obj, ASANA.sourceAuthor)) if g.value(source_obj, ASANA.sourceAuthor) else "",
+                "year": int(g.value(source_obj, ASANA.sourceYear)) if g.value(source_obj, ASANA.sourceYear) else None,
+            }
+            sources_list.append(source_data)
+        
+        photos = [p["image"] for p in photos_with_sources if p["image"]]
+        
+        similar_asanas.append({
+            "id": str(similar_uri),
+            "name": name_data,
+            "sources": sources_list,
+            "photos": photos_with_sources,
+            "photo": photos[0] if photos else ""
+        })
+    
+    logger.info(f"Returning {len(similar_asanas)} similar asanas")
+    return similar_asanas
+
+
+def add_same_as_object(asana_id: str, target_asana_id: str) -> bool:
+    """
+    Добавляет связь isSameAsObject между двумя асанами.
+    Связь симметрична - добавляется в обе стороны.
+    """
+    logger.info(f"Adding isSameAsObject: {asana_id} <-> {target_asana_id}")
+    
+    try:
+        g = get_graph()
+        
+        # Формируем полные URI
+        def make_full_uri(aid):
+            if not aid.startswith('http://'):
+                if not aid.startswith('asana_'):
+                    aid = f"asana_{aid}"
+                return f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{aid}"
+            return aid
+        
+        asana_uri = URIRef(make_full_uri(asana_id))
+        target_uri = URIRef(make_full_uri(target_asana_id))
+        
+        # Проверяем, что обе асаны существуют
+        if (asana_uri, RDF.type, ASANA.Asana) not in g:
+            logger.error(f"Asana not found: {asana_uri}")
+            return False
+        if (target_uri, RDF.type, ASANA.Asana) not in g:
+            logger.error(f"Target asana not found: {target_uri}")
+            return False
+        
+        # Добавляем связь (в одну сторону, при чтении ищем в обе)
+        g.add((asana_uri, ASANA.isSameAsObject, target_uri))
+        
+        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        logger.info(f"Successfully added isSameAsObject relation")
+        return True
+    except Exception as e:
+        logger.error(f"Error adding isSameAsObject: {str(e)}", exc_info=True)
+        return False
+
+
+def remove_same_as_object(asana_id: str, target_asana_id: str) -> bool:
+    """
+    Удаляет связь isSameAsObject между двумя асанами.
+    Удаляет связи в обе стороны.
+    """
+    logger.info(f"Removing isSameAsObject: {asana_id} <-> {target_asana_id}")
+    
+    try:
+        g = get_graph()
+        
+        # Формируем полные URI
+        def make_full_uri(aid):
+            if not aid.startswith('http://'):
+                if not aid.startswith('asana_'):
+                    aid = f"asana_{aid}"
+                return f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{aid}"
+            return aid
+        
+        asana_uri = URIRef(make_full_uri(asana_id))
+        target_uri = URIRef(make_full_uri(target_asana_id))
+        
+        # Удаляем связи в обе стороны
+        g.remove((asana_uri, ASANA.isSameAsObject, target_uri))
+        g.remove((target_uri, ASANA.isSameAsObject, asana_uri))
+        
+        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        logger.info(f"Successfully removed isSameAsObject relation")
+        return True
+    except Exception as e:
+        logger.error(f"Error removing isSameAsObject: {str(e)}", exc_info=True)
+        return False

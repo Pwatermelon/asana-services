@@ -42,5 +42,31 @@ interface DictApiService {
         @Path("asana_id") asanaId: String,
         @Path("source_id") sourceId: String
     ): Response<com.yoga.dict.data.model.AsanaPhoto>
+    
+    // Методы для работы с isSameAsObject (аналогичные асаны)
+    @GET("api/asana/{asana_id}/similar")
+    suspend fun getSimilarAsanas(
+        @Path("asana_id") asanaId: String
+    ): Response<List<Asana>>
+    
+    @POST("api/asana/{asana_id}/same-as")
+    suspend fun setSameAsObject(
+        @Path("asana_id") asanaId: String,
+        @Body request: SameAsRequest
+    ): Response<MessageResponse>
+    
+    @DELETE("api/asana/{asana_id}/same-as/{target_asana_id}")
+    suspend fun removeSameAsObject(
+        @Path("asana_id") asanaId: String,
+        @Path("target_asana_id") targetAsanaId: String
+    ): Response<MessageResponse>
 }
+
+data class SameAsRequest(
+    val target_asana_id: String
+)
+
+data class MessageResponse(
+    val message: String
+)
 
