@@ -1,0 +1,19 @@
+{
+  "name": "Каталог асан",
+  "short_name": "Асаны",
+  "description": "Каталог асан йоги",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "theme_color": "#6200EE",
+  "background_color": "#6200EE",
+  "display": "standalone",
+  "start_url": "/",
+  "orientation": "portrait-primary"
+}
+

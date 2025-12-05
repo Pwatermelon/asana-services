@@ -10,8 +10,10 @@ import json
 import uuid
 import asyncio
 from starlette.responses import RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 from app.auth import (
-    get_current_user, is_admin, is_expert_or_admin
+    get_current_user, is_admin, is_expert_or_admin, get_user_info_from_token_sync
 )
 from app.ontology import (
     add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
@@ -70,6 +72,63 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
+
+# Middleware для защиты документации API
+class DocsAuthMiddleware(BaseHTTPMiddleware):
+    """Middleware для защиты документации API - только для авторизованных пользователей (админ/эксперт)"""
+    
+    async def dispatch(self, request: StarletteRequest, call_next):
+        # Проверяем, является ли запрос к документации
+        path = request.url.path
+        
+        # Защищаем основные пути документации
+        # Также защищаем статические файлы Swagger UI (они загружаются через /docs/static/...)
+        protected_paths = ["/docs", "/redoc", "/openapi.json"]
+        is_protected = any(path == protected or path.startswith(protected + "/") for protected in protected_paths)
+        
+        if is_protected:
+            # Получаем токен из заголовков или cookies
+            token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token") or request.cookies.get("session_token")
+            
+            if not token:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Требуется авторизация для доступа к документации API"}
+                )
+            
+            # Проверяем авторизацию и роль пользователя
+            try:
+                user_data = get_user_info_from_token_sync(token)
+                if not user_data:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Недействительный токен авторизации"}
+                    )
+                
+                # Проверяем, что пользователь является админом или экспертом
+                is_admin_flag = user_data.get("is_admin", False)
+                permission_study = user_data.get("permission_study", False)
+                
+                if not (is_admin_flag or permission_study):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Доступ к документации API разрешен только администраторам и экспертам"}
+                    )
+                
+                # Пользователь авторизован и имеет нужные права - пропускаем запрос
+            except Exception as e:
+                logger.error(f"Error checking auth in docs middleware: {str(e)}")
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Ошибка проверки авторизации"}
+                )
+        
+        # Продолжаем обработку запроса
+        response = await call_next(request)
+        return response
+
+# Добавляем middleware для защиты документации (перед CORS)
+app.add_middleware(DocsAuthMiddleware)
 
 # Разрешаем CORS для всех источников (для разработки)
 app.add_middleware(

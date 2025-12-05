@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Фон -->
+  <rect width="512" height="512" fill="#6200EE" rx="100" ry="100"/>
+  
+  <!-- Цветок лотоса -->
+  <!-- Центральный круг (пестик) -->
+  <circle cx="256" cy="256" r="40" fill="#FFFFFF"/>
+  
+  <!-- Лепестки (8 лепестков вокруг центра) -->
+  <!-- Верхний лепесток -->
+  <ellipse cx="256" cy="180" rx="50" ry="80" fill="#FFFFFF"/>
+  
+  <!-- Нижний лепесток -->
+  <ellipse cx="256" cy="332" rx="50" ry="80" fill="#FFFFFF"/>
+  
+  <!-- Левый лепесток -->
+  <ellipse cx="180" cy="256" rx="80" ry="50" fill="#FFFFFF"/>
+  
+  <!-- Правый лепесток -->
+  <ellipse cx="332" cy="256" rx="80" ry="50" fill="#FFFFFF"/>
+  
+  <!-- Диагональные лепестки -->
+  <ellipse cx="200" cy="200" rx="60" ry="70" fill="#FFFFFF" transform="rotate(-45 200 200)"/>
+  <ellipse cx="312" cy="200" rx="60" ry="70" fill="#FFFFFF" transform="rotate(45 312 200)"/>
+  <ellipse cx="200" cy="312" rx="60" ry="70" fill="#FFFFFF" transform="rotate(45 200 312)"/>
+  <ellipse cx="312" cy="312" rx="60" ry="70" fill="#FFFFFF" transform="rotate(-45 312 312)"/>
+</svg>
+
