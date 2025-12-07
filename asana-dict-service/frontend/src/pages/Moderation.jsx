@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { moderationAPI } from '../api/moderation';
 import { sourcesAPI } from '../api/sources';
 import { contentAPI } from '../api/content';
+import SearchableSelect from '../components/SearchableSelect';
 import '../styles/Moderation.css';
 
 const Moderation = () => {
@@ -15,6 +16,7 @@ const Moderation = () => {
   const [names, setNames] = useState([]);
   const [addFormData, setAddFormData] = useState({});
   const [keepPhotoFromRequest, setKeepPhotoFromRequest] = useState({}); // Галочка для сохранения фото из запроса
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     loadItems();
@@ -114,6 +116,21 @@ const Moderation = () => {
     }
   };
 
+  const handleExport = async () => {
+    if (exporting) return;
+    
+    setExporting(true);
+    try {
+      // Всегда экспортируем только нерешённые записи
+      await moderationAPI.exportItems();
+    } catch (error) {
+      console.error('Error exporting moderation items:', error);
+      alert('Ошибка при экспорте файла');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) {
     return <div className="container">Загрузка...</div>;
   }
@@ -136,6 +153,16 @@ const Moderation = () => {
           </div>
           <div className="filter-group" style={{ marginLeft: '1em', color: '#666', fontSize: '0.9em' }}>
             Записи отсортированы по времени создания (новые сначала)
+          </div>
+          <div className="filter-group" style={{ marginLeft: 'auto' }}>
+            <button
+              className="btn-primary"
+              onClick={handleExport}
+              disabled={exporting || items.length === 0}
+              style={{ marginLeft: '1em' }}
+            >
+              {exporting ? 'Экспорт...' : 'Экспорт в Excel'}
+            </button>
           </div>
         </div>
 
@@ -314,44 +341,39 @@ const Moderation = () => {
                     <div style={{ marginBottom: '1em' }}>
                       <label style={{ display: 'block', marginBottom: '0.5em' }}>
                         Название асаны *
-                        <select
+                        <SearchableSelect
                           value={addFormData[item.id]?.name_id || ''}
-                          onChange={(e) => setAddFormData({
+                          onChange={(value) => setAddFormData({
                             ...addFormData,
-                            [item.id]: { ...addFormData[item.id], name_id: e.target.value }
+                            [item.id]: { ...addFormData[item.id], name_id: value }
                           })}
-                          style={{ width: '100%', padding: '0.5em', marginTop: '0.25em' }}
+                          options={names}
+                          placeholder="Выберите название..."
+                          getOptionLabel={(name) => 
+                            name.name_ru + (name.name_sanskrit ? ` (${name.name_sanskrit})` : '')
+                          }
+                          getOptionValue={(name) => name.id}
                           required
-                        >
-                          <option value="">Выберите название...</option>
-                          {names.map((name) => (
-                            <option key={name.id} value={name.id}>
-                              {name.name_ru}
-                              {name.name_sanskrit && ` (${name.name_sanskrit})`}
-                            </option>
-                          ))}
-                        </select>
+                          style={{ marginTop: '0.25em' }}
+                        />
                       </label>
                     </div>
                     <div style={{ marginBottom: '1em' }}>
                       <label style={{ display: 'block', marginBottom: '0.5em' }}>
                         Источник *
-                        <select
+                        <SearchableSelect
                           value={addFormData[item.id]?.source_id || ''}
-                          onChange={(e) => setAddFormData({
+                          onChange={(value) => setAddFormData({
                             ...addFormData,
-                            [item.id]: { ...addFormData[item.id], source_id: e.target.value }
+                            [item.id]: { ...addFormData[item.id], source_id: value }
                           })}
-                          style={{ width: '100%', padding: '0.5em', marginTop: '0.25em' }}
+                          options={sources}
+                          placeholder="Выберите источник..."
+                          getOptionLabel={(source) => `${source.author} - ${source.title}`}
+                          getOptionValue={(source) => source.id}
                           required
-                        >
-                          <option value="">Выберите источник...</option>
-                          {sources.map((source) => (
-                            <option key={source.id} value={source.id}>
-                              {source.author} - {source.title}
-                            </option>
-                          ))}
-                        </select>
+                          style={{ marginTop: '0.25em' }}
+                        />
                       </label>
                     </div>
                     <div style={{ marginBottom: '1em' }}>

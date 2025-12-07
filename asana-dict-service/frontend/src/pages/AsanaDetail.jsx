@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { sourcesAPI } from '../api/sources';
 import { useAuth } from '../contexts/AuthContext';
+import SearchableSelect from '../components/SearchableSelect';
 import '../styles/AsanaDetail.css';
 
 const AsanaDetail = () => {
@@ -150,8 +151,7 @@ const AsanaDetail = () => {
     }
   };
 
-  const handleSourceChange = async (e) => {
-    const sourceId = e.target.value;
+  const handleSourceChange = async (sourceId) => {
     setSelectedSource(sourceId);
     
     if (sourceId && asana) {
@@ -698,20 +698,16 @@ const AsanaDetail = () => {
                 <label className="form-label" htmlFor="source">
                   Источник *
                 </label>
-                <select
-                  id="source"
+                <SearchableSelect
                   value={selectedSource}
                   onChange={handleSourceChange}
+                  options={sources}
+                  placeholder="Выберите источник"
+                  getOptionLabel={(source) => `${source.author} - ${source.title}`}
+                  getOptionValue={(source) => source.id}
                   className="form-select"
                   required
-                >
-                  <option value="">Выберите источник</option>
-                  {sources.map((source) => (
-                    <option key={source.id} value={source.id}>
-                      {source.author} - {source.title}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               {hasExistingPhoto && (

@@ -23,7 +23,7 @@ from app.ontology import (
 )
 from app.config import logger
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -852,7 +852,7 @@ async def import_asanas(
         logger.error(f"Error starting import task: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Ошибка при запуске импорта: {str(e)}")
 
-def run_import_full_task(task_id: str, tmp_path: str, user: str):
+def run_import_full_task(task_id: str, tmp_path: str, user: str, source_mapping: Optional[Dict[str, str]] = None):
     """Фоновая задача для полного импорта"""
     try:
         import_tasks[task_id]["status"] = "processing"
@@ -867,7 +867,7 @@ def run_import_full_task(task_id: str, tmp_path: str, user: str):
                 import_tasks[task_id]["progress"] = progress
                 logger.debug(f"Import progress: {progress}% ({current}/{total})")
         
-        result = import_full_from_excel(tmp_path, user=user, progress_callback=update_progress)
+        result = import_full_from_excel(tmp_path, user=user, progress_callback=update_progress, source_mapping=source_mapping)
         error_count = len(result.get('errors', []))
         
         import_tasks[task_id]["status"] = "completed"
@@ -889,15 +889,55 @@ def run_import_full_task(task_id: str, tmp_path: str, user: str):
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
+@app.post("/api/import/full/scan")
+async def scan_full_import(
+    file: UploadFile = File(...),
+    user: str = Depends(is_expert_or_admin)
+):
+    """Сканирует Excel файл и возвращает список источников для подтверждения"""
+    from app.excel_import import scan_sources_from_excel
+    
+    logger.info(f"Scanning full import file by user: {user}")
+    try:
+        # Сохраняем файл временно
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+        
+        # Сканируем источники
+        sources = scan_sources_from_excel(tmp_path)
+        
+        # Удаляем временный файл
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        
+        return {"sources": sources}
+    except Exception as e:
+        logger.error(f"Error scanning import file: {str(e)}", exc_info=True)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=400, detail=f"Ошибка при сканировании файла: {str(e)}")
+
 @app.post("/api/import/full")
 async def import_full(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    source_mapping: Optional[str] = Form(None),
     user: str = Depends(is_expert_or_admin)
 ):
     """Импорт асан и источников из Excel файла (полный импорт, асинхронно)"""
     logger.info(f"Starting async import of full data from Excel by user: {user}")
     try:
+        # Парсим source_mapping если есть
+        mapping = None
+        if source_mapping:
+            try:
+                mapping = json.loads(source_mapping)
+            except:
+                logger.warning(f"Failed to parse source_mapping: {source_mapping}")
+        
         # Сохраняем файл временно
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
@@ -915,7 +955,7 @@ async def import_full(
         }
         
         # Запускаем фоновую задачу
-        background_tasks.add_task(run_import_full_task, task_id, tmp_path, user)
+        background_tasks.add_task(run_import_full_task, task_id, tmp_path, user, mapping)
         
         return {
             "task_id": task_id,
@@ -1066,6 +1106,75 @@ async def get_moderation_items_count(user: str = Depends(is_expert_or_admin)):
     try:
         count = db.query(ModerationItem).filter(ModerationItem.resolved == False).count()
         return {"count": count}
+    finally:
+        db.close()
+
+@app.get("/api/moderation/items/export")
+async def export_moderation_items(
+    resolved: Optional[bool] = Query(None),
+    user: str = Depends(is_expert_or_admin)
+):
+    """Экспортировать записи модерации в Excel файл
+    
+    Args:
+        resolved: Если True - экспортировать только решённые, если False - только нерешённые, если None - только нерешённые (по умолчанию)
+    """
+    from app.excel_import import export_moderation_to_excel
+    
+    db = SessionLocal()
+    try:
+        query = db.query(ModerationItem)
+        # Всегда экспортируем только нерешённые записи
+        query = query.filter(ModerationItem.resolved == False)
+        
+        # Сортировка по времени создания (новые сначала)
+        items = query.order_by(ModerationItem.created_at.desc()).all()
+        
+        # Преобразуем в список словарей
+        items_list = []
+        for item in items:
+            import_data = None
+            if item.import_data:
+                try:
+                    import_data = json.loads(item.import_data)
+                except:
+                    pass
+            
+            items_list.append({
+                "id": item.id,
+                "asana_name": item.asana_name,
+                "source_id": item.source_id,
+                "error_message": item.error_message,
+                "row_number": item.row_number,
+                "import_data": import_data,
+                "created_at": item.created_at,
+                "resolved": item.resolved,
+                "resolved_by": item.resolved_by,
+                "resolved_at": item.resolved_at,
+                "moderation_type": item.moderation_type,
+                "object_type": item.object_type,
+                "suggested_name_ru": item.suggested_name_ru,
+                "suggested_name_sanskrit": item.suggested_name_sanskrit,
+                "suggested_transliteration": item.suggested_transliteration,
+                "suggested_definition": item.suggested_definition,
+                "existing_name_id": item.existing_name_id,
+                "existing_name_ru": item.existing_name_ru
+            })
+        
+        # Экспортируем в Excel
+        excel_stream = export_moderation_to_excel(items_list)
+        
+        # Возвращаем файл
+        from datetime import datetime
+        filename = f"moderation_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return StreamingResponse(
+            excel_stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
     finally:
         db.close()
 

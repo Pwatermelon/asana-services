@@ -8,7 +8,10 @@ from datetime import datetime
 from io import BytesIO
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
+from openpyxl.drawing.image import Image
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 from app.config import logger, SQLALCHEMY_DATABASE_URL
 from app.models import ModerationItem
@@ -690,7 +693,52 @@ def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str]
     }
 
 
-def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_callback: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
+def scan_sources_from_excel(file_path: str) -> List[Dict[str, Any]]:
+    """
+    Сканирует Excel файл и возвращает список уникальных источников из файла.
+    Используется для предварительного просмотра перед импортом.
+    
+    Returns:
+        List[Dict]: Список словарей с данными источников и информацией о том, существуют ли они
+    """
+    rows = parse_excel_file(file_path)
+    sources_found = {}  # {(title, author, year): source_data}
+    
+    for row in rows:
+        normalized = normalize_column_names(row)
+        
+        if has_source_data(normalized):
+            source_data = {
+                "title": normalized.get('source_title', 'Неизвестный источник'),
+                "author": normalized.get('source_author', ''),
+                "year": int(normalized.get('source_year', 0)) if normalized.get('source_year') else 0,
+            }
+            
+            if normalized.get('source_publisher'):
+                source_data["publisher"] = normalized['source_publisher']
+            if normalized.get('source_pages'):
+                source_data["pages"] = int(normalized['source_pages'])
+            if normalized.get('source_annotation'):
+                source_data["annotation"] = normalized['source_annotation']
+            
+            # Используем ключ для уникальности
+            cache_key = (
+                source_data.get('title', '').strip().lower(),
+                source_data.get('author', '').strip().lower(),
+                source_data.get('year', 0)
+            )
+            
+            if cache_key not in sources_found:
+                # Проверяем, существует ли уже такой источник
+                existing_source_id = find_existing_source(source_data)
+                source_data['exists'] = existing_source_id is not None
+                source_data['existing_id'] = existing_source_id
+                sources_found[cache_key] = source_data
+    
+    return list(sources_found.values())
+
+
+def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_callback: Optional[Callable[[int, int], None]] = None, source_mapping: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Импортирует асаны и источники из Excel файла.
     Если в строке есть данные источника, создается новый источник.
@@ -700,6 +748,8 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
         file_path: Путь к Excel файлу
         user: Имя пользователя
         progress_callback: Функция для обновления прогресса (current, total)
+        source_mapping: Словарь для маппинга новых источников на существующие.
+                       Ключ - строка вида "title|author|year", значение - ID существующего источника
     """
     rows = parse_excel_file(file_path)
     total_rows = len(rows)
@@ -749,10 +799,24 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
                         current_source_id = existing_source_id
                         source_cache[cache_key] = current_source_id  # Сохраняем в кеш
                     else:
-                        # Создаем новый источник
-                        current_source_id = add_source(source_data, check_existing=False)
-                        source_cache[cache_key] = current_source_id  # Сохраняем в кеш
-                        imported_sources += 1
+                        # Проверяем маппинг источников
+                        source_key = f"{source_data.get('title', '')}|{source_data.get('author', '')}|{source_data.get('year', 0)}"
+                        if source_mapping and source_key in source_mapping:
+                            mapping_value = source_mapping[source_key]
+                            # Если значение 'new', создаем новый источник
+                            if mapping_value == 'new':
+                                current_source_id = add_source(source_data, check_existing=False)
+                                source_cache[cache_key] = current_source_id
+                                imported_sources += 1
+                            else:
+                                # Используем существующий источник из маппинга (ID источника)
+                                current_source_id = mapping_value
+                                source_cache[cache_key] = current_source_id
+                        else:
+                            # Создаем новый источник (если маппинга нет или ключа нет в маппинге)
+                            current_source_id = add_source(source_data, check_existing=False)
+                            source_cache[cache_key] = current_source_id  # Сохраняем в кеш
+                            imported_sources += 1
             
             # Если нет текущего источника, пропускаем
             if not current_source_id:
@@ -1063,4 +1127,132 @@ def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) ->
         "skipped": skipped,
         "errors": errors
     }
+
+
+def export_moderation_to_excel(items: List[Dict[str, Any]]) -> BytesIO:
+    """
+    Экспортирует записи модерации в Excel файл в том же формате, что и при импорте.
+    Изображения вставляются как картинки в Excel.
+    
+    Args:
+        items: Список записей модерации с полями:
+            - row_number: номер строки
+            - import_data: словарь с данными импорта (может содержать photo, photo_base64, photo_url)
+            - asana_name: название асаны
+            - error_message: сообщение об ошибке
+            - и другие поля
+    
+    Returns:
+        BytesIO: поток с Excel файлом
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Модерация"
+    
+    # Определяем колонки на основе данных импорта
+    # Используем только те поля, которые реально используются при импорте асан
+    columns = [
+        'название',  # name_ru
+        'фото',  # photo (будет изображение)
+        'название источника',  # source_title
+        'автор',  # source_author
+        'год',  # source_year
+        'издательство',  # source_publisher
+        'страницы',  # source_pages
+        'аннотация',  # source_annotation
+    ]
+    
+    # Заголовки
+    for col_idx, col_name in enumerate(columns, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = Font(bold=True)
+    
+    # Заполняем данные
+    for item_idx, item in enumerate(items, start=2):
+        import_data = item.get('import_data', {}) or {}
+        
+        # Название асаны
+        ws.cell(row=item_idx, column=1, value=item.get('asana_name') or import_data.get('name_ru', ''))
+        
+        # Фото - вставляем как изображение
+        photo_col = 2
+        photo_data = None
+        
+        # Пробуем получить фото из разных источников
+        if import_data.get('photo_base64'):
+            photo_data = import_data['photo_base64']
+        elif import_data.get('photo'):
+            photo_data = import_data['photo']
+        elif import_data.get('photo_url'):
+            # Если это URL, пропускаем (не загружаем из интернета при экспорте)
+            # Можно было бы загрузить, но это может быть медленно и требует requests
+            photo_data = None
+        
+        # Вставляем изображение в Excel
+        if photo_data:
+            try:
+                # Декодируем base64
+                if isinstance(photo_data, str):
+                    # Убираем префикс data: если есть
+                    if photo_data.startswith('data:'):
+                        photo_data = photo_data.split(',', 1)[1]
+                    
+                    # Декодируем base64
+                    try:
+                        img_bytes = base64.b64decode(photo_data)
+                    except Exception:
+                        # Если не base64, пробуем как URL или путь
+                        img_bytes = None
+                else:
+                    img_bytes = photo_data
+                
+                if img_bytes:
+                    # Создаем временный файл изображения
+                    img_io = BytesIO(img_bytes)
+                    
+                    # Создаем объект Image
+                    img = Image(img_io)
+                    
+                    # Устанавливаем размер (опционально, можно настроить)
+                    img.width = 200
+                    img.height = 200
+                    
+                    # Вставляем изображение в ячейку
+                    cell_ref = ws.cell(row=item_idx, column=photo_col).coordinate
+                    ws.add_image(img, cell_ref)
+                    
+                    # Увеличиваем высоту строки для изображения
+                    ws.row_dimensions[item_idx].height = 150
+            except Exception as e:
+                logger.warning(f"Не удалось вставить изображение в строку {item_idx}: {e}")
+        
+        # Данные источника
+        ws.cell(row=item_idx, column=3, value=import_data.get('source_title', ''))
+        ws.cell(row=item_idx, column=4, value=import_data.get('source_author', ''))
+        ws.cell(row=item_idx, column=5, value=import_data.get('source_year', ''))
+        ws.cell(row=item_idx, column=6, value=import_data.get('source_publisher', ''))
+        ws.cell(row=item_idx, column=7, value=import_data.get('source_pages', ''))
+        ws.cell(row=item_idx, column=8, value=import_data.get('source_annotation', ''))
+    
+    # Настраиваем ширину колонок
+    column_widths = {
+        1: 30,  # название
+        2: 25,  # фото
+        3: 30,  # название источника
+        4: 25,  # автор
+        5: 10,  # год
+        6: 25,  # издательство
+        7: 15,  # страницы
+        8: 40,  # аннотация
+    }
+    
+    for col_idx, width in column_widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    
+    # Сохраняем в BytesIO
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return output
 

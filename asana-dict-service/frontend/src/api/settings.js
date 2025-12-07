@@ -39,9 +39,25 @@ export const settingsAPI = {
     return response.data;
   },
 
-  importFull: async (file) => {
+  scanFullImport: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
+    
+    const response = await apiClient.post('/api/import/full/scan', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  importFull: async (file, sourceMapping = null) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    // Всегда передаем маппинг, если он передан (может содержать 'new' для создания новых источников)
+    if (sourceMapping) {
+      formData.append('source_mapping', JSON.stringify(sourceMapping));
+    }
     
     const response = await apiClient.post('/api/import/full', formData, {
       headers: {

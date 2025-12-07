@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { sourcesAPI } from '../api/sources';
 import { contentAPI } from '../api/content';
+import SearchableSelect from '../components/SearchableSelect';
 import '../styles/AddAsana.css';
 
 const AddAsana = () => {
@@ -211,21 +212,18 @@ const AddAsana = () => {
                 <label htmlFor="selected_name" className="form-label">
                   Выберите название:
                 </label>
-                <select
-                  id="selected_name"
+                <SearchableSelect
                   value={selectedName}
-                  onChange={(e) => setSelectedName(e.target.value)}
-                  className="form-select"
+                  onChange={setSelectedName}
+                  options={names}
+                  placeholder="-- Выберите название --"
+                  getOptionLabel={(name) => 
+                    name.name_ru + (name.name_sanskrit ? ` (${name.name_sanskrit})` : '')
+                  }
+                  getOptionValue={(name) => name.id}
                   required
-                >
-                  <option value="">-- Выберите название --</option>
-                  {names.map((name) => (
-                    <option key={name.id} value={name.id}>
-                      {name.name_ru}
-                      {name.name_sanskrit && ` (${name.name_sanskrit})`}
-                    </option>
-                  ))}
-                </select>
+                  className="form-select"
+                />
               </div>
             ) : (
               <>
@@ -323,20 +321,16 @@ const AddAsana = () => {
                 <label htmlFor="selected_source" className="form-label">
                   Выберите источник:
                 </label>
-                <select
-                  id="selected_source"
+                <SearchableSelect
                   value={selectedSource}
-                  onChange={(e) => setSelectedSource(e.target.value)}
-                  className="form-select"
+                  onChange={setSelectedSource}
+                  options={sources}
+                  placeholder="-- Выберите источник --"
+                  getOptionLabel={(source) => `${source.author} - ${source.title}`}
+                  getOptionValue={(source) => source.id}
                   required
-                >
-                  <option value="">-- Выберите источник --</option>
-                  {sources.map((source) => (
-                    <option key={source.id} value={source.id}>
-                      {source.author} - {source.title}
-                    </option>
-                  ))}
-                </select>
+                  className="form-select"
+                />
               </div>
             ) : (
               <>

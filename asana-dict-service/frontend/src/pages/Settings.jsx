@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { settingsAPI } from '../api/settings';
 import { sourcesAPI } from '../api/sources';
+import SearchableSelect from '../components/SearchableSelect';
 import '../styles/Settings.css';
 
 const Settings = () => {
@@ -21,12 +22,16 @@ const Settings = () => {
   const [importTaskId, setImportTaskId] = useState(null);
   const [importProgress, setImportProgress] = useState(0);
   const [importStatus, setImportStatus] = useState(null);
+  const [showSourceModal, setShowSourceModal] = useState(false);
+  const [scannedSources, setScannedSources] = useState([]);
+  const [sourceMapping, setSourceMapping] = useState({});
+  const [pendingFile, setPendingFile] = useState(null);
 
   useEffect(() => {
-    if (importMode === 'asanas') {
+    if (importMode === 'asanas' || showSourceModal) {
       loadSources();
     }
-  }, [importMode]);
+  }, [importMode, showSourceModal]);
 
   const loadSources = async () => {
     try {
@@ -86,6 +91,46 @@ const Settings = () => {
       return;
     }
 
+    // Для полного импорта сначала сканируем файл
+    if (importMode === 'full') {
+      try {
+        setImporting(true);
+        setError('');
+        const scanResult = await settingsAPI.scanFullImport(selectedFile);
+        const newSources = scanResult.sources || [];
+        
+        // Фильтруем только новые источники (которые не существуют)
+        const newSourcesOnly = newSources.filter(s => !s.exists);
+        
+        if (newSourcesOnly.length > 0) {
+          // Есть новые источники - показываем модальное окно
+          // Инициализируем маппинг: по умолчанию все источники = 'new'
+          const initialMapping = {};
+          newSourcesOnly.forEach(source => {
+            const key = `${source.title}|${source.author}|${source.year}`;
+            initialMapping[key] = 'new';
+          });
+          
+          setScannedSources(newSourcesOnly);
+          setPendingFile(selectedFile);
+          setSourceMapping(initialMapping);
+          setShowSourceModal(true);
+          setImporting(false);
+          return;
+        }
+        // Нет новых источников - продолжаем импорт
+      } catch (error) {
+        setError(error.response?.data?.detail || 'Ошибка при сканировании файла');
+        setImporting(false);
+        return;
+      }
+    }
+
+    // Продолжаем импорт
+    await startImport(selectedFile);
+  };
+
+  const startImport = async (file, mapping = null) => {
     setImporting(true);
     setError('');
     setSuccess('');
@@ -95,9 +140,11 @@ const Settings = () => {
     try {
       let result;
       if (importMode === 'asanas') {
-        result = await settingsAPI.importAsanas(selectedFile, selectedSource);
+        result = await settingsAPI.importAsanas(file, selectedSource);
       } else {
-        result = await settingsAPI.importFull(selectedFile);
+        // Используем переданный маппинг (может содержать 'new' для создания новых источников)
+        // Всегда передаем маппинг, даже если он пустой (null будет передан если маппинга нет вообще)
+        result = await settingsAPI.importFull(file, mapping);
       }
       
       // Получаем task_id из ответа
@@ -123,6 +170,54 @@ const Settings = () => {
       setError(error.response?.data?.detail || 'Ошибка при импорте файла');
       setImporting(false);
     }
+  };
+
+  const handleConfirmSources = async () => {
+    try {
+      // Очищаем только промежуточные значения 'select' и пустые строки из маппинга
+      // Значение 'new' должно остаться, так как оно означает "создать новый источник"
+      const cleanMapping = {};
+      Object.keys(sourceMapping).forEach(key => {
+        const value = sourceMapping[key];
+        // Сохраняем 'new' и валидные ID источников, удаляем только 'select' и пустые строки
+        if (value && value !== 'select' && value !== '') {
+          cleanMapping[key] = value;
+        }
+      });
+      
+      // Закрываем модальное окно сразу
+      setShowSourceModal(false);
+      
+      // Сохраняем данные перед очисткой
+      const fileToImport = pendingFile;
+      // Всегда передаем маппинг, даже если он содержит только 'new'
+      const mappingToUse = cleanMapping;
+      
+      // Очищаем состояние
+      setPendingFile(null);
+      setScannedSources([]);
+      setSourceMapping({});
+      
+      // Запускаем импорт
+      if (fileToImport) {
+        await startImport(fileToImport, mappingToUse);
+      } else {
+        setError('Ошибка: файл не найден');
+        setImporting(false);
+      }
+    } catch (error) {
+      console.error('Error in handleConfirmSources:', error);
+      setError('Ошибка при запуске импорта: ' + (error.message || 'Неизвестная ошибка'));
+      setImporting(false);
+    }
+  };
+
+  const handleCancelSources = () => {
+    setShowSourceModal(false);
+    setPendingFile(null);
+    setScannedSources([]);
+    setSourceMapping({});
+    setImporting(false);
   };
 
   const pollImportStatus = async (taskId) => {
@@ -290,19 +385,15 @@ const Settings = () => {
               <label htmlFor="source-select" className="form-label">
                 Выберите источник
               </label>
-              <select
-                id="source-select"
-                className="form-select"
+              <SearchableSelect
                 value={selectedSource}
-                onChange={(e) => setSelectedSource(e.target.value)}
-              >
-                <option value="">Выберите источник...</option>
-                {sources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {source.title || source.author || source.id}
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedSource}
+                options={sources}
+                placeholder="Выберите источник..."
+                getOptionLabel={(source) => source.title || source.author || source.id}
+                getOptionValue={(source) => source.id}
+                className="form-select"
+              />
             </div>
           )}
 
@@ -408,6 +499,183 @@ const Settings = () => {
           </div>
         )}
       </div>
+
+      {/* Модальное окно для выбора источников */}
+      {showSourceModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              handleCancelSources();
+            }
+          }}
+        >
+          <div 
+            style={{
+              backgroundColor: 'white',
+              padding: '2em',
+              borderRadius: '10px',
+              maxWidth: '600px',
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              position: 'relative',
+              zIndex: 1001
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ marginTop: 0 }}>Обнаружены новые источники</h2>
+            <p style={{ color: '#666', marginBottom: '1.5em' }}>
+              В файле найдены источники, которых нет в системе. Выберите действие для каждого:
+            </p>
+            
+            {scannedSources.map((source, index) => {
+              const sourceKey = `${source.title}|${source.author}|${source.year}`;
+              const currentMapping = sourceMapping[sourceKey];
+              const isCreatingNew = !currentMapping || currentMapping === 'new';
+              const isSelectingExisting = currentMapping && currentMapping !== 'new';
+              
+              return (
+                <div key={index} style={{
+                  marginBottom: '1.5em',
+                  padding: '1em',
+                  border: '1px solid #ddd',
+                  borderRadius: '8px'
+                }}>
+                  <div style={{ marginBottom: '0.5em' }}>
+                    <strong>{source.title}</strong>
+                    {source.author && <div>Автор: {source.author}</div>}
+                    {source.year && <div>Год: {source.year}</div>}
+                  </div>
+                  
+                  <div style={{ marginTop: '0.5em' }}>
+                    <label 
+                      style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5em', cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSourceMapping({
+                          ...sourceMapping,
+                          [sourceKey]: 'new'
+                        });
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name={`source-${index}`}
+                        checked={isCreatingNew}
+                        onChange={() => {
+                          setSourceMapping({
+                            ...sourceMapping,
+                            [sourceKey]: 'new'
+                          });
+                        }}
+                        style={{ marginRight: '0.5em', cursor: 'pointer' }}
+                      />
+                      Создать новый источник
+                    </label>
+                    
+                    <label 
+                      style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5em', cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isSelectingExisting) {
+                          setSourceMapping({
+                            ...sourceMapping,
+                            [sourceKey]: 'select'
+                          });
+                        }
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name={`source-${index}`}
+                        checked={isSelectingExisting}
+                        onChange={() => {
+                          setSourceMapping({
+                            ...sourceMapping,
+                            [sourceKey]: currentMapping && currentMapping !== 'new' ? currentMapping : 'select'
+                          });
+                        }}
+                        style={{ marginRight: '0.5em', cursor: 'pointer' }}
+                      />
+                      Выбрать существующий источник
+                    </label>
+                    
+                    {isSelectingExisting && (
+                      <div style={{ marginLeft: '1.5em', marginTop: '0.5em', width: 'calc(100% - 2em)' }}>
+                        <SearchableSelect
+                          value={currentMapping === 'select' ? '' : currentMapping}
+                          onChange={(value) => {
+                            setSourceMapping({
+                              ...sourceMapping,
+                              [sourceKey]: value
+                            });
+                          }}
+                          options={sources}
+                          placeholder="Выберите источник..."
+                          getOptionLabel={(s) => `${s.author} - ${s.title}${s.year ? ` (${s.year})` : ''}`}
+                          getOptionValue={(s) => s.id}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            
+            <div style={{ display: 'flex', gap: '1em', marginTop: '2em', justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                onClick={handleCancelSources}
+              >
+                Отмена
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!e.currentTarget.disabled) {
+                    handleConfirmSources();
+                  }
+                }}
+                disabled={scannedSources.length === 0 || scannedSources.some(source => {
+                  const key = `${source.title}|${source.author}|${source.year}`;
+                  const mapping = sourceMapping[key];
+                  
+                  // Кнопка disabled если:
+                  // 1. Нет выбора (mapping пустое или undefined)
+                  if (!mapping) return true;
+                  
+                  // 2. "Создать новый" - OK
+                  if (mapping === 'new') return false;
+                  
+                  // 3. Выбрано "Выбрать существующий" но не выбран конкретный источник (mapping === 'select' или пустая строка)
+                  if (mapping === 'select' || mapping === '') return true;
+                  
+                  // 4. Проверяем, что выбранный источник существует
+                  const sourceExists = sources.find(s => s.id === mapping);
+                  return !sourceExists;
+                })}
+              >
+                Продолжить импорт
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
