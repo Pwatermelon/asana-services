@@ -13,6 +13,7 @@ MERGED from [androidx.navigation:navigation-runtime:2.7.5] C:\Users\Zhuk2\.gradl
 MERGED from [androidx.navigation:navigation-common-ktx:2.7.5] C:\Users\Zhuk2\.gradle\caches\transforms-4\726bef03bd54a7dc538794bf3ec3b46c\transformed\navigation-common-ktx-2.7.5\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.navigation:navigation-runtime-ktx:2.7.5] C:\Users\Zhuk2\.gradle\caches\transforms-4\9e9431afb38659e88e3ae28c6d9244ee\transformed\navigation-runtime-ktx-2.7.5\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.navigation:navigation-compose:2.7.5] C:\Users\Zhuk2\.gradle\caches\transforms-4\2bce1fdf89405a43399c45b9b4544e12\transformed\jetified-navigation-compose-2.7.5\AndroidManifest.xml:2:1-7:12
+MERGED from [com.google.accompanist:accompanist-permissions:0.32.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\a5f33f288d0af5f089c5326bba8198a1\transformed\jetified-accompanist-permissions-0.32.0\AndroidManifest.xml:17:1-23:12
 MERGED from [io.coil-kt:coil-compose:2.5.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\cb2ff1395f26246e81fcd563046a18fa\transformed\jetified-coil-compose-2.5.0\AndroidManifest.xml:2:1-7:12
 MERGED from [io.coil-kt:coil-compose-base:2.5.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\ab74fb4fb556a751d0de7e316ba43aeb\transformed\jetified-coil-compose-base-2.5.0\AndroidManifest.xml:2:1-7:12
 MERGED from [com.google.accompanist:accompanist-placeholder-material:0.32.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\90fe7f915a7f8f0e5dc84d61761c92de\transformed\jetified-accompanist-placeholder-material-0.32.0\AndroidManifest.xml:17:1-23:12
@@ -185,6 +186,8 @@ MERGED from [androidx.navigation:navigation-runtime-ktx:2.7.5] C:\Users\Zhuk2\.g
 MERGED from [androidx.navigation:navigation-runtime-ktx:2.7.5] C:\Users\Zhuk2\.gradle\caches\transforms-4\9e9431afb38659e88e3ae28c6d9244ee\transformed\navigation-runtime-ktx-2.7.5\AndroidManifest.xml:5:5-44
 MERGED from [androidx.navigation:navigation-compose:2.7.5] C:\Users\Zhuk2\.gradle\caches\transforms-4\2bce1fdf89405a43399c45b9b4544e12\transformed\jetified-navigation-compose-2.7.5\AndroidManifest.xml:5:5-44
 MERGED from [androidx.navigation:navigation-compose:2.7.5] C:\Users\Zhuk2\.gradle\caches\transforms-4\2bce1fdf89405a43399c45b9b4544e12\transformed\jetified-navigation-compose-2.7.5\AndroidManifest.xml:5:5-44
+MERGED from [com.google.accompanist:accompanist-permissions:0.32.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\a5f33f288d0af5f089c5326bba8198a1\transformed\jetified-accompanist-permissions-0.32.0\AndroidManifest.xml:21:5-44
+MERGED from [com.google.accompanist:accompanist-permissions:0.32.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\a5f33f288d0af5f089c5326bba8198a1\transformed\jetified-accompanist-permissions-0.32.0\AndroidManifest.xml:21:5-44
 MERGED from [io.coil-kt:coil-compose:2.5.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\cb2ff1395f26246e81fcd563046a18fa\transformed\jetified-coil-compose-2.5.0\AndroidManifest.xml:5:5-44
 MERGED from [io.coil-kt:coil-compose:2.5.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\cb2ff1395f26246e81fcd563046a18fa\transformed\jetified-coil-compose-2.5.0\AndroidManifest.xml:5:5-44
 MERGED from [io.coil-kt:coil-compose-base:2.5.0] C:\Users\Zhuk2\.gradle\caches\transforms-4\ab74fb4fb556a751d0de7e316ba43aeb\transformed\jetified-coil-compose-base-2.5.0\AndroidManifest.xml:5:5-44

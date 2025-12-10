@@ -138,6 +138,7 @@ fun AsanaDetailScreen(
                         asana = asana,
                         allAsanas = allAsanas,
                         similarAsanas = similarAsanas,
+                        similarAsanasMap = similarAsanasMap,
                         isExpertOrAdmin = isExpertOrAdmin,
                         onMatchClick = { showMatchDialog = true },
                         onRemoveSimilar = { targetId ->
@@ -308,6 +309,7 @@ fun AsanaDetailContent(
     asana: Asana,
     allAsanas: List<Asana>,
     similarAsanas: List<Asana>,
+    similarAsanasMap: Map<String, List<Asana>> = emptyMap(),
     isExpertOrAdmin: Boolean,
     onMatchClick: () -> Unit,
     onRemoveSimilar: (String) -> Unit,
@@ -515,7 +517,7 @@ fun AsanaDetailContent(
                 
                 // Разделитель между асанами
                 if (currentAsana.id != asanasWithSameName.last().id) {
-                    HorizontalDivider(
+                    Divider(
                         modifier = Modifier.padding(vertical = 16.dp),
                         thickness = 2.dp,
                         color = MaterialTheme.colorScheme.outlineVariant

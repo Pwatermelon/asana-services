@@ -7,14 +7,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.yoga.dict.ui.viewmodel.ContentViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpertInstructionsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    viewModel: ContentViewModel = hiltViewModel()
 ) {
+    val content by viewModel.expertInstructions.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    
+    LaunchedEffect(Unit) {
+        viewModel.loadExpertInstructions()
+    }
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -27,24 +40,43 @@ fun ExpertInstructionsScreen(
             )
         }
     ) { paddingValues ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "Инструкции для экспертов",
-                style = MaterialTheme.typography.headlineMedium
-            )
-            
-            Text(
-                text = "Инструкции будут загружены с сервера",
-                style = MaterialTheme.typography.bodyMedium
-            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (error != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                text = error ?: "Ошибка загрузки",
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = content.ifEmpty { "Инструкции для экспертов отсутствуют" },
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
         }
     }
 }
-

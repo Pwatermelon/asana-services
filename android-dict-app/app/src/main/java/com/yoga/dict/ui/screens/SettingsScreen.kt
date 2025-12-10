@@ -91,6 +91,38 @@ fun SettingsScreen(
                     )
                 }
                 
+                if (isAdmin) {
+                    Divider()
+                    
+                    Text(
+                        text = "Администрирование",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    ListItem(
+                        headlineContent = { Text("Импорт данных") },
+                        supportingContent = { Text("Импорт асан из Excel") },
+                        leadingContent = { Icon(Icons.Default.Upload, null) },
+                        modifier = Modifier.clickable { /* TODO: Импорт */ }
+                    )
+                    
+                    ListItem(
+                        headlineContent = { Text("Экспорт данных") },
+                        supportingContent = { Text("Экспорт данных в Excel") },
+                        leadingContent = { Icon(Icons.Default.Download, null) },
+                        modifier = Modifier.clickable { /* TODO: Экспорт */ }
+                    )
+                    
+                    ListItem(
+                        headlineContent = { Text("Управление онтологией") },
+                        supportingContent = { Text("Загрузка/скачивание онтологии") },
+                        leadingContent = { Icon(Icons.Default.Storage, null) },
+                        modifier = Modifier.clickable { /* TODO: Онтология */ }
+                    )
+                }
+                
                 Divider()
                 
                 ListItem(

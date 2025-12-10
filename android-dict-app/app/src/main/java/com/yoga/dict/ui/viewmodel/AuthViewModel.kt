@@ -120,6 +120,8 @@ class AuthViewModel @Inject constructor(
             authRepository.login(username, password, rememberMe)
                 .onSuccess { token ->
                     authPreferences.saveToken(token)
+                    // Небольшая задержка, чтобы DataStore успел обновиться
+                    kotlinx.coroutines.delay(200)
                     checkAuth()
                 }
                 .onFailure { error ->

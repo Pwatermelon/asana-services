@@ -20,10 +20,16 @@ import dagger.hilt.processor.internal.definecomponent.codegen._dagger_hilt_compo
 import hilt_aggregated_deps._com_yoga_dict_MainActivity_GeneratedInjector;
 import hilt_aggregated_deps._com_yoga_dict_YogaDictApplication_GeneratedInjector;
 import hilt_aggregated_deps._com_yoga_dict_data_api_NetworkModule;
+import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_AsanaManagementViewModel_HiltModules_BindsModule;
+import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_AsanaManagementViewModel_HiltModules_KeyModule;
 import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_AsanaViewModel_HiltModules_BindsModule;
 import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_AsanaViewModel_HiltModules_KeyModule;
 import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_AuthViewModel_HiltModules_BindsModule;
 import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_AuthViewModel_HiltModules_KeyModule;
+import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_ContentViewModel_HiltModules_BindsModule;
+import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_ContentViewModel_HiltModules_KeyModule;
+import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_ModerationViewModel_HiltModules_BindsModule;
+import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_ModerationViewModel_HiltModules_KeyModule;
 import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_SourcesViewModel_HiltModules_BindsModule;
 import hilt_aggregated_deps._com_yoga_dict_ui_viewmodel_SourcesViewModel_HiltModules_KeyModule;
 import hilt_aggregated_deps._dagger_hilt_android_flags_FragmentGetContextFix_FragmentGetContextFixEntryPoint;
@@ -68,10 +74,16 @@ import hilt_aggregated_deps._dagger_hilt_android_internal_modules_HiltWrapper_Ac
         _com_yoga_dict_MainActivity_GeneratedInjector.class,
         _com_yoga_dict_YogaDictApplication_GeneratedInjector.class,
         _com_yoga_dict_data_api_NetworkModule.class,
+        _com_yoga_dict_ui_viewmodel_AsanaManagementViewModel_HiltModules_BindsModule.class,
+        _com_yoga_dict_ui_viewmodel_AsanaManagementViewModel_HiltModules_KeyModule.class,
         _com_yoga_dict_ui_viewmodel_AsanaViewModel_HiltModules_BindsModule.class,
         _com_yoga_dict_ui_viewmodel_AsanaViewModel_HiltModules_KeyModule.class,
         _com_yoga_dict_ui_viewmodel_AuthViewModel_HiltModules_BindsModule.class,
         _com_yoga_dict_ui_viewmodel_AuthViewModel_HiltModules_KeyModule.class,
+        _com_yoga_dict_ui_viewmodel_ContentViewModel_HiltModules_BindsModule.class,
+        _com_yoga_dict_ui_viewmodel_ContentViewModel_HiltModules_KeyModule.class,
+        _com_yoga_dict_ui_viewmodel_ModerationViewModel_HiltModules_BindsModule.class,
+        _com_yoga_dict_ui_viewmodel_ModerationViewModel_HiltModules_KeyModule.class,
         _com_yoga_dict_ui_viewmodel_SourcesViewModel_HiltModules_BindsModule.class,
         _com_yoga_dict_ui_viewmodel_SourcesViewModel_HiltModules_KeyModule.class,
         _dagger_hilt_android_flags_FragmentGetContextFix_FragmentGetContextFixEntryPoint.class,

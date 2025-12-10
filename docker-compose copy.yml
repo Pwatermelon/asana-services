@@ -1,0 +1,213 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # Основной сервис (asana-server-module)
+  # ============================================
+  server-module:
+    image: plwatermelon/server-module:1.0.2-beta
+    container_name: server-module
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+    environment:
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-asana_db}
+      - DB_USER=${DB_USER:-asana_user}
+      - DB_PASSWORD=${DB_PASSWORD:-asana_password}
+      - HOST_SERVER=${HOST_SERVER:-0.0.0.0}
+      - PORT_SERVER=8000
+      - SECRET_KEY=${SECRET_KEY}
+      - HOST_NETWORK_SERVER=${URL_NETWORK_SERVER}
+      - SMTP_SERVER=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - HOST_MINIO=${HOST_MINIO:-minio}
+      - PORT_MINIO=${PORT_MINIO:-9000}
+      - USER_MINIO=${USER_MINIO:-minioadmin}
+      - PASSWORD_MINIO=${PASSWORD_MINIO:-minioadmin}
+      - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - asana-network
+
+  # ============================================
+  # Сервис каталога асан (asana-dict-service)
+  # ============================================
+  asana-backend:
+    image: plwatermelon/asana-backend:1.0.2-beta
+    container_name: asana-backend
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://katalog-asan.online/images}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}  
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - EXPERT_USERNAME=${EXPERT_USERNAME:-expert}
+      - EXPERT_PASSWORD=${EXPERT_PASSWORD:-expert123}
+      - USER_MINIO=${USER_MINIO:-minioadmin}
+      - PASSWORD_MINIO=${PASSWORD_MINIO:-minioadmin}
+      - POSTGRES_HOST=${DB_HOST:-postgres}
+      - POSTGRES_PORT=${DB_PORT:-5432}
+      - POSTGRES_DB=${DB_NAME:-asana_db}
+      - POSTGRES_USER=${DB_USER:-asana_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-asana_password}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /app/ontology_updated.owl:/app/ontology_updated.owl
+    networks:
+      - asana-network
+
+  asana-frontend:
+    image: plwatermelon/asana-frontend:1.0.2-beta
+    container_name: asana-frontend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - asana-backend
+      - server-module
+    networks:
+      - asana-network
+
+  # # ============================================
+  # # Сервис с нейронкой (asana-network-service)
+  # # ============================================
+  # server-network:
+  #   build: 
+  #     context: ./asana-network-service
+  #     dockerfile: Dockerfile
+  #   image: server-network
+  #   container_name: server-network
+  #   ports:
+  #     - "8002:8001"
+  #   restart: "always"
+  #   environment:
+  #     - HOST_SERVER=${HOST_NETWORK_SERVER}
+  #     - PORT_SERVER=${PORT_NETWORK_SERVER}
+  
+  # ============================================
+  # База данных PostgreSQL (общая для всех сервисов)
+  # ============================================
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-asana_db}
+      POSTGRES_USER: ${DB_USER:-asana_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-asana_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - asana-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-asana_user} -d ${DB_NAME:-asana_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # MINIO S3 хранилище
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - asana-network
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Init контейнер для настройки MinIO bucket policy
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin} 2>/dev/null; do
+          echo 'Waiting for MinIO to be ready...'
+          sleep 2
+        done
+        mc mb local/images --ignore-existing || true
+        mc anonymous set public local/images || true
+        echo 'MinIO bucket policy configured successfully'
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    networks:
+      - asana-network
+
+  # ============================================
+  # Certbot для получения SSL сертификатов
+  # ============================================
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - asana-network
+
+  # ============================================
+  # Nginx для проксирования с SSL
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /app/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - asana-frontend
+      - server-module
+      - certbot
+    networks:
+      - asana-network
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  minio_data:
+
+networks:
+  asana-network:
+    driver: bridge
+

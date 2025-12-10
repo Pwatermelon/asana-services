@@ -13,6 +13,7 @@ data class Asana(
 
 @Parcelize
 data class AsanaName(
+    val id: String? = null,
     val name_ru: String,
     val name_sanskrit: String? = null,
     val transliteration: String? = null,

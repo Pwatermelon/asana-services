@@ -142,6 +142,21 @@ class AsanaViewModel @Inject constructor(
         }
     }
     
+    fun loadAsanasBySource(sourceId: String) {
+        viewModelScope.launch {
+            _uiState.value = AsanaUiState.Loading
+            repository.getAsanasBySource(sourceId)
+                .onSuccess { asanas ->
+                    _asanaList.value = asanas
+                    groupAsanasByName(asanas)
+                    _uiState.value = AsanaUiState.Success(asanas)
+                }
+                .onFailure { error ->
+                    _uiState.value = AsanaUiState.Error(error.message ?: "Unknown error")
+                }
+        }
+    }
+    
     fun clearFilters() {
         _searchQuery.value = ""
         _selectedLetter.value = null

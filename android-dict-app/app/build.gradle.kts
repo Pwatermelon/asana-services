@@ -23,10 +23,9 @@ android {
         }
 
         // API Base URL
-        // Для Android эмулятора используйте: http://10.0.2.2:80
-        // Для реального устройства используйте: http://ВАШ_IP_КОМПЬЮТЕРА:80
-        // Чтобы узнать IP компьютера: ipconfig (Windows) или ifconfig (Linux/Mac)
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:80\"")
+        // Производственный сервер: https://katalog-asan.online
+        // Для локальной разработки используйте: http://10.0.2.2:80 (эмулятор) или http://ВАШ_IP:80 (реальное устройство)
+        buildConfigField("String", "API_BASE_URL", "\"https://katalog-asan.online\"")
     }
 
     buildTypes {
@@ -123,6 +122,12 @@ dependencies {
     implementation("com.google.accompanist:accompanist-swiperefresh:0.32.0")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
     implementation("com.google.accompanist:accompanist-placeholder-material:0.32.0")
+    
+    // Activity Compose for result
+    implementation("androidx.activity:activity-compose:1.8.1")
+    
+    // Permissions
+    implementation("com.google.accompanist:accompanist-permissions:0.32.0")
     
     // Testing
     testImplementation("junit:junit:4.13.2")

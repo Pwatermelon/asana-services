@@ -16,12 +16,21 @@ import com.yoga.dict.data.api.NetworkModule_ProvideGsonFactory;
 import com.yoga.dict.data.api.NetworkModule_ProvideOkHttpClientFactory;
 import com.yoga.dict.data.api.NetworkModule_ProvideRetrofitFactory;
 import com.yoga.dict.data.local.AuthPreferences;
+import com.yoga.dict.data.repository.AsanaManagementRepository;
 import com.yoga.dict.data.repository.AsanaRepository;
 import com.yoga.dict.data.repository.AuthRepository;
+import com.yoga.dict.data.repository.ContentRepository;
+import com.yoga.dict.data.repository.ModerationRepository;
+import com.yoga.dict.ui.viewmodel.AsanaManagementViewModel;
+import com.yoga.dict.ui.viewmodel.AsanaManagementViewModel_HiltModules_KeyModule_ProvideFactory;
 import com.yoga.dict.ui.viewmodel.AsanaViewModel;
 import com.yoga.dict.ui.viewmodel.AsanaViewModel_HiltModules_KeyModule_ProvideFactory;
 import com.yoga.dict.ui.viewmodel.AuthViewModel;
 import com.yoga.dict.ui.viewmodel.AuthViewModel_HiltModules_KeyModule_ProvideFactory;
+import com.yoga.dict.ui.viewmodel.ContentViewModel;
+import com.yoga.dict.ui.viewmodel.ContentViewModel_HiltModules_KeyModule_ProvideFactory;
+import com.yoga.dict.ui.viewmodel.ModerationViewModel;
+import com.yoga.dict.ui.viewmodel.ModerationViewModel_HiltModules_KeyModule_ProvideFactory;
 import com.yoga.dict.ui.viewmodel.SourcesViewModel;
 import com.yoga.dict.ui.viewmodel.SourcesViewModel_HiltModules_KeyModule_ProvideFactory;
 import dagger.hilt.android.ActivityRetainedLifecycle;
@@ -392,7 +401,7 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
 
     @Override
     public Set<String> getViewModelKeys() {
-      return SetBuilder.<String>newSetBuilder(3).add(AsanaViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(AuthViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(SourcesViewModel_HiltModules_KeyModule_ProvideFactory.provide()).build();
+      return SetBuilder.<String>newSetBuilder(6).add(AsanaManagementViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(AsanaViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(AuthViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(ContentViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(ModerationViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(SourcesViewModel_HiltModules_KeyModule_ProvideFactory.provide()).build();
     }
 
     @Override
@@ -418,9 +427,15 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
 
     private final ViewModelCImpl viewModelCImpl = this;
 
+    private Provider<AsanaManagementViewModel> asanaManagementViewModelProvider;
+
     private Provider<AsanaViewModel> asanaViewModelProvider;
 
     private Provider<AuthViewModel> authViewModelProvider;
+
+    private Provider<ContentViewModel> contentViewModelProvider;
+
+    private Provider<ModerationViewModel> moderationViewModelProvider;
 
     private Provider<SourcesViewModel> sourcesViewModelProvider;
 
@@ -437,14 +452,17 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
     @SuppressWarnings("unchecked")
     private void initialize(final SavedStateHandle savedStateHandleParam,
         final ViewModelLifecycle viewModelLifecycleParam) {
-      this.asanaViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 0);
-      this.authViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 1);
-      this.sourcesViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 2);
+      this.asanaManagementViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 0);
+      this.asanaViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 1);
+      this.authViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 2);
+      this.contentViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 3);
+      this.moderationViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 4);
+      this.sourcesViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 5);
     }
 
     @Override
     public Map<String, Provider<ViewModel>> getHiltViewModelMap() {
-      return MapBuilder.<String, Provider<ViewModel>>newMapBuilder(3).put("com.yoga.dict.ui.viewmodel.AsanaViewModel", ((Provider) asanaViewModelProvider)).put("com.yoga.dict.ui.viewmodel.AuthViewModel", ((Provider) authViewModelProvider)).put("com.yoga.dict.ui.viewmodel.SourcesViewModel", ((Provider) sourcesViewModelProvider)).build();
+      return MapBuilder.<String, Provider<ViewModel>>newMapBuilder(6).put("com.yoga.dict.ui.viewmodel.AsanaManagementViewModel", ((Provider) asanaManagementViewModelProvider)).put("com.yoga.dict.ui.viewmodel.AsanaViewModel", ((Provider) asanaViewModelProvider)).put("com.yoga.dict.ui.viewmodel.AuthViewModel", ((Provider) authViewModelProvider)).put("com.yoga.dict.ui.viewmodel.ContentViewModel", ((Provider) contentViewModelProvider)).put("com.yoga.dict.ui.viewmodel.ModerationViewModel", ((Provider) moderationViewModelProvider)).put("com.yoga.dict.ui.viewmodel.SourcesViewModel", ((Provider) sourcesViewModelProvider)).build();
     }
 
     private static final class SwitchingProvider<T> implements Provider<T> {
@@ -468,13 +486,22 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
       @Override
       public T get() {
         switch (id) {
-          case 0: // com.yoga.dict.ui.viewmodel.AsanaViewModel 
+          case 0: // com.yoga.dict.ui.viewmodel.AsanaManagementViewModel 
+          return (T) new AsanaManagementViewModel(singletonCImpl.asanaManagementRepositoryProvider.get());
+
+          case 1: // com.yoga.dict.ui.viewmodel.AsanaViewModel 
           return (T) new AsanaViewModel(singletonCImpl.asanaRepositoryProvider.get());
 
-          case 1: // com.yoga.dict.ui.viewmodel.AuthViewModel 
+          case 2: // com.yoga.dict.ui.viewmodel.AuthViewModel 
           return (T) new AuthViewModel(singletonCImpl.authRepositoryProvider.get(), singletonCImpl.authPreferencesProvider.get());
 
-          case 2: // com.yoga.dict.ui.viewmodel.SourcesViewModel 
+          case 3: // com.yoga.dict.ui.viewmodel.ContentViewModel 
+          return (T) new ContentViewModel(singletonCImpl.contentRepositoryProvider.get());
+
+          case 4: // com.yoga.dict.ui.viewmodel.ModerationViewModel 
+          return (T) new ModerationViewModel(singletonCImpl.moderationRepositoryProvider.get());
+
+          case 5: // com.yoga.dict.ui.viewmodel.SourcesViewModel 
           return (T) new SourcesViewModel(singletonCImpl.asanaRepositoryProvider.get());
 
           default: throw new AssertionError(id);
@@ -566,11 +593,17 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
 
     private Provider<DictApiService> provideDictApiServiceProvider;
 
+    private Provider<AsanaManagementRepository> asanaManagementRepositoryProvider;
+
     private Provider<AsanaRepository> asanaRepositoryProvider;
 
     private Provider<AuthApiService> provideAuthApiServiceProvider;
 
     private Provider<AuthRepository> authRepositoryProvider;
+
+    private Provider<ContentRepository> contentRepositoryProvider;
+
+    private Provider<ModerationRepository> moderationRepositoryProvider;
 
     private SingletonCImpl(ApplicationContextModule applicationContextModuleParam) {
       this.applicationContextModule = applicationContextModuleParam;
@@ -585,9 +618,12 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
       this.provideGsonProvider = DoubleCheck.provider(new SwitchingProvider<Gson>(singletonCImpl, 5));
       this.provideRetrofitProvider = DoubleCheck.provider(new SwitchingProvider<Retrofit>(singletonCImpl, 2));
       this.provideDictApiServiceProvider = DoubleCheck.provider(new SwitchingProvider<DictApiService>(singletonCImpl, 1));
-      this.asanaRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<AsanaRepository>(singletonCImpl, 0));
-      this.provideAuthApiServiceProvider = DoubleCheck.provider(new SwitchingProvider<AuthApiService>(singletonCImpl, 7));
-      this.authRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<AuthRepository>(singletonCImpl, 6));
+      this.asanaManagementRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<AsanaManagementRepository>(singletonCImpl, 0));
+      this.asanaRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<AsanaRepository>(singletonCImpl, 6));
+      this.provideAuthApiServiceProvider = DoubleCheck.provider(new SwitchingProvider<AuthApiService>(singletonCImpl, 8));
+      this.authRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<AuthRepository>(singletonCImpl, 7));
+      this.contentRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<ContentRepository>(singletonCImpl, 9));
+      this.moderationRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<ModerationRepository>(singletonCImpl, 10));
     }
 
     @Override
@@ -623,8 +659,8 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
       @Override
       public T get() {
         switch (id) {
-          case 0: // com.yoga.dict.data.repository.AsanaRepository 
-          return (T) new AsanaRepository(singletonCImpl.provideDictApiServiceProvider.get());
+          case 0: // com.yoga.dict.data.repository.AsanaManagementRepository 
+          return (T) new AsanaManagementRepository(singletonCImpl.provideDictApiServiceProvider.get());
 
           case 1: // com.yoga.dict.data.api.DictApiService 
           return (T) NetworkModule_ProvideDictApiServiceFactory.provideDictApiService(singletonCImpl.provideRetrofitProvider.get());
@@ -641,11 +677,20 @@ public final class DaggerYogaDictApplication_HiltComponents_SingletonC {
           case 5: // com.google.gson.Gson 
           return (T) NetworkModule_ProvideGsonFactory.provideGson();
 
-          case 6: // com.yoga.dict.data.repository.AuthRepository 
+          case 6: // com.yoga.dict.data.repository.AsanaRepository 
+          return (T) new AsanaRepository(singletonCImpl.provideDictApiServiceProvider.get());
+
+          case 7: // com.yoga.dict.data.repository.AuthRepository 
           return (T) new AuthRepository(singletonCImpl.provideAuthApiServiceProvider.get());
 
-          case 7: // com.yoga.dict.data.api.AuthApiService 
+          case 8: // com.yoga.dict.data.api.AuthApiService 
           return (T) NetworkModule_ProvideAuthApiServiceFactory.provideAuthApiService(singletonCImpl.provideRetrofitProvider.get());
+
+          case 9: // com.yoga.dict.data.repository.ContentRepository 
+          return (T) new ContentRepository(singletonCImpl.provideDictApiServiceProvider.get());
+
+          case 10: // com.yoga.dict.data.repository.ModerationRepository 
+          return (T) new ModerationRepository(singletonCImpl.provideDictApiServiceProvider.get());
 
           default: throw new AssertionError(id);
         }

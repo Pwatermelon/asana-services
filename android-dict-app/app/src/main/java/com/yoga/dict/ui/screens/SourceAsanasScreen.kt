@@ -25,7 +25,9 @@ fun SourceAsanasScreen(
     viewModel: AsanaViewModel = hiltViewModel()
 ) {
     LaunchedEffect(sourceId) {
-        // TODO: Load asanas by source
+        if (sourceId.isNotEmpty()) {
+            viewModel.loadAsanasBySource(sourceId)
+        }
     }
     
     val asanaList by viewModel.asanaList.collectAsStateWithLifecycle()
@@ -63,15 +65,33 @@ fun SourceAsanasScreen(
                 )
             }
             is AsanaUiState.Success -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                if (asanaList.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Нет асан для этого источника")
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                     items(asanaList) { asana ->
-                        // Reuse AsanaCard from AsanaListScreen
+                        AsanaCard(
+                            asana = asana,
+                            onClick = { /* Navigate to detail if needed */ },
+                            onLongPress = { _, _ -> /* No action */ },
+                            showSources = false,
+                            showPhoto = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                     }
                 }
             }

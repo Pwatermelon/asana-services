@@ -43,39 +43,26 @@ object NetworkModule {
             }
         }
         
-        // Кэш для токена, чтобы избежать блокирующих вызовов в interceptor
-        var cachedToken: String? = null
-        var tokenCacheTime: Long = 0
-        val TOKEN_CACHE_DURATION = 5 * 60 * 1000L // 5 минут
-        
         val authInterceptor = okhttp3.Interceptor { chain ->
             val requestBuilder = chain.request().newBuilder()
             
-            // Используем кэшированный токен, если он еще актуален
-            val currentTime = System.currentTimeMillis()
-            if (cachedToken != null && (currentTime - tokenCacheTime) < TOKEN_CACHE_DURATION) {
-                requestBuilder.addHeader("Authorization", "Bearer $cachedToken")
-            } else {
-                // Пытаемся получить токен, но не блокируем главный поток
-                try {
-                    // Используем runBlocking только если мы не на главном потоке
-                    if (android.os.Looper.getMainLooper().thread != Thread.currentThread()) {
-                        val token = runBlocking { 
-                            try {
-                                authPreferences.getTokenSync()
-                            } catch (e: Exception) {
-                                null
-                            }
-                        }
-                        if (token != null) {
-                            cachedToken = token
-                            tokenCacheTime = currentTime
-                            requestBuilder.addHeader("Authorization", "Bearer $token")
+            // Всегда получаем свежий токен из AuthPreferences
+            // Используем runBlocking только если мы не на главном потоке
+            try {
+                if (android.os.Looper.getMainLooper().thread != Thread.currentThread()) {
+                    val token = runBlocking { 
+                        try {
+                            authPreferences.getTokenSync()
+                        } catch (e: Exception) {
+                            null
                         }
                     }
-                } catch (e: Exception) {
-                    // Игнорируем ошибки получения токена
+                    if (token != null && token.isNotBlank()) {
+                        requestBuilder.addHeader("Authorization", "Bearer $token")
+                    }
                 }
+            } catch (e: Exception) {
+                // Игнорируем ошибки получения токена
             }
             
             // Добавляем заголовок схемы БД для auth endpoints
@@ -149,6 +136,7 @@ class AsanaDeserializer : JsonDeserializer<Asana> {
         // Парсим name
         val nameObj = jsonObject.getAsJsonObject("name")
         val name = AsanaName(
+            id = nameObj.get("id")?.asString,
             name_ru = nameObj.get("ru")?.asString ?: nameObj.get("name_ru")?.asString ?: "",
             name_sanskrit = nameObj.get("sanskrit")?.asString ?: nameObj.get("name_sanskrit")?.asString,
             transliteration = nameObj.get("transliteration")?.asString ?: nameObj.get("nameInTranslit")?.asString,
@@ -162,8 +150,16 @@ class AsanaDeserializer : JsonDeserializer<Asana> {
             if (photoElement.isJsonObject) {
                 val photoObj = photoElement.asJsonObject
                 val photoId = photoObj.get("id")?.asString ?: ""
-                val photoUrl = photoObj.get("url")?.asString ?: photoObj.get("s3_path")?.asString ?: ""
-                val sourceId = photoObj.get("source_id")?.asString
+                // API возвращает поле "image", а не "url" или "s3_path"
+                var photoUrl = photoObj.get("image")?.asString 
+                    ?: photoObj.get("url")?.asString 
+                    ?: photoObj.get("s3_path")?.asString 
+                    ?: ""
+                val sourceId = photoObj.get("source")?.asString ?: photoObj.get("source_id")?.asString
+                // Если URL относительный, добавляем базовый URL
+                if (photoUrl.isNotEmpty() && !photoUrl.startsWith("http://") && !photoUrl.startsWith("https://")) {
+                    photoUrl = "${BuildConfig.API_BASE_URL}${if (photoUrl.startsWith("/")) "" else "/"}$photoUrl"
+                }
                 if (photoUrl.isNotEmpty()) {
                     photos.add(AsanaPhoto(photoId, photoUrl, sourceId))
                 }

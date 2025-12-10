@@ -1,0 +1,46 @@
+graph TB
+    subgraph "Клиентский уровень"
+        Browser[Браузер пользователя]
+    end
+    
+    subgraph "Прокси-уровень"
+        Nginx[Nginx<br/>Reverse Proxy]
+    end
+    
+    subgraph "Frontend сервисы"
+        Frontend[asana-frontend<br/>React + Vite]
+    end
+    
+    subgraph "Backend сервисы"
+        Backend[asana-backend<br/>FastAPI]
+        AuthService[server-module<br/>Сервис авторизации]
+    end
+    
+    subgraph "Хранилища данных"
+        PostgreSQL[(PostgreSQL<br/>База данных)]
+        Ontology[OWL Онтология<br/>ontology_updated.owl]
+        MinIO[MinIO S3<br/>Объектное хранилище]
+    end
+    
+    Browser -->|HTTP/HTTPS| Nginx
+    Nginx -->|Маршрутизация| Frontend
+    Nginx -->|API запросы| Backend
+    Nginx -->|Авторизация| AuthService
+    
+    Frontend -->|REST API| Backend
+    Backend -->|Проверка токенов| AuthService
+    Backend -->|CRUD операции| PostgreSQL
+    Backend -->|Загрузка/чтение| Ontology
+    Backend -->|Загрузка/получение файлов| MinIO
+    
+    AuthService -->|Пользователи и сессии| PostgreSQL
+    
+    style Browser fill:#e3f2fd
+    style Nginx fill:#fff3e0
+    style Frontend fill:#f3e5f5
+    style Backend fill:#e8f5e9
+    style AuthService fill:#e8f5e9
+    style PostgreSQL fill:#fce4ec
+    style Ontology fill:#fce4ec
+    style MinIO fill:#fce4ec
+

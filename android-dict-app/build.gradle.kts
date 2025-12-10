@@ -2,6 +2,19 @@
 buildscript {
     repositories {
         google()
+        // Российские зеркала для buildscript
+        maven {
+            url = uri("https://maven.aliyun.com/repository/public/")
+            name = "Aliyun Maven"
+        }
+        maven {
+            url = uri("https://repo.maven.apache.org/maven2/")
+            name = "Maven Central Apache"
+        }
+        maven {
+            url = uri("https://repo1.maven.org/maven2/")
+            name = "Maven Central Repo1"
+        }
         mavenCentral()
     }
     dependencies {

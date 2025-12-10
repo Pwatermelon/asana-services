@@ -44,7 +44,8 @@ fun AsanaListScreen(
     authViewModel: AuthViewModel = hiltViewModel(),
     onAsanaClick: (Asana) -> Unit,
     onNavigateToSources: () -> Unit = {},
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToAddAsana: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val asanaList by viewModel.asanaList.collectAsStateWithLifecycle()
@@ -91,7 +92,7 @@ fun AsanaListScreen(
         floatingActionButton = {
             if (isExpertOrAdmin) {
                 FloatingActionButton(
-                    onClick = { /* TODO: Добавить асану */ },
+                    onClick = onNavigateToAddAsana,
                     containerColor = MaterialTheme.colorScheme.tertiary
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Добавить")

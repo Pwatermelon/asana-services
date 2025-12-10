@@ -1,8 +1,11 @@
 package com.yoga.dict;
 
 import com.yoga.dict.data.api.NetworkModule;
+import com.yoga.dict.ui.viewmodel.AsanaManagementViewModel_HiltModules;
 import com.yoga.dict.ui.viewmodel.AsanaViewModel_HiltModules;
 import com.yoga.dict.ui.viewmodel.AuthViewModel_HiltModules;
+import com.yoga.dict.ui.viewmodel.ContentViewModel_HiltModules;
+import com.yoga.dict.ui.viewmodel.ModerationViewModel_HiltModules;
 import com.yoga.dict.ui.viewmodel.SourcesViewModel_HiltModules;
 import dagger.Binds;
 import dagger.Component;
@@ -154,9 +157,12 @@ public final class YogaDictApplication_HiltComponents {
 
   @Subcomponent(
       modules = {
+          AsanaManagementViewModel_HiltModules.KeyModule.class,
           AsanaViewModel_HiltModules.KeyModule.class,
           AuthViewModel_HiltModules.KeyModule.class,
+          ContentViewModel_HiltModules.KeyModule.class,
           HiltWrapper_ActivityRetainedComponentManager_LifecycleModule.class,
+          ModerationViewModel_HiltModules.KeyModule.class,
           SourcesViewModel_HiltModules.KeyModule.class,
           ActivityCBuilderModule.class,
           ViewModelCBuilderModule.class
@@ -195,9 +201,12 @@ public final class YogaDictApplication_HiltComponents {
 
   @Subcomponent(
       modules = {
+          AsanaManagementViewModel_HiltModules.BindsModule.class,
           AsanaViewModel_HiltModules.BindsModule.class,
           AuthViewModel_HiltModules.BindsModule.class,
+          ContentViewModel_HiltModules.BindsModule.class,
           HiltWrapper_HiltViewModelFactory_ViewModelModule.class,
+          ModerationViewModel_HiltModules.BindsModule.class,
           SourcesViewModel_HiltModules.BindsModule.class
       }
   )

@@ -67,29 +67,57 @@ class MainActivity : ComponentActivity() {
                         composable("asana_list") {
                             AsanaListScreen(
                                 onAsanaClick = { asana ->
-                                    navController.navigate("asana_detail/${asana.id}")
+                                    // URL-кодируем ID асаны для безопасной передачи в пути
+                                    val encodedId = java.net.URLEncoder.encode(asana.id, "UTF-8")
+                                    navController.navigate("asana_detail/$encodedId")
                                 },
                                 onNavigateToSources = { navController.navigate("sources") },
-                                onNavigateToSettings = { navController.navigate("settings") }
+                                onNavigateToSettings = { navController.navigate("settings") },
+                                onNavigateToAddAsana = { navController.navigate("add_asana") }
                             )
                         }
                         composable("asana_detail/{asanaId}") { backStackEntry ->
-                            val asanaId = backStackEntry.arguments?.getString("asanaId") ?: ""
+                            // Navigation Compose автоматически декодирует параметры пути
+                            // Но если ID был закодирован дважды, нужно декодировать еще раз
+                            val encodedId = backStackEntry.arguments?.getString("asanaId") ?: ""
+                            val asanaId = try {
+                                // Пробуем декодировать - если уже декодирован, вернется как есть
+                                val decoded = java.net.URLDecoder.decode(encodedId, "UTF-8")
+                                // Если декодирование изменило строку, значит она была закодирована
+                                if (decoded != encodedId) decoded else encodedId
+                            } catch (e: Exception) {
+                                encodedId
+                            }
                             AsanaDetailScreen(
                                 asanaId = asanaId,
-                                onBack = { navController.popBackStack() }
+                                onBack = { navController.popBackStack() },
+                                onNavigateToAsana = { id ->
+                                    // Кодируем ID для навигации
+                                    val encoded = java.net.URLEncoder.encode(id, "UTF-8")
+                                    navController.navigate("asana_detail/$encoded") {
+                                        popUpTo("asana_list")
+                                    }
+                                }
                             )
                         }
                         composable("sources") {
                             SourcesListScreen(
                                 onSourceClick = { source ->
-                                    navController.navigate("source_asanas/${source.id}")
+                                    // URL-кодируем ID источника для безопасной передачи в пути
+                                    val encodedId = java.net.URLEncoder.encode(source.id, "UTF-8")
+                                    navController.navigate("source_asanas/$encodedId")
                                 },
                                 onAddSource = { navController.navigate("add_source") }
                             )
                         }
                         composable("source_asanas/{sourceId}") { backStackEntry ->
-                            val sourceId = backStackEntry.arguments?.getString("sourceId") ?: ""
+                            // Декодируем ID источника из пути
+                            val encodedId = backStackEntry.arguments?.getString("sourceId") ?: ""
+                            val sourceId = try {
+                                java.net.URLDecoder.decode(encodedId, "UTF-8")
+                            } catch (e: Exception) {
+                                encodedId
+                            }
                             SourceAsanasScreen(
                                 sourceId = sourceId,
                                 onBack = { navController.popBackStack() }
@@ -136,4 +164,5 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
 
