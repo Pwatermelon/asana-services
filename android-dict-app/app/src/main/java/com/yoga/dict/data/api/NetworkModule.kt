@@ -47,22 +47,22 @@ object NetworkModule {
             val requestBuilder = chain.request().newBuilder()
             
             // Всегда получаем свежий токен из AuthPreferences
-            // Используем runBlocking только если мы не на главном потоке
+                    // Используем runBlocking только если мы не на главном потоке
             try {
-                if (android.os.Looper.getMainLooper().thread != Thread.currentThread()) {
-                    val token = runBlocking { 
-                        try {
-                            authPreferences.getTokenSync()
-                        } catch (e: Exception) {
-                            null
+                    if (android.os.Looper.getMainLooper().thread != Thread.currentThread()) {
+                        val token = runBlocking { 
+                            try {
+                                authPreferences.getTokenSync()
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                    if (token != null && token.isNotBlank()) {
+                            requestBuilder.addHeader("Authorization", "Bearer $token")
                         }
                     }
-                    if (token != null && token.isNotBlank()) {
-                        requestBuilder.addHeader("Authorization", "Bearer $token")
-                    }
-                }
-            } catch (e: Exception) {
-                // Игнорируем ошибки получения токена
+                } catch (e: Exception) {
+                    // Игнорируем ошибки получения токена
             }
             
             // Добавляем заголовок схемы БД для auth endpoints

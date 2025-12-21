@@ -337,6 +337,83 @@ def delete_file_from_s3(s3_path: str) -> bool:
         return False
 
 
+def replace_file_in_s3(s3_path: str, new_image_data: bytes | str) -> Tuple[str, str]:
+    """
+    Заменяет файл в S3 по существующему пути без изменения пути.
+    Это позволяет обновить содержимое файла, сохраняя тот же URL.
+    
+    Args:
+        s3_path: Существующий путь к файлу в формате bucket/path/to/file (например: images/asans/uuid.jpg)
+        new_image_data: Новые данные изображения в виде bytes или base64 строка
+    
+    Returns:
+        Кортеж (путь к файлу в S3 (тот же), новый хеш изображения MD5)
+    """
+    try:
+        minio_client = get_minio_client()
+        
+        # Парсим путь: images/asans/uuid.jpg -> bucket=images, object=asans/uuid.jpg
+        if '/' not in s3_path:
+            raise ValueError(f"Invalid S3 path format: {s3_path}")
+        
+        parts = s3_path.split('/', 1)
+        bucket_name = parts[0]
+        object_name = parts[1] if len(parts) > 1 else ''
+        
+        if not object_name:
+            raise ValueError(f"Invalid S3 path format (no object name): {s3_path}")
+        
+        # Проверяем существование файла
+        try:
+            minio_client.stat_object(bucket_name, object_name)
+        except S3Error as e:
+            if e.code == 'NoSuchKey':
+                raise ValueError(f"File not found in S3: {s3_path}")
+            raise
+        
+        # Обрабатываем входные данные
+        if isinstance(new_image_data, bytes):
+            image_bytes = new_image_data
+        else:
+            # Если передан base64
+            image_base64 = new_image_data
+            if ',' in image_base64:
+                image_base64 = image_base64.split(',')[1]
+            image_base64 = image_base64.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+            if not image_base64:
+                raise ValueError("Base64 строка пустая после очистки")
+            image_bytes = base64.b64decode(image_base64, validate=True)
+        
+        if len(image_bytes) == 0:
+            raise ValueError("Данные изображения пустые")
+        
+        # Определяем формат изображения
+        file_extension, content_type = detect_image_format(image_bytes)
+        
+        # Заменяем файл в S3 (тот же путь, новое содержимое)
+        minio_client.put_object(
+            bucket_name,
+            object_name,
+            BytesIO(image_bytes),
+            length=len(image_bytes),
+            content_type=content_type
+        )
+        logger.info(f"[DEBUG S3] Successfully replaced file in S3: {s3_path} (format: {file_extension}, size: {len(image_bytes)} bytes)")
+        
+        # Вычисляем новый хеш
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        logger.info(f"[DEBUG S3] New image hash (MD5): {image_hash}")
+        
+        return s3_path, image_hash
+        
+    except S3Error as e:
+        logger.error(f"[DEBUG S3] S3Error replacing file in S3: {e}", exc_info=True)
+        raise
+    except Exception as e:
+        logger.error(f"[DEBUG S3] Unexpected error replacing file in S3: {e}", exc_info=True)
+        raise
+
+
 def get_s3_url(s3_path: str) -> str:
     """
     Возвращает URL для доступа к файлу в S3 через Nginx прокси.

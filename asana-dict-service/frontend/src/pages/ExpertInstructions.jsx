@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { contentAPI } from '../api/content';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/AboutProject.css';
@@ -89,7 +91,9 @@ const ExpertInstructions = () => {
             </div>
           </div>
         ) : (
-          <div className="about-content" dangerouslySetInnerHTML={{ __html: content }} />
+          <div className="about-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          </div>
         )}
       </div>
     </div>

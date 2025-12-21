@@ -119,4 +119,47 @@ export const asanasAPI = {
     const response = await apiClient.delete(`/api/asana/${encodeURIComponent(shortId)}/same-as/${encodeURIComponent(targetShortId)}`);
     return response.data;
   },
+
+  replacePhoto: async (asanaId, photoId, photoFile) => {
+    const formData = new FormData();
+    formData.append('photo', photoFile);
+    
+    // Обрабатываем разные форматы ID
+    let shortId = asanaId;
+    if (asanaId.includes('#')) {
+      shortId = asanaId.split('#').pop();
+    }
+    shortId = shortId.replace('asana_', '');
+    
+    let shortPhotoId = photoId;
+    if (photoId.includes('#')) {
+      shortPhotoId = photoId.split('#').pop();
+    }
+    shortPhotoId = shortPhotoId.replace('photo_', '');
+    
+    const response = await apiClient.put(`/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  deletePhoto: async (asanaId, photoId) => {
+    // Обрабатываем разные форматы ID
+    let shortId = asanaId;
+    if (asanaId.includes('#')) {
+      shortId = asanaId.split('#').pop();
+    }
+    shortId = shortId.replace('asana_', '');
+    
+    let shortPhotoId = photoId;
+    if (photoId.includes('#')) {
+      shortPhotoId = photoId.split('#').pop();
+    }
+    shortPhotoId = shortPhotoId.replace('photo_', '');
+    
+    const response = await apiClient.delete(`/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}`);
+    return response.data;
+  },
 };

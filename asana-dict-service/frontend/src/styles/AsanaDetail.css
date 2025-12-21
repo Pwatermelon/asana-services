@@ -97,6 +97,73 @@
   transform: scale(1.02);
 }
 
+.photo-menu-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  color: white;
+  font-size: 20px;
+  line-height: 1;
+  transition: all 0.2s ease;
+}
+
+.photo-menu-button:hover {
+  background: rgba(0, 0, 0, 0.8);
+  transform: scale(1.1);
+}
+
+.photo-menu {
+  position: absolute;
+  top: 40px;
+  right: 8px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+  min-width: 160px;
+  overflow: hidden;
+}
+
+.photo-menu-item {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: background 0.2s ease;
+}
+
+.photo-menu-item:hover {
+  background: var(--background-alt);
+}
+
+.photo-menu-item:first-child {
+  border-bottom: 1px solid var(--border-light);
+}
+
+.photo-menu-item-danger {
+  color: var(--danger-color) !important;
+  border-top: 1px solid var(--border-light);
+}
+
+.photo-menu-item-danger:hover {
+  background: #fee2e2 !important;
+  color: var(--danger-hover) !important;
+}
+
 .gallery-item {
   width: 100%;
   height: auto;
@@ -421,7 +488,7 @@
 }
 
 .modal-content {
-  background: var(--card-background);
+  background: #ffffff;
   border-radius: 16px;
   max-width: 600px;
   width: 100%;
@@ -463,6 +530,36 @@
   padding: 1.5em;
   max-height: 60vh;
   overflow-y: auto;
+  background: #ffffff;
+}
+
+.modal-body form {
+  background: #ffffff;
+}
+
+.modal-body .form-group {
+  background: #ffffff;
+}
+
+.modal-body .form-label {
+  background: #ffffff;
+  color: var(--text-primary);
+}
+
+.modal-body input[type="file"] {
+  background: #ffffff;
+  padding: 0.5em;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  width: 100%;
+}
+
+.modal-body .form-actions {
+  background: #ffffff;
+  margin-top: 1.5em;
+  display: flex;
+  gap: 1em;
+  justify-content: flex-end;
 }
 
 .modal-search {

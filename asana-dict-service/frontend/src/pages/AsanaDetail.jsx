@@ -1,39 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
-import { sourcesAPI } from '../api/sources';
 import { useAuth } from '../contexts/AuthContext';
-import SearchableSelect from '../components/SearchableSelect';
 import '../styles/AsanaDetail.css';
 
 const AsanaDetail = () => {
   const params = useParams();
   const id = params.id || params['id-page'] || params.idPage;
   const [asana, setAsana] = useState(null);
-  const [sources, setSources] = useState([]);
   const [allAsanas, setAllAsanas] = useState([]);
   const [similarAsanas, setSimilarAsanas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [showMatchModal, setShowMatchModal] = useState(false);
-  const [selectedSource, setSelectedSource] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
-  const [hasExistingPhoto, setHasExistingPhoto] = useState(false);
   const [matchSearchQuery, setMatchSearchQuery] = useState('');
   const [selectedMatchAsana, setSelectedMatchAsana] = useState(null);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(null); // ID фото, для которого открыто меню
+  const [showReplacePhotoModal, setShowReplacePhotoModal] = useState(false);
+  const [selectedPhotoToReplace, setSelectedPhotoToReplace] = useState(null);
+  const [replacePhotoFile, setReplacePhotoFile] = useState(null);
   const { isExpertOrAdmin } = useAuth();
 
   useEffect(() => {
     loadAsana();
     loadAllAsanas();
   }, [id]);
-
-  useEffect(() => {
-    if (isExpertOrAdmin && showAddPhotoForm) {
-      loadSources();
-    }
-  }, [isExpertOrAdmin, showAddPhotoForm]);
 
   const loadAsana = async () => {
     try {
@@ -142,39 +135,35 @@ const AsanaDetail = () => {
   };
 
 
-  const loadSources = async () => {
-    try {
-      const data = await sourcesAPI.getAll();
-      setSources(data);
-    } catch (error) {
-      console.error('Error loading sources:', error);
-    }
-  };
-
-  const handleSourceChange = async (sourceId) => {
-    setSelectedSource(sourceId);
-    
-    if (sourceId && asana) {
-      try {
-        const check = await asanasAPI.checkPhoto(asana.id, sourceId);
-        setHasExistingPhoto(check.hasPhoto);
-      } catch (error) {
-        console.error('Error checking photo:', error);
-      }
-    }
-  };
-
   const handlePhotoSubmit = async (e) => {
     e.preventDefault();
-    if (!photoFile || !selectedSource) return;
+    if (!photoFile || !asana) return;
+
+    // Автоматически определяем источник из асаны
+    let sourceId = null;
+    if (asana.sources && asana.sources.length > 0) {
+      sourceId = asana.sources[0].id;
+    } else if (asana.source) {
+      // Если source - это объект с id
+      if (typeof asana.source === 'object' && asana.source.id) {
+        sourceId = asana.source.id;
+      } 
+      // Если source - это строка (ID)
+      else if (typeof asana.source === 'string') {
+        sourceId = asana.source;
+      }
+    }
+
+    if (!sourceId) {
+      alert('У асаны нет источника. Невозможно добавить фотографию.');
+      return;
+    }
 
     try {
-      await asanasAPI.addPhoto(asana.id, photoFile, selectedSource);
+      await asanasAPI.addPhoto(asana.id, photoFile, sourceId);
       loadAsana();
       setShowAddPhotoForm(false);
-      setSelectedSource('');
       setPhotoFile(null);
-      setHasExistingPhoto(false);
     } catch (error) {
       alert('Ошибка при добавлении фотографии');
       console.error('Error adding photo:', error);
@@ -208,6 +197,93 @@ const AsanaDetail = () => {
       console.error('Error removing same as object:', error);
     }
   };
+
+  const handleDownloadPhoto = async (photoData, photoIndex) => {
+    try {
+      const photoSrc = getPhotoSrc(photoData);
+      const link = document.createElement('a');
+      link.href = photoSrc;
+      link.download = `asana_photo_${photoIndex + 1}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      alert('Ошибка при скачивании фотографии');
+      console.error('Error downloading photo:', error);
+    }
+  };
+
+  const handleReplacePhoto = async (e) => {
+    e.preventDefault();
+    if (!replacePhotoFile || !selectedPhotoToReplace || !asana) return;
+
+    try {
+      await asanasAPI.replacePhoto(asana.id, selectedPhotoToReplace.photoId, replacePhotoFile);
+      setShowReplacePhotoModal(false);
+      setSelectedPhotoToReplace(null);
+      setReplacePhotoFile(null);
+      setPhotoMenuOpen(null);
+      loadAsana();
+      alert('Фотография успешно заменена');
+    } catch (error) {
+      alert('Ошибка при замене фотографии');
+      console.error('Error replacing photo:', error);
+    }
+  };
+
+  const handleDeletePhoto = async (photo, photoIndex) => {
+    if (!asana || !photo) return;
+    
+    if (!window.confirm('Вы уверены, что хотите удалить это фото? Это действие нельзя отменить.')) {
+      return;
+    }
+
+    try {
+      // Получаем photoId из фото объекта
+      let photoId = null;
+      if (typeof photo === 'object' && photo.id) {
+        photoId = photo.id;
+      } else {
+        // Если ID нет, пытаемся найти фото в онтологии по индексу
+        photoId = `photo_${photoIndex}`;
+      }
+
+      await asanasAPI.deletePhoto(asana.id, photoId);
+      setPhotoMenuOpen(null);
+      loadAsana();
+      alert('Фотография успешно удалена');
+    } catch (error) {
+      alert('Ошибка при удалении фотографии');
+      console.error('Error deleting photo:', error);
+    }
+  };
+
+  const openReplacePhotoModal = (photo, photoIndex) => {
+    // Получаем photoId из фото объекта
+    let photoId = null;
+    if (typeof photo === 'object' && photo.id) {
+      photoId = photo.id;
+    } else {
+      // Если ID нет, пытаемся найти фото в онтологии по индексу
+      // Для этого нужно найти фото асаны по индексу
+      photoId = `photo_${photoIndex}`;
+    }
+    setSelectedPhotoToReplace({ photo, photoId, photoIndex });
+    setShowReplacePhotoModal(true);
+  };
+
+  // Закрытие меню при клике вне его
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (photoMenuOpen && !event.target.closest('.photo-container')) {
+        setPhotoMenuOpen(null);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [photoMenuOpen]);
 
   const getAsanaId = (a) => {
     return a.id.split('#').pop();
@@ -565,7 +641,25 @@ const AsanaDetail = () => {
           <div className="admin-actions">
             <button
               className="btn-primary"
-              onClick={() => setShowAddPhotoForm(!showAddPhotoForm)}
+              onClick={() => {
+                // Проверяем наличие источника перед открытием формы
+                let hasSource = false;
+                if (asana.sources && asana.sources.length > 0) {
+                  hasSource = true;
+                } else if (asana.source) {
+                  if (typeof asana.source === 'object' && asana.source.id) {
+                    hasSource = true;
+                  } else if (typeof asana.source === 'string' && asana.source) {
+                    hasSource = true;
+                  }
+                }
+                
+                if (!hasSource) {
+                  alert('У асаны нет источника. Невозможно добавить фотографию.');
+                  return;
+                }
+                setShowAddPhotoForm(!showAddPhotoForm);
+              }}
             >
               Добавить фотографию
             </button>
@@ -627,9 +721,54 @@ const AsanaDetail = () => {
                 {asana.photos.map((photo, index) => {
                   const photoSource = typeof photo === 'object' && photo.source ? photo.source : null;
                   const sourceId = photoSource ? (typeof photoSource === 'string' ? photoSource.split('#').pop() : photoSource.id?.split('#').pop() || photoSource.id) : null;
+                  // Получаем photoId: если это объект с id, используем его, иначе создаем уникальный ключ
+                  const photoId = typeof photo === 'object' && photo.id 
+                    ? photo.id 
+                    : (typeof photo === 'object' && photo.image 
+                        ? `photo_${index}_${photo.image.substring(0, 20)}` 
+                        : `photo_${index}`);
+                  const isMenuOpen = photoMenuOpen === photoId;
                   
                   return (
                     <div key={index} className="photo-container">
+                      {isExpertOrAdmin && (
+                        <div className="photo-menu-button" onClick={(e) => {
+                          e.stopPropagation();
+                          setPhotoMenuOpen(isMenuOpen ? null : photoId);
+                        }}>
+                          <span>⋯</span>
+                        </div>
+                      )}
+                      {isMenuOpen && isExpertOrAdmin && (
+                        <div className="photo-menu" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="photo-menu-item"
+                            onClick={() => {
+                              handleDownloadPhoto(photo, index);
+                              setPhotoMenuOpen(null);
+                            }}
+                          >
+                            📥 Скачать
+                          </button>
+                          <button
+                            className="photo-menu-item"
+                            onClick={() => {
+                              openReplacePhotoModal(photo, index);
+                              setPhotoMenuOpen(null);
+                            }}
+                          >
+                            ✏️ Изменить фото
+                          </button>
+                          <button
+                            className="photo-menu-item photo-menu-item-danger"
+                            onClick={() => {
+                              handleDeletePhoto(photo, index);
+                            }}
+                          >
+                            🗑️ Удалить фото
+                          </button>
+                        </div>
+                      )}
                       {typeof photo === 'object' && photo.image ? (
                         <img
                           src={getPhotoSrc(photo.image)}
@@ -693,29 +832,29 @@ const AsanaDetail = () => {
         {showAddPhotoForm && (
           <div className="add-photo-form">
             <h3 className="form-title">Добавление фотографии</h3>
+            <div className="form-group" style={{ marginBottom: '1em', padding: '0.75em', background: 'var(--background-alt)', borderRadius: '8px' }}>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9em', margin: 0 }}>
+                <strong>Источник:</strong>{' '}
+                {asana.sources && asana.sources.length > 0 ? (
+                  <>
+                    {asana.sources[0].author} - {asana.sources[0].title}
+                    {asana.sources[0].year && ` (${asana.sources[0].year})`}
+                  </>
+                ) : asana.source ? (
+                  typeof asana.source === 'object' ? (
+                    <>
+                      {asana.source.author} - {asana.source.title}
+                      {asana.source.year && ` (${asana.source.year})`}
+                    </>
+                  ) : (
+                    'Источник определен автоматически'
+                  )
+                ) : (
+                  'Источник не определен'
+                )}
+              </p>
+            </div>
             <form onSubmit={handlePhotoSubmit}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="source">
-                  Источник *
-                </label>
-                <SearchableSelect
-                  value={selectedSource}
-                  onChange={handleSourceChange}
-                  options={sources}
-                  placeholder="Выберите источник"
-                  getOptionLabel={(source) => `${source.author} - ${source.title}`}
-                  getOptionValue={(source) => source.id}
-                  className="form-select"
-                  required
-                />
-              </div>
-
-              {hasExistingPhoto && (
-                <div className="warning-message">
-                  В выбранном источнике уже есть фото этой асаны. Хотите добавить другое фото?
-                </div>
-              )}
-
               <div className="form-group">
                 <label className="form-label" htmlFor="photo">
                   Фотография *
@@ -738,7 +877,6 @@ const AsanaDetail = () => {
                   className="btn-secondary"
                   onClick={() => {
                     setShowAddPhotoForm(false);
-                    setSelectedSource('');
                     setPhotoFile(null);
                   }}
                 >
@@ -812,6 +950,60 @@ const AsanaDetail = () => {
               >
                 Указать совпадение
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно замены фото */}
+      {showReplacePhotoModal && (
+        <div className="modal-overlay" onClick={() => {
+          setShowReplacePhotoModal(false);
+          setSelectedPhotoToReplace(null);
+          setReplacePhotoFile(null);
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Заменить фотографию</h3>
+              <button className="modal-close" onClick={() => {
+                setShowReplacePhotoModal(false);
+                setSelectedPhotoToReplace(null);
+                setReplacePhotoFile(null);
+              }}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleReplacePhoto}>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="replace-photo">
+                    Новая фотография *
+                  </label>
+                  <input
+                    type="file"
+                    id="replace-photo"
+                    accept="image/*"
+                    onChange={(e) => setReplacePhotoFile(e.target.files[0])}
+                    required
+                  />
+                </div>
+                <div className="form-actions">
+                  <button type="submit" className="btn-primary">
+                    Заменить
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setShowReplacePhotoModal(false);
+                      setSelectedPhotoToReplace(null);
+                      setReplacePhotoFile(null);
+                    }}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>

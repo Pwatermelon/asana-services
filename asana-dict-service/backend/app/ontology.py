@@ -88,6 +88,7 @@ def load_asanas():
             base64_photo = g.value(photo, ASANA.base64Photo)
             
             photo_data = {
+                "id": str(photo),  # Добавляем ID фото
                 "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
                 "source": str(source_obj) if source_obj else None
             }
@@ -127,6 +128,8 @@ def load_asanas():
         logger.debug(f"Adding asana with ID: {asana_data['id']}")
         asanas.append(asana_data)
     logger.info(f"Successfully loaded {len(asanas)} asanas")
+    # Сортируем асаны по названию на русском языке
+    asanas.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
     return asanas
 
 def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
@@ -701,8 +704,10 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
 # Получение асан по первой букве (для каталога по алфавиту)
 def get_asanas_by_first_letter(letter: str):
     logger.info(f"Getting asanas starting with letter: {letter}")
-    asanas = load_asanas()
+    asanas = load_asanas()  # load_asanas уже сортирует, но на всякий случай еще раз
     filtered_asanas = [asana for asana in asanas if asana["name"]["name_ru"] and asana["name"]["name_ru"][0].upper() == letter.upper()]
+    # Сортируем по названию (на всякий случай, хотя load_asanas уже сортирует)
+    filtered_asanas.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
     logger.info(f"Found {len(filtered_asanas)} asanas starting with letter: {letter}")
     return filtered_asanas
 
@@ -784,6 +789,8 @@ def get_asanas_by_source(source_id: str):
         asanas.append(asana_data)
     
     logger.info(f"Found {len(asanas)} asanas for source ID: {source_id}")
+    # Сортируем асаны по названию
+    asanas.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
     return asanas
 
 # Поиск асан по названию (с поддержкой нечеткого поиска)
@@ -831,6 +838,109 @@ def search_asanas_by_name(query: str, fuzzy_threshold: float = 0.7):
         results = [asana for asana in asanas if query_lower in asana["name"]["name_ru"].lower()]
         logger.info(f"Found {len(results)} asanas matching query: {query}")
         return results
+
+def delete_photo_from_asana(asana_id: str, photo_id: str) -> bool:
+    """
+    Удаляет фото асаны из онтологии и S3.
+    
+    Args:
+        asana_id: ID асаны
+        photo_id: ID фото (URI фото в онтологии)
+    
+    Returns:
+        True если успешно удалено, False если фото не найдено
+    """
+    try:
+        g = get_graph()
+        asana_uri = URIRef(asana_id)
+        photo_uri = URIRef(photo_id)
+        
+        # Проверяем, что фото принадлежит асане
+        if (asana_uri, ASANA.hasPhoto, photo_uri) not in g:
+            logger.warning(f"Photo {photo_id} does not belong to asana {asana_id}")
+            return False
+        
+        # Получаем S3 путь перед удалением
+        s3_path = g.value(photo_uri, ASANA.s3PhotoPath)
+        
+        # Удаляем файл из S3, если есть путь
+        if s3_path:
+            from app.s3_utils import delete_file_from_s3
+            delete_file_from_s3(str(s3_path))
+            logger.info(f"Deleted photo file from S3: {s3_path}")
+        
+        # Удаляем все триплеты, связанные с фото
+        # Удаляем связь асаны с фото
+        g.remove((asana_uri, ASANA.hasPhoto, photo_uri))
+        
+        # Удаляем все свойства фото
+        g.remove((photo_uri, None, None))
+        g.remove((None, None, photo_uri))
+        
+        # Сохраняем онтологию
+        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        
+        logger.info(f"Successfully deleted photo {photo_id} from asana {asana_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error deleting photo: {str(e)}", exc_info=True)
+        raise
+
+
+def replace_photo_in_asana(asana_id: str, photo_id: str, new_photo_bytes: bytes) -> bool:
+    """
+    Заменяет фото асаны новым изображением, сохраняя тот же путь в S3.
+    
+    Args:
+        asana_id: ID асаны
+        photo_id: ID фото (URI фото в онтологии)
+        new_photo_bytes: Новые данные изображения в виде bytes
+    
+    Returns:
+        True если успешно заменено, False если фото не найдено
+    """
+    try:
+        g = get_graph()
+        asana_uri = URIRef(asana_id)
+        photo_uri = URIRef(photo_id)
+        
+        # Проверяем, что фото принадлежит асане
+        if (asana_uri, ASANA.hasPhoto, photo_uri) not in g:
+            logger.warning(f"Photo {photo_id} does not belong to asana {asana_id}")
+            return False
+        
+        # Получаем текущий S3 путь
+        s3_path = g.value(photo_uri, ASANA.s3PhotoPath)
+        if not s3_path:
+            logger.warning(f"Photo {photo_id} does not have S3 path (might be base64)")
+            return False
+        
+        s3_path_str = str(s3_path)
+        
+        # Заменяем файл в S3 (тот же путь, новое содержимое)
+        from app.s3_utils import replace_file_in_s3
+        new_s3_path, new_hash = replace_file_in_s3(s3_path_str, new_photo_bytes)
+        
+        # Обновляем хеш в онтологии
+        # Удаляем старый хеш
+        old_hash = g.value(photo_uri, ASANA.photoHash)
+        if old_hash:
+            g.remove((photo_uri, ASANA.photoHash, old_hash))
+        
+        # Добавляем новый хеш
+        g.add((photo_uri, ASANA.photoHash, Literal(new_hash)))
+        
+        # Сохраняем онтологию
+        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        
+        logger.info(f"Successfully replaced photo {photo_id} for asana {asana_id}, new hash: {new_hash}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error replacing photo: {str(e)}", exc_info=True)
+        raise
+
 
 def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:
     """
@@ -914,6 +1024,7 @@ def get_similar_asanas(asana_id: str) -> List[Dict]:
             base64_photo = g.value(photo, ASANA.base64Photo)
             
             photo_data = {
+                "id": str(photo),  # Добавляем ID фото
                 "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
                 "source": str(source_obj) if source_obj else None
             }

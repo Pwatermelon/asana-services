@@ -601,19 +601,82 @@ async def delete_asana(user: str = Depends(is_expert_or_admin), uri: str = Query
 async def add_asana_photo_endpoint(
     asana_id: str, 
     source_id: str = Form(...),
-    photos: List[UploadFile] = File(...), 
+    photo: UploadFile = File(...),  # Изменено на единственное число для совместимости с frontend
     user: str = Depends(is_expert_or_admin)
 ):
     """Добавить фото к асане (только эксперты и админы)"""
     try:
-        results = []
-        for photo in photos:
-            photo_bytes = await photo.read()
-            photo_uri = add_photo_to_asana(asana_id, photo_bytes, source_id)
-            results.append(photo_uri)
-        return {"message": "Фото добавлены", "photo_ids": results}
+        photo_bytes = await photo.read()
+        photo_uri = add_photo_to_asana(asana_id, photo_bytes, source_id)
+        return {"message": "Фото добавлено", "photo_id": photo_uri}
     except Exception as e:
         logger.error(f"Error adding photo to asana: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put("/api/asana/{asana_id}/photo/{photo_id}")
+async def replace_asana_photo_endpoint(
+    asana_id: str,
+    photo_id: str,
+    photo: UploadFile = File(...),
+    user: str = Depends(is_expert_or_admin)
+):
+    """Заменить фото асаны (только эксперты и админы)"""
+    try:
+        # Формируем полные URI
+        if not asana_id.startswith('http://'):
+            if not asana_id.startswith('asana_'):
+                asana_id = f"asana_{asana_id}"
+            asana_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{asana_id}"
+        
+        if not photo_id.startswith('http://'):
+            if not photo_id.startswith('photo_'):
+                photo_id = f"photo_{photo_id}"
+            photo_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{photo_id}"
+        
+        photo_bytes = await photo.read()
+        from app.ontology import replace_photo_in_asana
+        success = replace_photo_in_asana(asana_id, photo_id, photo_bytes)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Photo not found or does not belong to this asana")
+        
+        return {"message": "Фото успешно заменено"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error replacing photo: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/api/asana/{asana_id}/photo/{photo_id}")
+async def delete_asana_photo_endpoint(
+    asana_id: str,
+    photo_id: str,
+    user: str = Depends(is_expert_or_admin)
+):
+    """Удалить фото асаны (только эксперты и админы)"""
+    try:
+        # Формируем полные URI
+        if not asana_id.startswith('http://'):
+            if not asana_id.startswith('asana_'):
+                asana_id = f"asana_{asana_id}"
+            asana_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{asana_id}"
+        
+        if not photo_id.startswith('http://'):
+            if not photo_id.startswith('photo_'):
+                photo_id = f"photo_{photo_id}"
+            photo_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{photo_id}"
+        
+        from app.ontology import delete_photo_from_asana
+        success = delete_photo_from_asana(asana_id, photo_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Photo not found or does not belong to this asana")
+        
+        return {"message": "Фото успешно удалено"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting photo: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 # Маршруты для источников

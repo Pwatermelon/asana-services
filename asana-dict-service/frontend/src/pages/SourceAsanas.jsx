@@ -35,6 +35,15 @@ const SourceAsanas = () => {
         grouped[firstLetter].push(asana);
       });
 
+      // Сортируем асаны внутри каждой буквы по названию
+      Object.keys(grouped).forEach(letter => {
+        grouped[letter].sort((a, b) => {
+          const nameA = (a.name?.name_ru || '').toLowerCase();
+          const nameB = (b.name?.name_ru || '').toLowerCase();
+          return nameA.localeCompare(nameB, 'ru');
+        });
+      });
+
       setGroupedAsanas(grouped);
       setAlphabet(Object.keys(grouped).sort());
     } catch (error) {
