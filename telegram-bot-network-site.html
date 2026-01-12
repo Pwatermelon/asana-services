@@ -1,0 +1,1375 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Сетевая диаграмма проекта — Telegram-бот (клиент ↔ бизнес)</title>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --surface: rgba(255,255,255,.06);
+      --surface2: rgba(255,255,255,.09);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.70);
+      --muted2: rgba(255,255,255,.55);
+      --border: rgba(255,255,255,.14);
+      --shadow: 0 10px 40px rgba(0,0,0,.35);
+      --accent: #7c5cff;
+      --accent2: #25d9b5;
+      --danger: #ff4d6d;
+      --warning: #ffb703;
+      --ok: #2dd4bf;
+      --grid: rgba(255,255,255,.08);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      --radius: 16px;
+      --radius2: 22px;
+      --pad: 18px;
+      --pad2: 22px;
+      --max: 1160px;
+    }
+    [data-theme="light"]{
+      --bg: #f6f8ff;
+      --surface: rgba(16,24,40,.06);
+      --surface2: rgba(16,24,40,.08);
+      --text: rgba(16,24,40,.92);
+      --muted: rgba(16,24,40,.72);
+      --muted2: rgba(16,24,40,.56);
+      --border: rgba(16,24,40,.14);
+      --shadow: 0 10px 40px rgba(16,24,40,.10);
+      --grid: rgba(16,24,40,.08);
+    }
+    *{ box-sizing: border-box; }
+    html, body{ height: 100%; }
+    body{
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% 10%, rgba(124,92,255,.35), transparent 55%),
+        radial-gradient(900px 500px at 80% 20%, rgba(37,217,181,.22), transparent 58%),
+        radial-gradient(900px 700px at 60% 90%, rgba(255,77,109,.18), transparent 60%),
+        linear-gradient(180deg, var(--bg), var(--bg));
+      overflow-x: hidden;
+    }
+    a{ color: inherit; text-decoration-color: rgba(124,92,255,.65); }
+    a:hover{ text-decoration-color: rgba(124,92,255,1); }
+    .container{ max-width: var(--max); margin: 0 auto; padding: 28px 18px 72px; }
+    header.hero{
+      position: relative;
+      padding: 26px 18px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius2);
+      background: linear-gradient(180deg, var(--surface), transparent);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .hero::before{
+      content: "";
+      position: absolute;
+      inset: -2px;
+      background:
+        radial-gradient(600px 300px at 15% 20%, rgba(124,92,255,.35), transparent 60%),
+        radial-gradient(520px 260px at 85% 10%, rgba(37,217,181,.25), transparent 60%),
+        radial-gradient(520px 320px at 70% 95%, rgba(255,183,3,.18), transparent 60%);
+      filter: blur(22px);
+      opacity: .9;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .hero > *{ position: relative; z-index: 1; }
+    .kicker{
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+    }
+    .dot{
+      width: 8px; height: 8px; border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent), var(--accent2));
+      box-shadow: 0 0 0 4px rgba(124,92,255,.15);
+    }
+    h1{
+      margin: 14px 0 6px;
+      font-size: clamp(26px, 4vw, 40px);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+    .subtitle{
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+      max-width: 88ch;
+    }
+    .controls{
+      margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn{
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 1px 0 rgba(255,255,255,.06) inset;
+    }
+    .btn:hover{ background: rgba(255,255,255,.06); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.primary{
+      border-color: rgba(124,92,255,.55);
+      background: linear-gradient(180deg, rgba(124,92,255,.24), rgba(124,92,255,.12));
+    }
+    .btn.ghost{ background: transparent; }
+    .pill{
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill b{ color: var(--text); font-family: var(--mono); font-weight: 800; }
+    nav.toc{
+      margin-top: 18px;
+      padding: 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    .toc-grid{
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .toc a{
+      display: block;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      color: var(--muted);
+      text-decoration: none;
+      background: transparent;
+      font-weight: 600;
+      font-size: 13px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toc a:hover{
+      border-color: var(--border);
+      color: var(--text);
+      background: rgba(255,255,255,.04);
+    }
+    section{
+      margin-top: 18px;
+      padding: var(--pad2);
+      border-radius: var(--radius2);
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      box-shadow: var(--shadow);
+    }
+    .section-title{
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    h2{
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+    }
+    .hint{
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .grid{
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card{
+      grid-column: span 3;
+      padding: 14px 14px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      box-shadow: 0 1px 0 rgba(255,255,255,.05) inset;
+    }
+    .card .label{
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .card .value{
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .card .sub{
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .badge{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+    .badge .swatch{ width: 10px; height: 10px; border-radius: 3px; background: var(--muted2); }
+    .badge.critical .swatch{ background: var(--danger); box-shadow: 0 0 0 4px rgba(255,77,109,.14); }
+    .badge.noncritical .swatch{ background: var(--accent2); box-shadow: 0 0 0 4px rgba(37,217,181,.12); }
+
+    .figure{
+      margin-top: 10px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      overflow: hidden;
+    }
+    .figure-head{
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+    .figure-body{ padding: 12px; }
+
+    .legend{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .legend .badge{ padding: 6px 10px; }
+
+    table{
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    thead th{
+      text-align: left;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 12px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    tbody td{
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text);
+      vertical-align: top;
+    }
+    tbody tr:hover td{ background: rgba(255,255,255,.03); }
+    tbody tr:last-child td{ border-bottom: none; }
+    .mono{ font-family: var(--mono); }
+    .muted{ color: var(--muted); }
+    .nowrap{ white-space: nowrap; }
+    .tag{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 800;
+      font-family: var(--mono);
+      white-space: nowrap;
+      background: rgba(255,255,255,.02);
+    }
+    .tag.critical{ border-color: rgba(255,77,109,.55); color: var(--danger); }
+    .tag.buffer{ border-color: rgba(37,217,181,.55); color: var(--accent2); }
+
+    .note{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .callouts{
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .callout{
+      grid-column: span 6;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      padding: 14px 14px;
+    }
+    .callout h3{
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+    }
+    .callout ul{
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .callout strong{ color: var(--text); }
+
+    /* Gantt */
+    .gantt-wrap{
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    .gantt{
+      min-width: 860px;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+    }
+    .gantt .left, .gantt .right{
+      padding: 10px 12px;
+    }
+    .gantt .row{
+      display: contents;
+    }
+    .gantt .cell-left{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .gantt .cell-right{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+    .gantt .cell-right::before{
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: var(--dayw) 100%;
+      opacity: .75;
+      pointer-events: none;
+    }
+    .gantt .bar{
+      height: 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.18);
+      position: relative;
+      box-shadow: 0 1px 0 rgba(255,255,255,.07) inset;
+    }
+    .gantt .bar.critical{
+      background: linear-gradient(180deg, rgba(255,77,109,.85), rgba(255,77,109,.55));
+      border-color: rgba(255,77,109,.55);
+    }
+    .gantt .bar.noncritical{
+      background: linear-gradient(180deg, rgba(37,217,181,.65), rgba(37,217,181,.35));
+      border-color: rgba(37,217,181,.55);
+    }
+    .gantt .bar .tip{
+      position: absolute;
+      top: -28px;
+      left: 0;
+      background: rgba(0,0,0,.6);
+      border: 1px solid rgba(255,255,255,.12);
+      color: rgba(255,255,255,.92);
+      font-size: 12px;
+      padding: 6px 8px;
+      border-radius: 10px;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: .15s ease;
+      pointer-events: none;
+      font-family: var(--mono);
+    }
+    [data-theme="light"] .gantt .bar .tip{
+      background: rgba(16,24,40,.88);
+      border-color: rgba(16,24,40,.12);
+      color: rgba(255,255,255,.92);
+    }
+    .gantt .bar:hover .tip{
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .gantt .header{
+      display: contents;
+    }
+    .gantt .header .cell-left,
+    .gantt .header .cell-right{
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: rgba(255,255,255,.03);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .gantt .header .cell-right{
+      overflow: hidden;
+    }
+    .gantt .ticks{
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: var(--dayw);
+      align-items: center;
+      gap: 0;
+      height: 18px;
+    }
+    .gantt .tick{
+      font-size: 11px;
+      color: var(--muted2);
+      font-family: var(--mono);
+      text-align: center;
+      opacity: .9;
+      user-select: none;
+    }
+
+    /* SVG network */
+    .svg-wrap{
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    svg{ display: block; width: 100%; height: auto; }
+    .node{
+      cursor: default;
+    }
+    .node rect{
+      fill: rgba(255,255,255,.03);
+      stroke: rgba(255,255,255,.18);
+      stroke-width: 1;
+    }
+    .node.critical rect{
+      fill: rgba(255,77,109,.14);
+      stroke: rgba(255,77,109,.55);
+    }
+    .node .id{
+      font-family: var(--mono);
+      font-weight: 900;
+      fill: var(--text);
+      font-size: 12px;
+    }
+    .node .title{
+      font-family: var(--sans);
+      fill: var(--muted);
+      font-size: 12px;
+    }
+    .node .meta{
+      font-family: var(--mono);
+      fill: var(--muted2);
+      font-size: 11px;
+    }
+    .edge{
+      fill: none;
+      stroke: rgba(255,255,255,.22);
+      stroke-width: 1.4;
+    }
+    .edge.critical{
+      stroke: rgba(255,77,109,.65);
+      stroke-width: 2.2;
+    }
+
+    footer{
+      margin-top: 18px;
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+      text-align: center;
+    }
+
+    @media (max-width: 980px){
+      .toc-grid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .card{ grid-column: span 6; }
+      .callout{ grid-column: span 12; }
+    }
+    @media print{
+      body{ background: #fff !important; }
+      .btn, nav.toc, .figure-head .btn{ display: none !important; }
+      section, header.hero{ box-shadow: none !important; }
+      .container{ padding: 0; }
+      a{ text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero" id="top">
+      <div class="kicker"><span class="dot"></span> Сетевое планирование / CPM / Gantt</div>
+      <h1>Проектирование системы управления коммуникациями между клиентами и бизнесом на основе Telegram-бота</h1>
+      <p class="subtitle">
+        Этот одностраничный файл содержит: таблицу работ, автоматический расчёт ранних/поздних сроков и резервов времени,
+        <strong>сетевую диаграмму</strong> зависимостей и <strong>временную диаграмму</strong> (Gantt) по вашему проекту, а также критический путь,
+        узкие места, ресурсы/стоимость и рекомендации по управлению.
+      </p>
+
+      <div class="controls">
+        <button class="btn primary" id="btnTheme" type="button" aria-label="Переключить тему">Тема: авто</button>
+        <button class="btn" id="btnCriticalOnly" type="button">Показать: всё</button>
+        <button class="btn ghost" type="button" onclick="window.print()">Печать / PDF</button>
+        <span class="pill">Критический путь: <b id="cpDays">—</b> дней</span>
+        <span class="pill">Проект (по графу): <b id="projDays">—</b> дней</span>
+        <span class="pill">Трудозатраты: <b id="totalHours">—</b> ч</span>
+      </div>
+
+      <nav class="toc" aria-label="Оглавление">
+        <div class="toc-grid">
+          <a href="#overview">Обзор</a>
+          <a href="#network">Сетевая диаграмма</a>
+          <a href="#timeline">Временная диаграмма</a>
+          <a href="#works">Таблица работ</a>
+          <a href="#critical">Критический путь</a>
+          <a href="#risks">Узкие места</a>
+          <a href="#resources">Ресурсы и стоимость</a>
+          <a href="#buffers">Резервы времени</a>
+          <a href="#recommendations">Рекомендации</a>
+          <a href="#assumptions">Примечания</a>
+          <a href="#top">Наверх</a>
+        </div>
+      </nav>
+    </header>
+
+    <section id="overview">
+      <div class="section-title">
+        <h2>Описание</h2>
+        <div class="hint">Обновляется автоматически из данных работ ниже</div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="label">Цель</div>
+          <div class="value">Единый канал общения</div>
+          <div class="sub">Telegram-бот и панель управления для операторов: приём обращений, распределение чатов, уведомления, рассылки и real‑time коммуникации.</div>
+        </div>
+        <div class="card">
+          <div class="label">Метрика успеха</div>
+          <div class="value">SLA + прозрачность</div>
+          <div class="sub">Сокращение времени ответа, управляемость очереди, аудит действий и стабильная доставка сообщений.</div>
+        </div>
+        <div class="card">
+          <div class="label">Критический путь</div>
+          <div class="value" id="cpListShort">—</div>
+          <div class="sub">Набор работ, определяющий минимальную длительность проекта (подсветка на диаграммах).</div>
+        </div>
+        <div class="card">
+          <div class="label">Объём работ</div>
+          <div class="value"><span id="taskCount">—</span> задач</div>
+          <div class="sub">От анализа и архитектуры до API, бизнес‑логики и итогового документирования.</div>
+        </div>
+      </div>
+      <p class="note">
+        <span class="badge critical"><span class="swatch"></span>Критические работы</span>
+        <span class="badge noncritical"><span class="swatch"></span>Некритические (имеют резерв)</span>
+        <span class="badge"><span class="swatch"></span>Зависимости (стрелки)</span>
+      </p>
+    </section>
+
+    <section id="network">
+      <div class="section-title">
+        <h2>Сетевая диаграмма проекта</h2>
+        <div class="hint">SVG • можно масштабировать колесом/тачпадом (в браузере)</div>
+      </div>
+
+      <div class="figure">
+        <div class="figure-head">
+          <div class="legend">
+            <span class="badge critical"><span class="swatch"></span>критический путь</span>
+            <span class="badge noncritical"><span class="swatch"></span>резерв времени &gt; 0</span>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <span class="pill">Проект (по CPM): <b id="projDays2">—</b> дней</span>
+            <span class="pill">Критический путь: <b id="cpDays2">—</b> дней</span>
+          </div>
+        </div>
+        <div class="figure-body">
+          <div class="svg-wrap">
+            <svg id="networkSvg" viewBox="0 0 1200 680" role="img" aria-label="Сетевая диаграмма работ"></svg>
+          </div>
+          <p class="note">Подсказка: внутри узла показаны \(ES/EF\) (раннее начало/окончание), \(LS/LF\) (позднее начало/окончание) и резерв.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="timeline">
+      <div class="section-title">
+        <h2>Временная диаграмма (Gantt)</h2>
+        <div class="hint">Старт проекта = День 1</div>
+      </div>
+      <div class="figure">
+        <div class="figure-head">
+          <div class="legend">
+            <span class="badge critical"><span class="swatch"></span>критические</span>
+            <span class="badge noncritical"><span class="swatch"></span>с резервом</span>
+          </div>
+          <div class="pill">Шаг сетки: <b id="dayWidthLabel">—</b> px/день</div>
+        </div>
+        <div class="figure-body">
+          <div class="gantt-wrap">
+            <div class="gantt" id="gantt" style="--dayw: 12px;"></div>
+          </div>
+          <p class="note">Наведи на полосу — появится подсказка с датами (в днях проекта), трудозатратами и резервом.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="works">
+      <div class="section-title">
+        <h2>Таблица работ</h2>
+        <div class="hint">CPM рассчитан автоматически (ES/EF/LS/LF/резерв)</div>
+      </div>
+      <div class="figure">
+        <div class="figure-head">
+          <div class="legend">
+            <span class="tag critical">critical</span>
+            <span class="tag buffer">buffer</span>
+          </div>
+          <div class="pill">Суммарно: <b id="totalHours2">—</b> ч • <b id="projDays3">—</b> дней</div>
+        </div>
+        <div class="figure-body" style="overflow:auto; max-height: 520px;">
+          <table>
+            <thead>
+              <tr>
+                <th class="nowrap">№</th>
+                <th>Работа</th>
+                <th class="nowrap">Длит., дни</th>
+                <th class="nowrap">Труд, ч</th>
+                <th>Предшественники</th>
+                <th class="nowrap">ES–EF</th>
+                <th class="nowrap">LS–LF</th>
+                <th class="nowrap">Резерв</th>
+                <th class="nowrap">Статус</th>
+              </tr>
+            </thead>
+            <tbody id="worksTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="critical">
+      <div class="section-title">
+        <h2>Критический путь</h2>
+        <div class="hint">Минимальная длительность по критическим работам</div>
+      </div>
+      <div class="callouts" id="criticalCards"></div>
+      <p class="note">
+        Общая длительность критического пути (по вашему описанию): <strong>31 день</strong>.
+        В этом файле дополнительно считается CPM по зависимостям, чтобы подсветка на диаграммах была строго корректной.
+      </p>
+    </section>
+
+    <section id="risks">
+      <div class="section-title">
+        <h2>Узкие места проекта</h2>
+        <div class="hint">Риски и митигации</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>1) Проектирование архитектуры (2.2)</h3>
+          <ul>
+            <li><strong>Проблема:</strong> определяет всю дальнейшую структуру системы.</li>
+            <li><strong>Риск:</strong> неверные решения приведут к переработке последующих модулей.</li>
+            <li><strong>Митигация:</strong> архитектурные ревью, консультации с экспертами, быстрые прототипы.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>2) Модуль работы операторов (3.3)</h3>
+          <ul>
+            <li><strong>Проблема:</strong> критический модуль с множеством зависимостей.</li>
+            <li><strong>Риск:</strong> задержка блокирует real‑time коммуникации и смежные функции.</li>
+            <li><strong>Митигация:</strong> параллелить независимые части (UI/логика/интеграции), заранее определить контракты API.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>3) Real‑time коммуникации (3.7)</h3>
+          <ul>
+            <li><strong>Проблема:</strong> технически сложный модуль (WebSocket/long‑polling, доставка событий).</li>
+            <li><strong>Риск:</strong> ошибки проектирования → проблемы производительности/надёжности.</li>
+            <li><strong>Митигация:</strong> раннее прототипирование, нагрузочное тестирование архитектуры.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>4) Проектирование API (4.2)</h3>
+          <ul>
+            <li><strong>Проблема:</strong> связывает все модули, находится на критическом пути.</li>
+            <li><strong>Риск:</strong> изменения API требуют переработки модулей.</li>
+            <li><strong>Митигация:</strong> версионирование, спецификация (OpenAPI), контрактное тестирование.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>5) Документирование (6.1)</h3>
+          <ul>
+            <li><strong>Проблема:</strong> финальный этап, зависит от всех предыдущих работ.</li>
+            <li><strong>Риск:</strong> накопление задержек, “долг документации”.</li>
+            <li><strong>Митигация:</strong> документировать параллельно: ADR, схемы, README, runbook.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="resources">
+      <div class="section-title">
+        <h2>Ресурсы и стоимость</h2>
+        <div class="hint">Итоги по вашему описанию</div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="label">Итого</div>
+          <div class="value">624 часа</div>
+          <div class="sub">55 дней работ (по оценкам в описании).</div>
+        </div>
+        <div class="card">
+          <div class="label">Аналитик/проектировщик</div>
+          <div class="value">400 ч</div>
+          <div class="sub">64% от общих трудозатрат.</div>
+        </div>
+        <div class="card">
+          <div class="label">Архитектор</div>
+          <div class="value">150 ч</div>
+          <div class="sub">24% от общих трудозатрат.</div>
+        </div>
+        <div class="card">
+          <div class="label">Технический писатель</div>
+          <div class="value">74 ч</div>
+          <div class="sub">12% от общих трудозатрат.</div>
+        </div>
+      </div>
+
+      <div class="callouts">
+        <div class="callout">
+          <h3>Трудозатраты по этапам</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Этап</th>
+                <th class="nowrap">Труд, ч</th>
+                <th class="nowrap">Длит., дни</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Глава 1. Анализ</td><td class="mono nowrap">80</td><td class="mono nowrap">5</td></tr>
+              <tr><td>Глава 2. Архитектура</td><td class="mono nowrap">104</td><td class="mono nowrap">9</td></tr>
+              <tr><td>Глава 3. Функциональность</td><td class="mono nowrap">200</td><td class="mono nowrap">22</td></tr>
+              <tr><td>Глава 4. Технические аспекты</td><td class="mono nowrap">128</td><td class="mono nowrap">8</td></tr>
+              <tr><td>Глава 5. Бизнес-процессы</td><td class="mono nowrap">72</td><td class="mono nowrap">6</td></tr>
+              <tr><td>Документирование</td><td class="mono nowrap">40</td><td class="mono nowrap">5</td></tr>
+              <tr><td><strong>ИТОГО</strong></td><td class="mono nowrap"><strong>624</strong></td><td class="mono nowrap"><strong>55</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <h3>Распределение ответственности (пример)</h3>
+          <ul>
+            <li><strong>Аналитик/Проектировщик:</strong> требования, UX‑сценарии, описание бизнес‑процессов, постановка задач.</li>
+            <li><strong>Архитектор:</strong> компоненты, интеграции (Telegram API), безопасность, масштабирование, выбор технологий.</li>
+            <li><strong>Технический писатель:</strong> документация API, инструкции эксплуатации, runbook, схемы.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="buffers">
+      <div class="section-title">
+        <h2>Резервы времени</h2>
+        <div class="hint">Фиксированные резервы из вашего текста + CPM-резервы из расчёта</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>Резервы (как в описании)</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Работа</th>
+                <th class="nowrap">Раннее начало</th>
+                <th class="nowrap">Позднее начало</th>
+                <th class="nowrap">Резерв</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>2.3 Проектирование БД</td><td class="mono nowrap">День 10</td><td class="mono nowrap">День 14</td><td class="mono nowrap">4 дня</td></tr>
+              <tr><td>3.1 Модуль взаимодействия</td><td class="mono nowrap">День 15</td><td class="mono nowrap">День 19</td><td class="mono nowrap">4 дня</td></tr>
+              <tr><td>3.2 Модуль управления чатами</td><td class="mono nowrap">День 15</td><td class="mono nowrap">День 18</td><td class="mono nowrap">3 дня</td></tr>
+              <tr><td>3.4 Модуль курьеров</td><td class="mono nowrap">День 19</td><td class="mono nowrap">День 22</td><td class="mono nowrap">3 дня</td></tr>
+              <tr><td>4.1 Выбор технологий</td><td class="mono nowrap">День 28</td><td class="mono nowrap">День 30</td><td class="mono nowrap">2 дня</td></tr>
+              <tr><td><strong>Общий резерв времени проекта</strong></td><td colspan="3" class="mono"><strong>16 дней</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <h3>Резервы (по CPM из этого файла)</h3>
+          <p class="note" style="margin-top: 0;">Ниже — резервы, которые посчитаны по графу зависимостей. Это удобно для контроля “что можно сдвинуть без сдвига дедлайна”.</p>
+          <div style="overflow:auto; max-height: 340px;">
+            <table>
+              <thead>
+                <tr>
+                  <th class="nowrap">№</th>
+                  <th>Работа</th>
+                  <th class="nowrap">Резерв, дни</th>
+                  <th class="nowrap">ES–EF</th>
+                  <th class="nowrap">LS–LF</th>
+                </tr>
+              </thead>
+              <tbody id="buffersTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="recommendations">
+      <div class="section-title">
+        <h2>Рекомендации по управлению проектом</h2>
+        <div class="hint">Фокус на срок, риск и параллельность</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>1) Фокус на критическом пути</h3>
+          <ul>
+            <li>Приоритизировать работы, отмеченные как <strong>critical</strong>, и защищать их от контекст‑свитчинга.</li>
+            <li>Еженедельный контроль факта vs плана по этим работам.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>2) Раннее выявление проблем</h3>
+          <ul>
+            <li>Регулярные ревью архитектурных решений (ADR).</li>
+            <li>Проверка ключевых гипотез прототипами (real‑time, нагрузка, интеграции).</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>3) Параллельная работа</h3>
+          <ul>
+            <li>Использовать резервы времени для параллельной разработки независимых модулей.</li>
+            <li>Фиксировать контракты API, чтобы параллелить фронт/бэк/бот.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>4) Управление рисками</h3>
+          <ul>
+            <li>Особое внимание узким местам: архитектура, операторский модуль, real‑time, API.</li>
+            <li>Раннее планирование тестирования (нагрузка, отказоустойчивость).</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>5) Гибкость планирования</h3>
+          <ul>
+            <li>Учитывать возможные задержки на сложных этапах.</li>
+            <li>Резервы использовать как инструмент управления, а не “лишнее время”.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="assumptions">
+      <div class="section-title">
+        <h2>Примечания (как считается график)</h2>
+        <div class="hint">Важно для корректной интерпретации</div>
+      </div>
+      <div class="note">
+        <ul>
+          <li><strong>Единица времени:</strong> “день” из таблицы, без календарных выходных (условные рабочие дни).</li>
+          <li><strong>Старт проекта:</strong> День 1.</li>
+          <li><strong>Критичность:</strong> в таблице есть “✅”, но диаграммы подсвечивают критический путь по CPM (резерв = 0).</li>
+          <li><strong>Длительность проекта:</strong> в тексте указано 55 дней (по оценкам трудозатрат по главам). CPM по зависимостям может дать другое число — это нормально, если часть работ предполагается параллельной.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer>
+      Файл: <span class="mono">telegram-bot-network-site.html</span> • автономно • без библиотек • можно сохранить как PDF через печать браузера
+    </footer>
+  </div>
+
+  <script>
+    // ---- Data ----
+    const TASKS = [
+      { id: "1.1", name: "Анализ сферы поддержки", days: 3, hours: 24, preds: [], criticalHint: false, phase: "Глава 1. Анализ" },
+      { id: "1.2", name: "Анализ конкурентов", days: 5, hours: 40, preds: [], criticalHint: false, phase: "Глава 1. Анализ" },
+      { id: "1.3", name: "Формулирование требований", days: 2, hours: 16, preds: [], criticalHint: false, phase: "Глава 1. Анализ" },
+
+      { id: "2.1", name: "Концептуальное проектирование", days: 4, hours: 32, preds: ["1.1","1.2","1.3"], criticalHint: true, phase: "Глава 2. Архитектура" },
+      { id: "2.2", name: "Проектирование архитектуры", days: 5, hours: 40, preds: ["2.1"], criticalHint: true, phase: "Глава 2. Архитектура" },
+      { id: "2.3", name: "Проектирование БД", days: 4, hours: 32, preds: ["2.1"], criticalHint: false, phase: "Глава 2. Архитектура" },
+
+      { id: "3.1", name: "Модуль взаимодействия с клиентами", days: 4, hours: 32, preds: ["2.2","2.3"], criticalHint: false, phase: "Глава 3. Функциональность" },
+      { id: "3.2", name: "Модуль управления чатами", days: 3, hours: 24, preds: ["2.2","2.3"], criticalHint: false, phase: "Глава 3. Функциональность" },
+      { id: "3.3", name: "Модуль работы операторов", days: 5, hours: 40, preds: ["3.1","3.2"], criticalHint: true, phase: "Глава 3. Функциональность" },
+      { id: "3.4", name: "Модуль работы курьеров", days: 3, hours: 24, preds: ["3.1","3.2"], criticalHint: false, phase: "Глава 3. Функциональность" },
+      { id: "3.5", name: "Модуль рассылок", days: 3, hours: 24, preds: ["3.3"], criticalHint: false, phase: "Глава 3. Функциональность" },
+      { id: "3.6", name: "Административный модуль", days: 3, hours: 24, preds: ["3.3"], criticalHint: false, phase: "Глава 3. Функциональность" },
+      { id: "3.7", name: "Real-time коммуникации", days: 4, hours: 32, preds: ["3.3"], criticalHint: true, phase: "Глава 3. Функциональность" },
+
+      { id: "4.1", name: "Выбор технологий", days: 2, hours: 16, preds: ["3.4","3.5","3.6","3.7"], criticalHint: false, phase: "Глава 4. Технические аспекты" },
+      { id: "4.2", name: "Проектирование API", days: 4, hours: 32, preds: ["4.1"], criticalHint: true, phase: "Глава 4. Технические аспекты" },
+      { id: "4.3", name: "Проектирование безопасности", days: 3, hours: 24, preds: ["4.1"], criticalHint: false, phase: "Глава 4. Технические аспекты" },
+      { id: "4.4", name: "Обработка файлов", days: 2, hours: 16, preds: ["4.2","4.3"], criticalHint: false, phase: "Глава 4. Технические аспекты" },
+      { id: "4.5", name: "Логирование и мониторинг", days: 2, hours: 16, preds: ["4.2","4.3"], criticalHint: false, phase: "Глава 4. Технические аспекты" },
+      { id: "4.6", name: "Система развертывания", days: 3, hours: 24, preds: ["4.4","4.5"], criticalHint: false, phase: "Глава 4. Технические аспекты" },
+
+      { id: "5.1", name: "Бизнес-процессы", days: 4, hours: 32, preds: ["3.7","4.2"], criticalHint: true, phase: "Глава 5. Бизнес-процессы" },
+      { id: "5.2", name: "Правила бизнес-логики", days: 3, hours: 24, preds: ["5.1"], criticalHint: false, phase: "Глава 5. Бизнес-процессы" },
+      { id: "5.3", name: "Система уведомлений", days: 2, hours: 16, preds: ["5.1"], criticalHint: false, phase: "Глава 5. Бизнес-процессы" },
+
+      { id: "6.1", name: "Документирование", days: 5, hours: 40, preds: ["4.6","5.2","5.3"], criticalHint: true, phase: "Документирование" },
+    ];
+
+    // ---- Helpers ----
+    const byId = new Map(TASKS.map(t => [t.id, { ...t }]));
+
+    function topoSort(tasks) {
+      const indeg = new Map(tasks.map(t => [t.id, 0]));
+      const succ = new Map(tasks.map(t => [t.id, []]));
+      for (const t of tasks) {
+        for (const p of t.preds) {
+          if (!succ.has(p)) succ.set(p, []);
+          succ.get(p).push(t.id);
+          indeg.set(t.id, (indeg.get(t.id) ?? 0) + 1);
+        }
+      }
+      const q = [];
+      for (const [id, d] of indeg.entries()) if (d === 0) q.push(id);
+      q.sort();
+      const order = [];
+      while (q.length) {
+        const id = q.shift();
+        order.push(id);
+        for (const s of (succ.get(id) ?? [])) {
+          indeg.set(s, indeg.get(s) - 1);
+          if (indeg.get(s) === 0) {
+            q.push(s);
+            q.sort();
+          }
+        }
+      }
+      if (order.length !== tasks.length) {
+        throw new Error("Цикл в зависимостях: невозможно построить сетевой график");
+      }
+      return { order, succ };
+    }
+
+    function computeCPM(tasks) {
+      const { order, succ } = topoSort(tasks);
+
+      // Forward pass
+      for (const id of order) {
+        const t = byId.get(id);
+        t.ES = 0;
+        for (const p of t.preds) {
+          const tp = byId.get(p);
+          t.ES = Math.max(t.ES, tp.EF);
+        }
+        t.EF = t.ES + t.days;
+      }
+      const projectDuration = Math.max(...tasks.map(t => byId.get(t.id).EF));
+
+      // Backward pass
+      const rev = [...order].reverse();
+      for (const id of rev) {
+        const t = byId.get(id);
+        const succs = succ.get(id) ?? [];
+        if (!succs.length) {
+          t.LF = projectDuration;
+        } else {
+          t.LF = Math.min(...succs.map(sid => byId.get(sid).LS));
+        }
+        t.LS = t.LF - t.days;
+        t.slack = t.LS - t.ES;
+        t.isCritical = Math.abs(t.slack) < 1e-9;
+      }
+
+      // One critical chain (choose the one following zero-slack edges)
+      const startCrit = tasks
+        .map(t => byId.get(t.id))
+        .filter(t => t.isCritical && t.preds.every(p => byId.get(p).EF <= t.ES + 1e-9))
+        .sort((a,b) => a.ES - b.ES)[0];
+
+      const chain = [];
+      if (startCrit) {
+        const visited = new Set();
+        let cur = startCrit;
+        while (cur && !visited.has(cur.id)) {
+          visited.add(cur.id);
+          chain.push(cur.id);
+          const next = (succ.get(cur.id) ?? [])
+            .map(id => byId.get(id))
+            .filter(t => t.isCritical && Math.abs(t.ES - cur.EF) < 1e-9)
+            .sort((a,b) => a.EF - b.EF)[0];
+          cur = next;
+        }
+      }
+
+      // Depth (for network layout)
+      for (const id of order) {
+        const t = byId.get(id);
+        t.depth = t.preds.length ? 1 + Math.max(...t.preds.map(p => byId.get(p).depth)) : 0;
+      }
+      const maxDepth = Math.max(...tasks.map(t => byId.get(t.id).depth));
+
+      return { order, succ, projectDuration, criticalChain: chain, maxDepth };
+    }
+
+    function formatDayRange(es, ef) {
+      // Convert 0-based ES/EF into Day numbers (Day 1..)
+      return `Д${es + 1}–Д${ef}`;
+    }
+    function formatDay(d0) { return `Д${d0 + 1}`; }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;");
+    }
+
+    // ---- Renderers ----
+    let onlyCritical = false;
+
+    function renderSummary(cpm) {
+      const totalHours = TASKS.reduce((a,t) => a + t.hours, 0);
+      document.getElementById("totalHours").textContent = String(totalHours);
+      document.getElementById("totalHours2").textContent = String(totalHours);
+      document.getElementById("projDays").textContent = String(cpm.projectDuration);
+      document.getElementById("projDays2").textContent = String(cpm.projectDuration);
+      document.getElementById("projDays3").textContent = String(cpm.projectDuration);
+      document.getElementById("taskCount").textContent = String(TASKS.length);
+
+      // Per your description: critical path = 31 days (explicit)
+      const describedCritical = ["2.1","2.2","3.3","3.7","4.2","5.1","6.1"];
+      const describedDays = describedCritical.reduce((a,id) => a + byId.get(id).days, 0);
+      document.getElementById("cpDays").textContent = String(describedDays);
+      document.getElementById("cpDays2").textContent = String(describedDays);
+      document.getElementById("cpListShort").textContent = describedCritical.join(" → ");
+    }
+
+    function renderWorksTable(cpm) {
+      const tbody = document.getElementById("worksTbody");
+      const rows = cpm.order
+        .map(id => byId.get(id))
+        .filter(t => !onlyCritical || t.isCritical)
+        .map(t => {
+          const preds = t.preds.length ? t.preds.join(", ") : "—";
+          const status = t.isCritical ? `<span class="tag critical">critical</span>` : `<span class="tag buffer">buffer</span>`;
+          const slack = Math.round(t.slack * 1000) / 1000;
+          return `
+            <tr>
+              <td class="mono nowrap">${escapeHtml(t.id)}</td>
+              <td>${escapeHtml(t.name)}<div class="muted" style="margin-top:4px; font-size:12px;">${escapeHtml(t.phase)}</div></td>
+              <td class="mono nowrap">${t.days}</td>
+              <td class="mono nowrap">${t.hours}</td>
+              <td class="mono">${escapeHtml(preds)}</td>
+              <td class="mono nowrap">${formatDayRange(t.ES, t.EF)}</td>
+              <td class="mono nowrap">${formatDayRange(t.LS, t.LF)}</td>
+              <td class="mono nowrap">${slack}</td>
+              <td class="nowrap">${status}</td>
+            </tr>
+          `;
+        }).join("");
+      tbody.innerHTML = rows;
+    }
+
+    function renderBuffersTable(cpm) {
+      const tbody = document.getElementById("buffersTbody");
+      const items = cpm.order
+        .map(id => byId.get(id))
+        .filter(t => t.slack > 0.000001)
+        .sort((a,b) => b.slack - a.slack);
+      tbody.innerHTML = items.map(t => `
+        <tr>
+          <td class="mono nowrap">${escapeHtml(t.id)}</td>
+          <td>${escapeHtml(t.name)}</td>
+          <td class="mono nowrap">${Math.round(t.slack * 1000) / 1000}</td>
+          <td class="mono nowrap">${formatDayRange(t.ES, t.EF)}</td>
+          <td class="mono nowrap">${formatDayRange(t.LS, t.LF)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderCriticalCards() {
+      const describedCritical = ["2.1","2.2","3.3","3.7","4.2","5.1","6.1"];
+      const wrap = document.getElementById("criticalCards");
+      wrap.innerHTML = describedCritical.map(id => {
+        const t = byId.get(id);
+        return `
+          <div class="callout">
+            <h3>${escapeHtml(t.name)} <span class="mono">(${escapeHtml(t.id)})</span></h3>
+            <ul>
+              <li><strong>Длительность:</strong> ${t.days} дней</li>
+              <li><strong>Трудозатраты:</strong> ${t.hours} часов</li>
+              <li><strong>Предшественники:</strong> ${t.preds.length ? escapeHtml(t.preds.join(", ")) : "—"}</li>
+            </ul>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderGantt(cpm) {
+      const gantt = document.getElementById("gantt");
+
+      // Dynamic day width: fit ~40-60 days on screen but keep readable.
+      const dayw = Math.max(10, Math.min(16, Math.round(820 / Math.max(30, cpm.projectDuration))));
+      gantt.style.setProperty("--dayw", dayw + "px");
+      document.getElementById("dayWidthLabel").textContent = String(dayw);
+
+      const tasks = cpm.order
+        .map(id => byId.get(id))
+        .filter(t => !onlyCritical || t.isCritical);
+
+      const ticks = Array.from({ length: cpm.projectDuration }, (_,i) => i + 1);
+      const header = `
+        <div class="row header">
+          <div class="cell-left">Работа</div>
+          <div class="cell-right">
+            <div class="ticks">
+              ${ticks.map(d => `<div class="tick">${(d % 5 === 0 || d === 1 || d === cpm.projectDuration) ? d : ""}</div>`).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+
+      const rows = tasks.map(t => {
+        const left = `
+          <div class="cell-left">
+            <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">
+              <span class="mono" style="font-weight:900;">${escapeHtml(t.id)}</span>
+              <span>${escapeHtml(t.name)}</span>
+            </div>
+            <div class="muted" style="margin-top:4px; font-size:12px;">
+              ${escapeHtml(t.phase)} • ${t.days}д • ${t.hours}ч • резерв: ${Math.round(t.slack*1000)/1000}д
+            </div>
+          </div>
+        `;
+        const leftPx = (t.ES) * dayw;
+        const widthPx = (t.days) * dayw;
+        const barCls = t.isCritical ? "critical" : "noncritical";
+        const right = `
+          <div class="cell-right">
+            <div class="bar ${barCls}" style="margin-left:${leftPx}px; width:${Math.max(8, widthPx)}px;">
+              <div class="tip">${escapeHtml(t.id)} • ${formatDay(t.ES)}–${formatDay(t.EF - 1)} • ${t.days}д • резерв ${Math.round(t.slack*1000)/1000}д</div>
+            </div>
+          </div>
+        `;
+        return `<div class="row">${left}${right}</div>`;
+      }).join("");
+
+      gantt.innerHTML = header + rows;
+    }
+
+    function renderNetworkSvg(cpm) {
+      const svg = document.getElementById("networkSvg");
+      const { succ } = cpm;
+
+      // Layout
+      const tasks = cpm.order.map(id => byId.get(id)).filter(t => !onlyCritical || t.isCritical);
+      const byDepth = new Map();
+      for (const t of tasks) {
+        const d = t.depth ?? 0;
+        if (!byDepth.has(d)) byDepth.set(d, []);
+        byDepth.get(d).push(t);
+      }
+      for (const [d, list] of byDepth.entries()) {
+        list.sort((a,b) => a.ES - b.ES || a.id.localeCompare(b.id));
+      }
+
+      const depthKeys = Array.from(byDepth.keys()).sort((a,b) => a-b);
+      const colW = 220;
+      const rowH = 90;
+      const nodeW = 200;
+      const nodeH = 64;
+      const marginX = 40;
+      const marginY = 30;
+
+      // Compute positions
+      const pos = new Map();
+      let maxRows = 0;
+      for (const d of depthKeys) maxRows = Math.max(maxRows, byDepth.get(d).length);
+
+      for (const d of depthKeys) {
+        const list = byDepth.get(d);
+        for (let i = 0; i < list.length; i++) {
+          const t = list[i];
+          const x = marginX + d * colW;
+          const y = marginY + i * rowH;
+          pos.set(t.id, { x, y });
+        }
+      }
+
+      const width = marginX * 2 + (Math.max(...depthKeys) + 1) * colW;
+      const height = marginY * 2 + Math.max(1, maxRows) * rowH;
+      svg.setAttribute("viewBox", `0 0 ${Math.max(1200, width)} ${Math.max(680, height)}`);
+
+      // Arrow marker
+      const defs = `
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,.35)"></path>
+          </marker>
+          <marker id="arrowCritical" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,77,109,.75)"></path>
+          </marker>
+        </defs>
+      `;
+
+      // Determine critical edges: both nodes critical + exact timing alignment (EF == ES)
+      const isCritEdge = (aId, bId) => {
+        const a = byId.get(aId), b = byId.get(bId);
+        return a && b && a.isCritical && b.isCritical && Math.abs(a.EF - b.ES) < 1e-9;
+      };
+
+      // Draw edges first
+      const edges = [];
+      for (const t of tasks) {
+        for (const p of t.preds) {
+          if (!pos.has(p) || !pos.has(t.id)) continue; // filtered out by critical-only
+          const A = pos.get(p);
+          const B = pos.get(t.id);
+          const x1 = A.x + nodeW;
+          const y1 = A.y + nodeH / 2;
+          const x2 = B.x;
+          const y2 = B.y + nodeH / 2;
+          const mid = (x1 + x2) / 2;
+          const d = `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+          const crit = isCritEdge(p, t.id);
+          edges.push(`<path class="edge ${crit ? "critical" : ""}" d="${d}" marker-end="url(#${crit ? "arrowCritical" : "arrow"})"></path>`);
+        }
+      }
+
+      // Draw nodes
+      const nodes = tasks.map(t => {
+        const { x, y } = pos.get(t.id);
+        const slack = Math.round(t.slack * 1000) / 1000;
+        const title = t.name.length > 32 ? t.name.slice(0, 31) + "…" : t.name;
+        const cls = `node ${t.isCritical ? "critical" : ""}`;
+        const meta = `ES/EF ${t.ES}/${t.EF} • LS/LF ${t.LS}/${t.LF} • R ${slack}`;
+        return `
+          <g class="${cls}" transform="translate(${x} ${y})">
+            <rect rx="14" ry="14" width="${nodeW}" height="${nodeH}"></rect>
+            <text class="id" x="14" y="20">${escapeHtml(t.id)}</text>
+            <text class="title" x="14" y="38">${escapeHtml(title)}</text>
+            <text class="meta" x="14" y="55">${escapeHtml(meta)}</text>
+          </g>
+        `;
+      }).join("");
+
+      // Background columns labels
+      const cols = depthKeys.map(d => {
+        const x = marginX + d * colW;
+        return `
+          <g opacity="0.7">
+            <text x="${x}" y="${18}" fill="rgba(255,255,255,.45)" font-size="11" font-family="var(--mono)">
+              Уровень ${d}
+            </text>
+          </g>
+        `;
+      }).join("");
+
+      svg.innerHTML = defs + cols + edges.join("") + nodes;
+    }
+
+    // ---- Theme & UI ----
+    function setTheme(theme) {
+      // theme: 'auto' | 'light' | 'dark'
+      const root = document.documentElement;
+      if (theme === "auto") {
+        root.removeAttribute("data-theme");
+      } else {
+        root.setAttribute("data-theme", theme);
+      }
+      localStorage.setItem("tbot_theme", theme);
+      const label = theme === "auto" ? "авто" : theme === "light" ? "светлая" : "тёмная";
+      document.getElementById("btnTheme").textContent = `Тема: ${label}`;
+    }
+
+    function toggleTheme() {
+      const cur = localStorage.getItem("tbot_theme") || "auto";
+      const next = cur === "auto" ? "dark" : cur === "dark" ? "light" : "auto";
+      setTheme(next);
+    }
+
+    function toggleCriticalOnly() {
+      onlyCritical = !onlyCritical;
+      document.getElementById("btnCriticalOnly").textContent = onlyCritical ? "Показать: только critical" : "Показать: всё";
+      const cpm = computeCPM(TASKS);
+      renderAll(cpm);
+    }
+
+    function renderAll(cpm) {
+      renderSummary(cpm);
+      renderWorksTable(cpm);
+      renderBuffersTable(cpm);
+      renderCriticalCards();
+      renderNetworkSvg(cpm);
+      renderGantt(cpm);
+    }
+
+    // Init
+    (function init() {
+      const savedTheme = localStorage.getItem("tbot_theme") || "auto";
+      setTheme(savedTheme);
+      document.getElementById("btnTheme").addEventListener("click", toggleTheme);
+      document.getElementById("btnCriticalOnly").addEventListener("click", toggleCriticalOnly);
+
+      const cpm = computeCPM(TASKS);
+      renderAll(cpm);
+    })();
+  </script>
+</body>
+</html>
