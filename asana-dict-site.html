@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>asana-dict — Каталог асан (одна страница)</title>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --surface: rgba(255,255,255,.06);
+      --surface2: rgba(255,255,255,.09);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.70);
+      --muted2: rgba(255,255,255,.55);
+      --border: rgba(255,255,255,.14);
+      --shadow: 0 10px 40px rgba(0,0,0,.35);
+      --accent: #7c5cff;
+      --accent2: #25d9b5;
+      --danger: #ff4d6d;
+      --warning: #ffb703;
+      --grid: rgba(255,255,255,.08);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      --radius: 16px;
+      --radius2: 22px;
+      --pad: 18px;
+      --pad2: 22px;
+      --max: 1160px;
+    }
+    [data-theme="light"]{
+      --bg: #f6f8ff;
+      --surface: rgba(16,24,40,.06);
+      --surface2: rgba(16,24,40,.08);
+      --text: rgba(16,24,40,.92);
+      --muted: rgba(16,24,40,.72);
+      --muted2: rgba(16,24,40,.56);
+      --border: rgba(16,24,40,.14);
+      --shadow: 0 10px 40px rgba(16,24,40,.10);
+      --grid: rgba(16,24,40,.08);
+    }
+    *{ box-sizing: border-box; }
+    html, body{ height: 100%; }
+    body{
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% 10%, rgba(124,92,255,.35), transparent 55%),
+        radial-gradient(900px 500px at 80% 20%, rgba(37,217,181,.22), transparent 58%),
+        radial-gradient(900px 700px at 60% 90%, rgba(255,183,3,.16), transparent 60%),
+        linear-gradient(180deg, var(--bg), var(--bg));
+      overflow-x: hidden;
+    }
+    a{ color: inherit; text-decoration-color: rgba(124,92,255,.65); }
+    a:hover{ text-decoration-color: rgba(124,92,255,1); }
+    .container{ max-width: var(--max); margin: 0 auto; padding: 28px 18px 72px; }
+    header.hero{
+      position: relative;
+      padding: 26px 18px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius2);
+      background: linear-gradient(180deg, var(--surface), transparent);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .hero::before{
+      content: "";
+      position: absolute;
+      inset: -2px;
+      background:
+        radial-gradient(600px 300px at 15% 20%, rgba(124,92,255,.35), transparent 60%),
+        radial-gradient(520px 260px at 85% 10%, rgba(37,217,181,.25), transparent 60%),
+        radial-gradient(520px 320px at 70% 95%, rgba(255,183,3,.18), transparent 60%);
+      filter: blur(22px);
+      opacity: .9;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .hero > *{ position: relative; z-index: 1; }
+    .kicker{
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+    }
+    .dot{
+      width: 8px; height: 8px; border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent), var(--accent2));
+      box-shadow: 0 0 0 4px rgba(124,92,255,.15);
+    }
+    h1{
+      margin: 14px 0 6px;
+      font-size: clamp(26px, 4vw, 40px);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+    .subtitle{
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+      max-width: 92ch;
+    }
+    .controls{
+      margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn{
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 1px 0 rgba(255,255,255,.06) inset;
+    }
+    .btn:hover{ background: rgba(255,255,255,.06); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.primary{
+      border-color: rgba(124,92,255,.55);
+      background: linear-gradient(180deg, rgba(124,92,255,.24), rgba(124,92,255,.12));
+    }
+    .pill{
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill b{ color: var(--text); font-family: var(--mono); font-weight: 800; }
+    nav.toc{
+      margin-top: 18px;
+      padding: 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    .toc-grid{
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .toc a{
+      display: block;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      color: var(--muted);
+      text-decoration: none;
+      background: transparent;
+      font-weight: 700;
+      font-size: 13px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toc a:hover{
+      border-color: var(--border);
+      color: var(--text);
+      background: rgba(255,255,255,.04);
+    }
+    section{
+      margin-top: 18px;
+      padding: var(--pad2);
+      border-radius: var(--radius2);
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      box-shadow: var(--shadow);
+    }
+    .section-title{
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    h2{
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+    }
+    .hint{
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .grid{
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card{
+      grid-column: span 4;
+      padding: 14px 14px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      box-shadow: 0 1px 0 rgba(255,255,255,.05) inset;
+    }
+    .card .label{
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .card .value{
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+    .card .sub{
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .badge{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+    .badge .swatch{ width: 10px; height: 10px; border-radius: 3px; background: var(--muted2); }
+    .badge.flow .swatch{ background: var(--accent); box-shadow: 0 0 0 4px rgba(124,92,255,.14); }
+    .badge.data .swatch{ background: var(--accent2); box-shadow: 0 0 0 4px rgba(37,217,181,.12); }
+    .badge.sec .swatch{ background: var(--warning); box-shadow: 0 0 0 4px rgba(255,183,3,.12); }
+    .badge.warn .swatch{ background: var(--danger); box-shadow: 0 0 0 4px rgba(255,77,109,.12); }
+    .figure{
+      margin-top: 10px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      overflow: hidden;
+    }
+    .figure-head{
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+    .figure-body{ padding: 12px; }
+    .legend{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .mono{ font-family: var(--mono); }
+    .muted{ color: var(--muted); }
+    .note{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .callouts{
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .callout{
+      grid-column: span 6;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      padding: 14px 14px;
+    }
+    .callout h3{
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+    }
+    .callout ul{
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    table{
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    thead th{
+      text-align: left;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 12px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    tbody td{
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text);
+      vertical-align: top;
+    }
+    tbody tr:hover td{ background: rgba(255,255,255,.03); }
+    tbody tr:last-child td{ border-bottom: none; }
+    .nowrap{ white-space: nowrap; }
+    .svg-wrap{
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    svg{ display: block; width: 100%; height: auto; }
+    .node rect{
+      fill: rgba(255,255,255,.03);
+      stroke: rgba(255,255,255,.18);
+      stroke-width: 1;
+    }
+    .node .title{ font-family: var(--sans); fill: var(--text); font-size: 13px; font-weight: 900; }
+    .node .sub{ font-family: var(--mono); fill: var(--muted2); font-size: 11px; }
+    .edge{ fill: none; stroke: rgba(255,255,255,.22); stroke-width: 1.5; }
+    .edge.flow{ stroke: rgba(124,92,255,.62); stroke-width: 2.1; }
+    .edge.data{ stroke: rgba(37,217,181,.55); stroke-width: 2.1; }
+    .edge.sec{ stroke: rgba(255,183,3,.62); stroke-width: 2.1; }
+    footer{
+      margin-top: 18px;
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+      text-align: center;
+    }
+    @media (max-width: 980px){
+      .toc-grid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .card{ grid-column: span 12; }
+      .callout{ grid-column: span 12; }
+    }
+    @media print{
+      body{ background: #fff !important; }
+      .btn, nav.toc{ display: none !important; }
+      section, header.hero{ box-shadow: none !important; }
+      .container{ padding: 0; }
+      a{ text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero" id="top">
+      <div class="kicker"><span class="dot"></span> asana-dict / микросервисы / онтология OWL</div>
+      <h1>Каталог асан традиционных школ йоги (asana-dict)</h1>
+      <p class="subtitle">
+        Это одностраничный сайт по твоему репозиторию: <strong>asana-dict-service</strong> (backend+frontend) и связанные модули
+        (<strong>asana-server-module</strong>, PostgreSQL, MinIO, Nginx).
+        Включает архитектуру, сетевую диаграмму компонентов, маршрутизацию, роли и ключевые API/модули.
+      </p>
+
+      <div class="controls">
+        <button class="btn primary" id="btnTheme" type="button">Тема: авто</button>
+        <button class="btn" id="btnView" type="button">Диаграмма: всё</button>
+        <button class="btn" type="button" onclick="window.print()">Печать / PDF</button>
+        <span class="pill">Сервисы: <b id="svcCount">—</b></span>
+        <span class="pill">Хранилища: <b id="storeCount">—</b></span>
+        <span class="pill">Основной модуль: <b>asana-dict-service</b></span>
+      </div>
+
+      <nav class="toc" aria-label="Оглавление">
+        <div class="toc-grid">
+          <a href="#overview">Обзор</a>
+          <a href="#features">Возможности</a>
+          <a href="#architecture">Сетевая диаграмма</a>
+          <a href="#routing">Nginx маршруты</a>
+          <a href="#services">Docker Compose</a>
+          <a href="#api">Ключевое API</a>
+          <a href="#data">Данные и онтология</a>
+          <a href="#roles">Роли</a>
+          <a href="#repo">Структура репо</a>
+          <a href="#run">Как запускать</a>
+          <a href="#top">Наверх</a>
+        </div>
+      </nav>
+    </header>
+
+    <section id="overview">
+      <div class="section-title">
+        <h2>Обзор проекта</h2>
+        <div class="hint">Источник: README/О_ПРОЕКТЕ/docker-compose/nginx</div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="label">Идея</div>
+          <div class="value">Объективный каталог асан</div>
+          <div class="sub">Асана определяется <strong>в контексте источника</strong> (книга/публикация), что снимает субъективность и позволяет сравнивать трактовки.</div>
+        </div>
+        <div class="card">
+          <div class="label">Архитектура</div>
+          <div class="value">Nginx → Frontend/Backend/Auth</div>
+          <div class="sub">Reverse proxy маршрутизирует запросы в <span class="mono">asana-frontend</span>, <span class="mono">asana-backend</span> и <span class="mono">server-module</span>.</div>
+        </div>
+        <div class="card">
+          <div class="label">Хранилища</div>
+          <div class="value">PostgreSQL + OWL + MinIO</div>
+          <div class="sub">Служебные данные в Postgres (схема <span class="mono">dict_schema</span>), предметные — в <span class="mono">ontology_updated.owl</span>, изображения — в MinIO S3.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="section-title">
+        <h2>Основные возможности</h2>
+        <div class="hint">Собрано по README/курсовой</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>Каталог</h3>
+          <ul>
+            <li>Поиск по названиям (в т.ч. нечеткий).</li>
+            <li>Алфавитная навигация и фильтрация.</li>
+            <li>Просмотр карточки асаны и фото из разных источников.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Источники и контент</h3>
+          <ul>
+            <li>Управление источниками и привязка асан к источникам.</li>
+            <li>Мультиязычные названия: RU / санскрит / транслитерация / перевод.</li>
+            <li>Связи “похожие/аналогичные” асаны.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Импорт/экспорт и модерация</h3>
+          <ul>
+            <li>Импорт из Excel (в т.ч. фоновыми задачами с прогрессом).</li>
+            <li>Модерация конфликтов/дубликатов с интерфейсом для экспертов.</li>
+            <li>Экспорт модерации обратно в Excel.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Безопасность и роли</h3>
+          <ul>
+            <li>JWT и проверка прав через внешний сервис <span class="mono">server-module</span>.</li>
+            <li>Защищённые маршруты/страницы для экспертных функций.</li>
+            <li>Документация API (<span class="mono">/docs</span>) защищена middleware (доступ admin/expert).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="section-title">
+        <h2>Сетевая диаграмма проекта (архитектура)</h2>
+        <div class="hint">Отрисовка в SVG • режим “всё/минимум”</div>
+      </div>
+      <div class="figure">
+        <div class="figure-head">
+          <div class="legend">
+            <span class="badge flow"><span class="swatch"></span>HTTP/маршрутизация</span>
+            <span class="badge sec"><span class="swatch"></span>проверка токена</span>
+            <span class="badge data"><span class="swatch"></span>данные/файлы</span>
+          </div>
+          <div class="pill">Источник структуры: <b class="mono">docs/architecture_diagram.mmd</b></div>
+        </div>
+        <div class="figure-body">
+          <div class="svg-wrap">
+            <svg id="archSvg" viewBox="0 0 1200 620" role="img" aria-label="Архитектурная диаграмма asana-dict"></svg>
+          </div>
+          <p class="note">Диаграмма отражает реальную маршрутизацию из <span class="mono">docker-compose.yml</span> и <span class="mono">nginx.conf</span> (Frontend/Backend/Auth + Postgres/OWL/MinIO).</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="routing">
+      <div class="section-title">
+        <h2>Nginx маршруты</h2>
+        <div class="hint">Источник: корневой <span class="mono">nginx.conf</span></div>
+      </div>
+      <div class="figure">
+        <div class="figure-body" style="overflow:auto; max-height: 520px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th>Куда проксирует</th>
+                <th>Назначение</th>
+              </tr>
+            </thead>
+            <tbody id="nginxRoutes"></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="note">
+        Важно: <span class="mono">/api/auth</span> и часть <span class="mono">/api/users/...</span> обслуживаются <strong>server-module</strong>,
+        а общий <span class="mono">/api/</span> — это <strong>asana-backend</strong>. Статика изображений идёт через <span class="mono">/images/</span> → MinIO.
+      </p>
+    </section>
+
+    <section id="services">
+      <div class="section-title">
+        <h2>Сервисы в Docker Compose</h2>
+        <div class="hint">Источник: корневой <span class="mono">docker-compose.yml</span></div>
+      </div>
+      <div class="figure">
+        <div class="figure-body" style="overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Сервис</th>
+                <th class="nowrap">Порты</th>
+                <th>Роль</th>
+                <th>Зависимости</th>
+              </tr>
+            </thead>
+            <tbody id="composeTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="api">
+      <div class="section-title">
+        <h2>Ключевое API</h2>
+        <div class="hint">Источник: <span class="mono">asana-dict-service/backend/app/main.py</span> + nginx</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>Публичные (каталог)</h3>
+          <ul>
+            <li><span class="mono">GET /api/asanas</span> — список асан</li>
+            <li><span class="mono">GET /api/asana/{asana_id}</span> — детали асаны</li>
+            <li><span class="mono">GET /api/asanas/search?query=...</span> — поиск</li>
+            <li><span class="mono">GET /api/sources</span> — источники</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Эксперт/Admin (контент)</h3>
+          <ul>
+            <li><span class="mono">POST /api/asana</span> — добавить асану + фото</li>
+            <li><span class="mono">POST /api/sources</span> — добавить источник</li>
+            <li><span class="mono">POST /api/import/*</span> — импорт Excel (фоновые задачи + статус)</li>
+            <li><span class="mono">GET /api/moderation/items</span> — модерация</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Контент “О проекте”</h3>
+          <ul>
+            <li><span class="mono">GET /api/about-project</span> — текст “О проекте”</li>
+            <li><span class="mono">GET /api/expert-instructions</span> — инструкции эксперту</li>
+            <li><span class="mono">POST</span> эти же endpoints — обновление (только admin)</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Документация</h3>
+          <ul>
+            <li><span class="mono">/docs</span>, <span class="mono">/redoc</span>, <span class="mono">/openapi.json</span> — защищены (нужна роль expert/admin).</li>
+            <li>Проверка токена идёт через <span class="mono">server-module</span> (см. diagram + nginx).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="data">
+      <div class="section-title">
+        <h2>Данные и онтология</h2>
+        <div class="hint">PostgreSQL + OWL + MinIO</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>PostgreSQL</h3>
+          <ul>
+            <li><strong>Схема</strong>: <span class="mono">dict_schema</span> (для asana-dict-service).</li>
+            <li><strong>Таблицы</strong>: <span class="mono">users</span>, <span class="mono">moderation_items</span>, <span class="mono">about_project</span>, <span class="mono">expert_instructions</span>.</li>
+            <li>Server-module использует основную схему (<span class="mono">public</span>) для своих данных.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>OWL онтология</h3>
+          <ul>
+            <li>Файл: <span class="mono">asana-dict-service/backend/ontology_updated.owl</span> (монтируется в контейнер backend).</li>
+            <li>Ключевые сущности: <span class="mono">Asana</span>, <span class="mono">AsanaSource</span>, <span class="mono">AsanaName</span>, <span class="mono">AsanaPhoto</span>, <span class="mono">SameAsObject</span>.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>MinIO (S3)</h3>
+          <ul>
+            <li>Хранение изображений асан.</li>
+            <li>Публичная раздача через <span class="mono">/images/</span> (Nginx → MinIO).</li>
+            <li>Антидубликаты: вычисление хеша при загрузке (в коде backend).</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Интеграции</h3>
+          <ul>
+            <li>Backend проверяет JWT через HTTP к <span class="mono">server-module</span>.</li>
+            <li>Фронтенд ходит в <span class="mono">/api/...</span> (за ним Nginx).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="roles">
+      <div class="section-title">
+        <h2>Роли пользователей</h2>
+        <div class="hint">Источник: README/О_ПРОЕКТЕ</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>Гость</h3>
+          <ul>
+            <li>Просмотр каталога и поиск.</li>
+            <li>Просмотр источников, фото, описаний.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Эксперт</h3>
+          <ul>
+            <li>Добавление асан/источников, загрузка фото.</li>
+            <li>Импорт Excel и работа с модерацией.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Администратор</h3>
+          <ul>
+            <li>Полный доступ + управление пользователями.</li>
+            <li>Загрузка/обновление онтологии, системные настройки.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Как это реализовано</h3>
+          <ul>
+            <li>Nginx проксирует <span class="mono">/api/auth</span> и <span class="mono">/api/users/me</span> в <span class="mono">server-module</span>.</li>
+            <li>Backend дополнительно проверяет токен через <span class="mono">AUTH_SERVICE_URL</span>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="repo">
+      <div class="section-title">
+        <h2>Структура репозитория (важное)</h2>
+        <div class="hint">По папкам в workspace</div>
+      </div>
+      <div class="figure">
+        <div class="figure-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Модуль/папка</th>
+                <th>Что это</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono nowrap">asana-dict-service/backend</td>
+                <td>FastAPI сервис каталога асан + работа с OWL + импорт/модерация + интеграция MinIO/Postgres/Auth</td>
+              </tr>
+              <tr>
+                <td class="mono nowrap">asana-dict-service/frontend</td>
+                <td>React + Vite фронтенд каталога асан (SPA)</td>
+              </tr>
+              <tr>
+                <td class="mono nowrap">asana-server-module</td>
+                <td>Отдельный сервис авторизации/пользователей + дополнительные API (см. nginx маршруты)</td>
+              </tr>
+              <tr>
+                <td class="mono nowrap">asana-network-service</td>
+                <td>Сервис “нейронки” (в docker-compose сейчас закомментирован)</td>
+              </tr>
+              <tr>
+                <td class="mono nowrap">nginx.conf</td>
+                <td>Reverse proxy маршрутизация: фронт, API, auth, minio images</td>
+              </tr>
+              <tr>
+                <td class="mono nowrap">docker-compose.yml</td>
+                <td>Сборка и запуск всех контейнеров (server-module / asana-backend / asana-frontend / postgres / minio / nginx)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="run">
+      <div class="section-title">
+        <h2>Как запускать (быстрый старт)</h2>
+        <div class="hint">Без сборки страницы — это просто документация</div>
+      </div>
+      <div class="callouts">
+        <div class="callout">
+          <h3>Через Docker Compose</h3>
+          <ul>
+            <li><span class="mono">docker-compose up -d</span></li>
+            <li>После этого: <span class="mono">http://localhost/</span> (через nginx:80)</li>
+            <li>Backend API: <span class="mono">http://localhost/api/...</span></li>
+            <li>MinIO console: <span class="mono">http://localhost:9001</span></li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h3>Порты (по compose)</h3>
+          <ul>
+            <li><span class="mono">nginx</span>: 80</li>
+            <li><span class="mono">asana-frontend</span>: 3000</li>
+            <li><span class="mono">asana-backend</span>: 8000</li>
+            <li><span class="mono">server-module</span>: 8001→8000</li>
+            <li><span class="mono">postgres</span>: 5432</li>
+            <li><span class="mono">minio</span>: 9000/9001</li>
+          </ul>
+        </div>
+      </div>
+      <p class="note">
+        Этот HTML-файл автономный: его можно открыть отдельно (как документацию) или распечатать в PDF.
+      </p>
+    </section>
+
+    <footer>
+      Файл: <span class="mono">asana-dict-site.html</span> • автономно • без библиотек
+    </footer>
+  </div>
+
+  <script>
+    // ---------- Data (собрано из docker-compose.yml + nginx.conf + docs/architecture_diagram.mmd) ----------
+    const SERVICES = [
+      { name: "nginx", ports: "80:80", role: "Reverse proxy: фронт + API + auth + /images/", deps: ["asana-frontend","server-module","minio","asana-backend"] },
+      { name: "asana-frontend", ports: "3000:3000", role: "SPA (React + Vite) — UI каталога", deps: ["asana-backend","server-module"] },
+      { name: "asana-backend", ports: "8000:8000", role: "FastAPI — каталог, OWL, импорт/модерация, MinIO, Postgres, auth check", deps: ["postgres","server-module","minio"] },
+      { name: "server-module", ports: "8001:8000", role: "Авторизация/пользователи (+ другие API по nginx)", deps: ["postgres","minio"] },
+      { name: "postgres", ports: "5432:5432", role: "Общая БД для сервисов (схемы: public + dict_schema)", deps: [] },
+      { name: "minio", ports: "9000:9000, 9001:9001", role: "S3-хранилище изображений (bucket: images)", deps: [] },
+      { name: "minio-init", ports: "—", role: "Инициализация bucket policy (public images)", deps: ["minio"] },
+      // server-network (asana-network-service) в compose закомментирован
+    ];
+
+    const ROUTES = [
+      { path: "/api/auth (и /api/auth...)", target: "server-module:8000", note: "Авторизация/регистрация" },
+      { path: "/api/users/me", target: "server-module:8000", note: "Инфо о текущем пользователе" },
+      { path: "/api/users/me/...", target: "server-module:8000", note: "Подэндпоинты текущего пользователя" },
+      { path: "/api/yoga_poses", target: "server-module:8000", note: "Позиции йоги (server-module)" },
+      { path: "/api/network", target: "server-module:8000", note: "Нейросеть (server-module)" },
+      { path: "/api/result_prediction", target: "server-module:8000", note: "Результаты предсказаний" },
+      { path: "/api/reports", target: "server-module:8000", note: "Сообщения об ошибках" },
+      { path: "/api/request_to_admin_status", target: "server-module:8000", note: "Запросы на статус администратора" },
+      { path: "/api/rept", target: "server-module:8000", note: "Отчеты" },
+      { path: "/api/ (остальное)", target: "asana-backend:8000", note: "API каталога асан" },
+      { path: "/images/", target: "minio:9000", note: "Раздача изображений из MinIO" },
+      { path: "/", target: "asana-frontend:3000", note: "Frontend (React)" },
+    ];
+
+    // Architecture nodes/edges
+    const NODES_FULL = [
+      { id: "browser", title: "Браузер", sub: "пользователь", x: 60, y: 80, w: 180, h: 70 },
+      { id: "nginx", title: "Nginx", sub: "reverse proxy", x: 300, y: 80, w: 200, h: 70 },
+      { id: "front", title: "asana-frontend", sub: "React + Vite", x: 560, y: 40, w: 240, h: 70 },
+      { id: "back", title: "asana-backend", sub: "FastAPI", x: 560, y: 140, w: 240, h: 70 },
+      { id: "auth", title: "server-module", sub: "auth/users", x: 840, y: 90, w: 240, h: 70 },
+      { id: "pg", title: "PostgreSQL", sub: "public + dict_schema", x: 560, y: 280, w: 240, h: 70 },
+      { id: "owl", title: "OWL онтология", sub: "ontology_updated.owl", x: 300, y: 280, w: 200, h: 70 },
+      { id: "minio", title: "MinIO S3", sub: "bucket: images", x: 840, y: 280, w: 240, h: 70 },
+    ];
+
+    const NODES_MIN = [
+      { id: "browser", title: "Браузер", sub: "UI", x: 80, y: 90, w: 200, h: 70 },
+      { id: "nginx", title: "Nginx", sub: "proxy", x: 340, y: 90, w: 220, h: 70 },
+      { id: "front", title: "Frontend", sub: "asana-frontend", x: 620, y: 40, w: 240, h: 70 },
+      { id: "back", title: "Backend", sub: "asana-backend", x: 620, y: 140, w: 240, h: 70 },
+      { id: "stores", title: "Хранилища", sub: "Postgres + OWL + MinIO", x: 340, y: 250, w: 520, h: 80 },
+      { id: "auth", title: "Auth", sub: "server-module", x: 900, y: 90, w: 220, h: 70 },
+    ];
+
+    const EDGES_FULL = [
+      { from: "browser", to: "nginx", kind: "flow", label: "HTTP" },
+      { from: "nginx", to: "front", kind: "flow", label: "/" },
+      { from: "nginx", to: "back", kind: "flow", label: "/api/" },
+      { from: "nginx", to: "auth", kind: "flow", label: "/api/auth, /api/users/me, ..." },
+      { from: "nginx", to: "minio", kind: "flow", label: "/images/" },
+      { from: "front", to: "back", kind: "flow", label: "REST" },
+      { from: "back", to: "auth", kind: "sec", label: "проверка JWT" },
+      { from: "back", to: "pg", kind: "data", label: "служебные данные" },
+      { from: "auth", to: "pg", kind: "data", label: "пользователи/сессии" },
+      { from: "back", to: "owl", kind: "data", label: "RDF/OWL чт/зап" },
+      { from: "back", to: "minio", kind: "data", label: "upload/get" },
+      { from: "auth", to: "minio", kind: "data", label: "конфиг/доступ" },
+    ];
+
+    const EDGES_MIN = [
+      { from: "browser", to: "nginx", kind: "flow", label: "HTTP" },
+      { from: "nginx", to: "front", kind: "flow", label: "UI" },
+      { from: "nginx", to: "back", kind: "flow", label: "API" },
+      { from: "nginx", to: "auth", kind: "flow", label: "auth API" },
+      { from: "back", to: "auth", kind: "sec", label: "JWT check" },
+      { from: "back", to: "stores", kind: "data", label: "данные/файлы" },
+    ];
+
+    // ---------- UI ----------
+    let viewMode = "full"; // full|min
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;");
+    }
+
+    function setTheme(theme) {
+      const root = document.documentElement;
+      if (theme === "auto") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", theme);
+      localStorage.setItem("asana_theme", theme);
+      const label = theme === "auto" ? "авто" : theme === "light" ? "светлая" : "тёмная";
+      document.getElementById("btnTheme").textContent = `Тема: ${label}`;
+    }
+
+    function toggleTheme() {
+      const cur = localStorage.getItem("asana_theme") || "auto";
+      const next = cur === "auto" ? "dark" : cur === "dark" ? "light" : "auto";
+      setTheme(next);
+    }
+
+    function toggleView() {
+      viewMode = (viewMode === "full") ? "min" : "full";
+      document.getElementById("btnView").textContent = viewMode === "full" ? "Диаграмма: всё" : "Диаграмма: минимум";
+      renderDiagram();
+    }
+
+    // ---------- Render ----------
+    function renderTables() {
+      document.getElementById("svcCount").textContent = String(SERVICES.filter(s => s.name !== "minio-init").length);
+      document.getElementById("storeCount").textContent = "3";
+
+      const composeTbody = document.getElementById("composeTable");
+      composeTbody.innerHTML = SERVICES.map(s => `
+        <tr>
+          <td class="mono nowrap">${escapeHtml(s.name)}</td>
+          <td class="mono nowrap">${escapeHtml(s.ports)}</td>
+          <td>${escapeHtml(s.role)}</td>
+          <td class="mono">${s.deps.length ? escapeHtml(s.deps.join(", ")) : "—"}</td>
+        </tr>
+      `).join("");
+
+      const nginxTbody = document.getElementById("nginxRoutes");
+      nginxTbody.innerHTML = ROUTES.map(r => `
+        <tr>
+          <td class="mono nowrap">${escapeHtml(r.path)}</td>
+          <td class="mono nowrap">${escapeHtml(r.target)}</td>
+          <td>${escapeHtml(r.note)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderDiagram() {
+      const svg = document.getElementById("archSvg");
+      const nodes = viewMode === "full" ? NODES_FULL : NODES_MIN;
+      const edges = viewMode === "full" ? EDGES_FULL : EDGES_MIN;
+
+      const width = 1200, height = viewMode === "full" ? 620 : 420;
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+      const defs = `
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,.35)"></path>
+          </marker>
+          <marker id="arrowFlow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(124,92,255,.75)"></path>
+          </marker>
+          <marker id="arrowData" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(37,217,181,.75)"></path>
+          </marker>
+          <marker id="arrowSec" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,183,3,.85)"></path>
+          </marker>
+        </defs>
+      `;
+
+      const nodeById = new Map(nodes.map(n => [n.id, n]));
+
+      function centerRight(n){ return { x: n.x + n.w, y: n.y + n.h/2 }; }
+      function centerLeft(n){ return { x: n.x, y: n.y + n.h/2 }; }
+      function centerTop(n){ return { x: n.x + n.w/2, y: n.y }; }
+      function centerBottom(n){ return { x: n.x + n.w/2, y: n.y + n.h }; }
+
+      function pathBetween(a, b){
+        // heuristic: if b is to the right, connect right->left, else top/bottom
+        if (b.x >= a.x + a.w) {
+          const p1 = centerRight(a), p2 = centerLeft(b);
+          const mid = (p1.x + p2.x) / 2;
+          return { d: `M ${p1.x} ${p1.y} C ${mid} ${p1.y}, ${mid} ${p2.y}, ${p2.x} ${p2.y}`, x: mid, y: (p1.y + p2.y)/2 };
+        }
+        if (b.y >= a.y + a.h) {
+          const p1 = centerBottom(a), p2 = centerTop(b);
+          const mid = (p1.y + p2.y) / 2;
+          return { d: `M ${p1.x} ${p1.y} C ${p1.x} ${mid}, ${p2.x} ${mid}, ${p2.x} ${p2.y}`, x: (p1.x + p2.x)/2, y: mid };
+        }
+        const p1 = centerRight(a), p2 = centerLeft(b);
+        const mid = (p1.x + p2.x) / 2;
+        return { d: `M ${p1.x} ${p1.y} C ${mid} ${p1.y}, ${mid} ${p2.y}, ${p2.x} ${p2.y}`, x: mid, y: (p1.y + p2.y)/2 };
+      }
+
+      const edgesSvg = edges.map(e => {
+        const a = nodeById.get(e.from), b = nodeById.get(e.to);
+        if (!a || !b) return "";
+        const p = pathBetween(a,b);
+        const cls = `edge ${e.kind}`;
+        const marker = e.kind === "flow" ? "arrowFlow" : e.kind === "data" ? "arrowData" : e.kind === "sec" ? "arrowSec" : "arrow";
+        const label = e.label ? `<text x="${p.x}" y="${p.y - 8}" fill="rgba(255,255,255,.55)" font-size="11" font-family="var(--mono)">${escapeHtml(e.label)}</text>` : "";
+        return `<g><path class="${cls}" d="${p.d}" marker-end="url(#${marker})"></path>${label}</g>`;
+      }).join("");
+
+      const nodesSvg = nodes.map(n => `
+        <g class="node" transform="translate(${n.x} ${n.y})">
+          <rect rx="14" ry="14" width="${n.w}" height="${n.h}"></rect>
+          <text class="title" x="14" y="28">${escapeHtml(n.title)}</text>
+          <text class="sub" x="14" y="48">${escapeHtml(n.sub)}</text>
+        </g>
+      `).join("");
+
+      svg.innerHTML = defs + edgesSvg + nodesSvg;
+    }
+
+    (function init(){
+      setTheme(localStorage.getItem("asana_theme") || "auto");
+      document.getElementById("btnTheme").addEventListener("click", toggleTheme);
+      document.getElementById("btnView").addEventListener("click", toggleView);
+
+      renderTables();
+      renderDiagram();
+    })();
+  </script>
+</body>
+</html>
