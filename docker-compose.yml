@@ -105,6 +105,7 @@ services:
       - asana-network
 
   asana-frontend:
+    image: asana-dict-frontend:${ASANA_IMPORT_TAG:-latest}
     build:
       context: ./asana-dict-service/frontend
       dockerfile: Dockerfile
