@@ -17,12 +17,29 @@ const Moderation = () => {
   const [addFormData, setAddFormData] = useState({});
   const [keepPhotoFromRequest, setKeepPhotoFromRequest] = useState({}); // Галочка для сохранения фото из запроса
   const [exporting, setExporting] = useState(false);
+  /** created_at — по умолчанию новые сверху; name — по алфавиту названия */
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const importHasPhoto = (item) => {
+    const d = item?.import_data;
+    if (!d || typeof d !== 'object') return false;
+    if (d.photo_url && String(d.photo_url).trim().startsWith('http')) return true;
+    if (d.photo_base64 && String(d.photo_base64).trim().length > 20) return true;
+    const p = d.photo;
+    if (p && typeof p === 'string') {
+      const t = p.trim();
+      if (t.startsWith('data:') || t.startsWith('http')) return true;
+      if (t.length > 80) return true;
+    }
+    return false;
+  };
 
   useEffect(() => {
     loadItems();
     loadSources();
     loadNames();
-  }, [resolvedFilter]);
+  }, [resolvedFilter, sortBy, sortDir]);
 
   const loadSources = async () => {
     try {
@@ -45,7 +62,10 @@ const Moderation = () => {
   const loadItems = async () => {
     setLoading(true);
     try {
-      const data = await moderationAPI.getItems(resolvedFilter);
+      const data = await moderationAPI.getItems(resolvedFilter, {
+        sort: sortBy,
+        sort_dir: sortDir,
+      });
       setItems(data);
     } catch (error) {
       console.error('Error loading moderation items:', error);
@@ -84,7 +104,7 @@ const Moderation = () => {
         formData.name_id,
         formData.source_id,
         formData.photo,
-        keepPhotoFromRequest[itemId] || false
+        keepPhotoFromRequest[itemId] !== false
       );
       await loadItems();
       setShowAddForm({ ...showAddForm, [itemId]: false });
@@ -111,6 +131,10 @@ const Moderation = () => {
             source_id: item.source_id || '',
             photo: null
           }
+        });
+        setKeepPhotoFromRequest({
+          ...keepPhotoFromRequest,
+          [itemId]: importHasPhoto(item),
         });
       }
     }
@@ -140,7 +164,7 @@ const Moderation = () => {
       <div className="moderation-container">
         <h1 className="moderation-title">Требует модерации</h1>
 
-        <div className="moderation-filters">
+        <div className="moderation-filters moderation-filters-row">
           <div className="filter-group">
             <label>
               <input
@@ -151,8 +175,26 @@ const Moderation = () => {
               Показать решенные
             </label>
           </div>
-          <div className="filter-group" style={{ marginLeft: '1em', color: '#666', fontSize: '0.9em' }}>
-            Записи отсортированы по времени создания (новые сначала)
+          <div className="filter-group moderation-sort">
+            <label htmlFor="mod-sort">Сортировка:</label>
+            <select
+              id="mod-sort"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="moderation-sort-select"
+            >
+              <option value="created_at">По дате добавления</option>
+              <option value="name">По названию</option>
+            </select>
+            <select
+              value={sortDir}
+              onChange={(e) => setSortDir(e.target.value)}
+              className="moderation-sort-select"
+              aria-label="Направление сортировки"
+            >
+              <option value="desc">{sortBy === 'name' ? 'Я → А' : 'Сначала новые'}</option>
+              <option value="asc">{sortBy === 'name' ? 'А → Я' : 'Сначала старые'}</option>
+            </select>
           </div>
           <div className="filter-group" style={{ marginLeft: 'auto' }}>
             <button
@@ -389,18 +431,21 @@ const Moderation = () => {
                           style={{ width: '100%', padding: '0.5em', marginTop: '0.25em' }}
                         />
                       </label>
-                      {item.import_data && typeof item.import_data === 'object' && item.import_data.photo && (
-                        <label style={{ display: 'flex', alignItems: 'center', marginTop: '0.5em' }}>
+                      {importHasPhoto(item) && (
+                        <label style={{ display: 'flex', alignItems: 'flex-start', marginTop: '0.5em', gap: '0.5em', fontSize: '0.9em', color: '#444' }}>
                           <input
                             type="checkbox"
-                            checked={keepPhotoFromRequest[item.id] || false}
+                            checked={keepPhotoFromRequest[item.id] !== false}
                             onChange={(e) => setKeepPhotoFromRequest({
                               ...keepPhotoFromRequest,
                               [item.id]: e.target.checked
                             })}
-                            style={{ marginRight: '0.5em' }}
+                            style={{ marginTop: '0.15em' }}
                           />
-                          Оставить фото как было в запросе
+                          <span>
+                            Подставить фото из импорта в каталог (сервер загрузит его в хранилище).
+                            Если снять галочку — фото из файла импорта не используется; тогда загрузите файл выше.
+                          </span>
                         </label>
                       )}
                     </div>

@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Медленный/нестабильный PyPI → таймаут pip по умолчанию (15s) часто рвёт крупные wheel (Pillow и т.д.)
+ENV PIP_DEFAULT_TIMEOUT=120
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -10,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --retries 10 --no-cache-dir -r requirements.txt
 
 COPY . .
 

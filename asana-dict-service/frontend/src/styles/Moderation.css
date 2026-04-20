@@ -1,20 +1,45 @@
 .moderation-container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1rem 1rem 2rem;
 }
 
 .moderation-title {
-  font-size: 2rem;
-  margin-bottom: 2rem;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
   color: var(--primary-color);
 }
 
 .moderation-filters {
-  margin-bottom: 2rem;
-  padding: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.65em 1em;
   background: var(--background-alt);
   border-radius: 8px;
+}
+
+.moderation-filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.moderation-sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.moderation-sort-select {
+  padding: 0.35em 0.6em;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--card-background);
+  font-size: 0.9rem;
+  color: var(--text-primary);
 }
 
 .moderation-filters label {
@@ -40,13 +65,13 @@
 .moderation-items {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0.85rem;
 }
 
 .moderation-item {
   background: var(--background-alt);
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1rem;
   border: 1px solid var(--border-color);
   transition: box-shadow 0.2s;
 }
@@ -83,8 +108,9 @@
 }
 
 .moderation-item-field {
-  margin-bottom: 0.75rem;
-  line-height: 1.6;
+  margin-bottom: 0.4rem;
+  line-height: 1.4;
+  font-size: 0.92rem;
 }
 
 .moderation-item-field strong {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { moderationAPI } from '../api/moderation';
@@ -9,10 +9,17 @@ const Navbar = () => {
   const navigate = useNavigate();
   const { isAuthenticated, isAdmin, isExpertOrAdmin, logout, user } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [moderationCount, setModerationCount] = useState(0);
   const dropdownRef = useRef(null);
+  const addMenuRef = useRef(null);
 
   const isActive = (path) => location.pathname === path;
+
+  const closeMobileMenu = useCallback(() => {
+    setIsMobileMenuOpen(false);
+  }, []);
 
   // Загружаем счетчик модерации
   useEffect(() => {
@@ -26,11 +33,29 @@ const Navbar = () => {
         }
       };
       loadModerationCount();
-      // Обновляем счетчик каждые 30 секунд
       const interval = setInterval(loadModerationCount, 30000);
       return () => clearInterval(interval);
     }
   }, [isExpertOrAdmin]);
+
+  useEffect(() => {
+    closeMobileMenu();
+  }, [location.pathname, closeMobileMenu]);
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeMobileMenu();
+    };
+    setIsDropdownOpen(false);
+    setIsAddMenuOpen(false);
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [isMobileMenuOpen, closeMobileMenu]);
 
   // Закрываем dropdown при клике вне его
   useEffect(() => {
@@ -49,18 +74,30 @@ const Navbar = () => {
     };
   }, [isDropdownOpen]);
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target)) {
+        setIsAddMenuOpen(false);
+      }
+    };
+    if (isAddMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isAddMenuOpen]);
+
   const handleLogout = () => {
     logout();
     navigate('/login');
     setIsDropdownOpen(false);
+    closeMobileMenu();
   };
 
   const getRoleLabel = () => {
     if (!user) return null;
-    // Используем role из user объекта, а не isAdmin/isExpert
     if (user.role === 'admin') return 'Администратор';
     if (user.role === 'expert') return 'Эксперт';
-    return null; // Обычный пользователь = неавторизованный
+    return null;
   };
 
   const getInitials = (login) => {
@@ -68,121 +105,254 @@ const Navbar = () => {
     return login.charAt(0).toUpperCase();
   };
 
-  return (
-    <>
-      {isAuthenticated && (
-        <div className="user-menu-fixed" ref={dropdownRef}>
-          <div 
-            className="user-menu-trigger"
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+  const renderNavLinks = (variant) => {
+    const isMobile = variant === 'mobile';
+    const linkClass = isMobile ? 'navbar-mobile-link' : 'nav-link';
+
+    return (
+      <>
+        <Link
+          to="/asanas"
+          className={`${linkClass} ${isActive('/asanas') ? 'active' : ''}`}
+          onClick={isMobile ? closeMobileMenu : undefined}
+        >
+          Каталог
+        </Link>
+        <Link
+          to="/sources"
+          className={`${linkClass} ${isActive('/sources') ? 'active' : ''}`}
+          onClick={isMobile ? closeMobileMenu : undefined}
+        >
+          Источники
+        </Link>
+        {isExpertOrAdmin && (
+          <Link
+            to="/settings"
+            className={`${linkClass} ${isActive('/settings') ? 'active' : ''}`}
+            onClick={isMobile ? closeMobileMenu : undefined}
           >
-            <div className="user-avatar">
-              {getInitials(user?.login)}
-            </div>
-            <span className="user-login">{user?.login || 'Пользователь'}</span>
-            <span className="dropdown-arrow">▼</span>
-          </div>
-          {isDropdownOpen && (
-            <div className="user-dropdown">
-              {getRoleLabel() && (
-                <div className="user-dropdown-role">
-                  <span className="role-label">Роль:</span>
-                  <span className="role-value">{getRoleLabel()}</span>
-                </div>
-              )}
-              {isAdmin && (
-                <Link
-                  to="/users"
-                  className="user-dropdown-link"
-                  onClick={() => setIsDropdownOpen(false)}
-                >
-                  Пользователи
-                </Link>
-              )}
-              <button 
-                className="user-dropdown-logout"
-                onClick={handleLogout}
-              >
-                Выйти
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-      <nav className="navbar">
-        <div className="navbar-content">
-          <Link to="/" className="navbar-brand">
-            Каталог<br />Асан
+            Настройки
           </Link>
-          <div className="navbar-links">
-            <Link
-              to="/asanas"
-              className={`nav-link ${isActive('/asanas') ? 'active' : ''}`}
-            >
-              Каталог асан
-            </Link>
-            <Link
-              to="/sources"
-              className={`nav-link ${isActive('/sources') ? 'active' : ''}`}
-            >
-              Источники
-            </Link>
-            {isExpertOrAdmin && (
-              <Link
-                to="/settings"
-                className={`nav-link ${isActive('/settings') ? 'active' : ''}`}
-              >
-                Настройки
-              </Link>
-            )}
-            {isExpertOrAdmin && (
-              <Link
-                to="/moderation"
-                className={`nav-link ${isActive('/moderation') ? 'active' : ''}`}
-              >
+        )}
+        {isExpertOrAdmin && (
+          <Link
+            to="/moderation"
+            className={`${linkClass} ${isActive('/moderation') ? 'active' : ''}`}
+            onClick={isMobile ? closeMobileMenu : undefined}
+          >
+            {isMobile ? (
+              <>
+                <span className="navbar-mobile-link-text">Требует модерации</span>
+                {moderationCount > 0 && (
+                  <span className="moderation-badge">{moderationCount}</span>
+                )}
+              </>
+            ) : (
+              <>
                 Требует модерации
                 {moderationCount > 0 && (
                   <span className="moderation-badge">{moderationCount}</span>
                 )}
-              </Link>
-            )}
-            <Link
-              to="/about"
-              className={`nav-link ${isActive('/about') ? 'active' : ''}`}
-            >
-              О проекте
-            </Link>
-            {isExpertOrAdmin && (
-              <Link
-                to="/expert-instructions"
-                className={`nav-link ${isActive('/expert-instructions') ? 'active' : ''}`}
-              >
-                Инструкции
-              </Link>
-            )}
-          </div>
-          <div className="navbar-actions">
-            {isExpertOrAdmin && (
-              <>
-                <Link to="/asana/add" className="btn-primary">
-                  Добавить асану
-                </Link>
-                <Link to="/sources/add" className="btn-primary">
-                  Добавить источник
-                </Link>
               </>
             )}
-            {!isAuthenticated && (
-              <Link to="/login" className="btn-primary">
-                Войти
-              </Link>
-            )}
-          </div>
+          </Link>
+        )}
+        <Link
+          to="/about"
+          className={`${linkClass} ${isActive('/about') ? 'active' : ''}`}
+          onClick={isMobile ? closeMobileMenu : undefined}
+        >
+          О проекте
+        </Link>
+        {isExpertOrAdmin && (
+          <Link
+            to="/expert-instructions"
+            className={`${linkClass} ${isActive('/expert-instructions') ? 'active' : ''}`}
+            onClick={isMobile ? closeMobileMenu : undefined}
+          >
+            Инструкции
+          </Link>
+        )}
+      </>
+    );
+  };
+
+  return (
+    <nav className="navbar">
+      <div className="navbar-content">
+        <Link to="/" className="navbar-brand">
+          <span className="navbar-brand-line">Каталог асан</span>
+          <span className="navbar-brand-line navbar-brand-line--sub">
+            традиционных школ йоги
+          </span>
+        </Link>
+        <div className="navbar-links navbar-links--desktop">{renderNavLinks('desktop')}</div>
+        <div className="navbar-actions">
+          {isExpertOrAdmin && (
+            <div className="navbar-add-wrap navbar-add-wrap--desktop" ref={addMenuRef}>
+              <button
+                type="button"
+                className="navbar-add-trigger"
+                onClick={() => setIsAddMenuOpen((o) => !o)}
+                aria-expanded={isAddMenuOpen}
+                aria-haspopup="menu"
+              >
+                <span className="navbar-add-plus" aria-hidden>
+                  +
+                </span>
+                <span>Создать</span>
+                <span className="navbar-add-chevron">▾</span>
+              </button>
+              {isAddMenuOpen && (
+                <div className="navbar-add-menu" role="menu">
+                  <Link
+                    to="/asana/add"
+                    className="navbar-add-item"
+                    role="menuitem"
+                    onClick={() => setIsAddMenuOpen(false)}
+                  >
+                    Новая асана
+                  </Link>
+                  <Link
+                    to="/sources/add"
+                    className="navbar-add-item"
+                    role="menuitem"
+                    onClick={() => setIsAddMenuOpen(false)}
+                  >
+                    Новый источник
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+          {!isAuthenticated && (
+            <Link to="/login" className="btn-primary btn-primary--nav">
+              Войти
+            </Link>
+          )}
+          {isAuthenticated && (
+            <div className="navbar-user-wrap" ref={dropdownRef}>
+              <div
+                className="user-menu-trigger"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setIsDropdownOpen(!isDropdownOpen);
+                  }
+                }}
+              >
+                <div className="user-avatar">{getInitials(user?.login)}</div>
+                <span className="user-login">{user?.login || 'Пользователь'}</span>
+                <span className="dropdown-arrow">▼</span>
+              </div>
+              {isDropdownOpen && (
+                <div className="user-dropdown">
+                  {getRoleLabel() && (
+                    <div className="user-dropdown-role">
+                      <span className="role-label">Роль:</span>
+                      <span className="role-value">{getRoleLabel()}</span>
+                    </div>
+                  )}
+                  {isExpertOrAdmin && (
+                    <Link
+                      to="/admin"
+                      className="user-dropdown-link"
+                      onClick={() => setIsDropdownOpen(false)}
+                    >
+                      {isAdmin ? 'Админ-панель' : 'Названия асан'}
+                    </Link>
+                  )}
+                  <button type="button" className="user-dropdown-logout" onClick={handleLogout}>
+                    Выйти
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            className={`navbar-burger ${isMobileMenuOpen ? 'navbar-burger--open' : ''}`}
+            aria-label={isMobileMenuOpen ? 'Закрыть меню' : 'Открыть меню'}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="navbar-mobile-panel"
+            onClick={() => setIsMobileMenuOpen((o) => !o)}
+          >
+            <span className="navbar-burger-line" />
+            <span className="navbar-burger-line" />
+            <span className="navbar-burger-line" />
+          </button>
         </div>
-      </nav>
-    </>
+      </div>
+
+      {isMobileMenuOpen && (
+        <>
+          <div
+            className="navbar-mobile-backdrop"
+            aria-hidden
+            onClick={closeMobileMenu}
+          />
+          <div
+            id="navbar-mobile-panel"
+            className="navbar-mobile-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Меню навигации"
+          >
+            <div className="navbar-mobile-panel-inner">
+              <div className="navbar-mobile-scroll">
+                {isExpertOrAdmin && (
+                  <div className="navbar-mobile-section">
+                    <div className="navbar-mobile-section-title">Создать</div>
+                    <Link
+                      to="/asana/add"
+                      className="navbar-mobile-link navbar-mobile-link--sub"
+                      onClick={closeMobileMenu}
+                    >
+                      Новая асана
+                    </Link>
+                    <Link
+                      to="/sources/add"
+                      className="navbar-mobile-link navbar-mobile-link--sub"
+                      onClick={closeMobileMenu}
+                    >
+                      Новый источник
+                    </Link>
+                  </div>
+                )}
+                <div className="navbar-mobile-section">
+                  <div className="navbar-mobile-section-title">Разделы</div>
+                  {renderNavLinks('mobile')}
+                </div>
+                {isAuthenticated && isExpertOrAdmin && (
+                  <div className="navbar-mobile-section">
+                    <Link
+                      to="/admin"
+                      className={`navbar-mobile-link ${isActive('/admin') ? 'active' : ''}`}
+                      onClick={closeMobileMenu}
+                    >
+                      {isAdmin ? 'Админ-панель' : 'Названия асан'}
+                    </Link>
+                  </div>
+                )}
+                {isAuthenticated && (
+                  <button
+                    type="button"
+                    className="navbar-mobile-logout"
+                    onClick={handleLogout}
+                  >
+                    Выйти
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </nav>
   );
 };
 
 export default Navbar;
-

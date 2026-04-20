@@ -1,0 +1,136 @@
+.admin-page {
+  padding: 20px 16px 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.admin-title {
+  margin: 0 0 24px;
+  color: var(--text-primary);
+  font-size: 1.75rem;
+}
+
+.admin-page-lead {
+  margin: -8px 0 20px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  max-width: 52rem;
+}
+
+.admin-page--expert-names {
+  padding-top: 8px;
+}
+
+.admin-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.admin-section + .admin-section {
+  border-top: 1px solid var(--border-color);
+}
+
+.admin-section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  margin: 0;
+  border: none;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.admin-section-header:hover {
+  background: var(--bg-hover);
+}
+
+.admin-section-header.is-open {
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.admin-section-title {
+  flex: 1;
+}
+
+.admin-section-chevron {
+  margin-left: 12px;
+  font-size: 0.85rem;
+  opacity: 0.8;
+  min-width: 1.25em;
+  text-align: center;
+}
+
+.admin-section-panel {
+  padding: 0 8px 16px;
+  background: var(--bg-primary, var(--bg-secondary));
+}
+
+.admin-nested {
+  padding: 12px 8px 0;
+  max-width: none;
+  margin: 0;
+}
+
+.admin-nested .users-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+}
+
+.admin-hint {
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+  color: var(--text-secondary, #666);
+  line-height: 1.45;
+}
+
+.cell-clamp {
+  max-width: 280px;
+  vertical-align: top;
+}
+
+.modal-wide {
+  max-width: 520px;
+}
+
+.modal-wide textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.admin-error-dismissible {
+  position: relative;
+  padding-right: 28px;
+}
+
+.btn-dismiss-error {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: transparent;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.btn-dismiss-error:hover {
+  opacity: 1;
+}

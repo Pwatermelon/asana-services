@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from typing import Optional, List, Dict
@@ -9,6 +9,7 @@ import logging
 import json
 import uuid
 import asyncio
+from datetime import datetime
 from starlette.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -17,15 +18,17 @@ from app.auth import (
 )
 from app.ontology import (
     add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
-    delete_source_from_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology, 
+    delete_source_from_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology,
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
-    get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object
+    get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object,
+    update_asana_name,
 )
+from app.moderation_photo import parse_moderation_item_import, image_bytes_from_import_dict
 from app.config import logger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, asc, desc
 from sqlalchemy.orm import sessionmaker
 from app import config
 from fastapi.templating import Jinja2Templates
@@ -158,9 +161,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 engine = None
 SessionLocal = None
 
-# Хранилище статусов задач импорта
-import_tasks: Dict[str, Dict] = {}
-
 def init_database():
     """Инициализация базы данных"""
     global engine, SessionLocal
@@ -180,13 +180,26 @@ def init_database():
             raise
         
         # Создаем все таблицы включая User в схеме dict_schema
-        from app.models import AboutProject, ExpertInstructions, User, ModerationItem
+        from app.models import (
+            AboutProject,
+            CatalogMirrorItem,
+            CatalogSyncState,
+            ExpertInstructions,
+            ImportBatch,
+            ImportStagingRow,
+            ModerationItem,
+            User,
+        )
         try:
             Base.metadata.create_all(bind=engine, tables=[
-                User.__table__, 
-                AboutProject.__table__, 
+                User.__table__,
+                AboutProject.__table__,
                 ExpertInstructions.__table__,
-                ModerationItem.__table__
+                ModerationItem.__table__,
+                CatalogSyncState.__table__,
+                CatalogMirrorItem.__table__,
+                ImportBatch.__table__,
+                ImportStagingRow.__table__,
             ])
         except Exception as e:
             logger.error(f"Failed to create tables: {e}")
@@ -243,23 +256,42 @@ def add_moderation_columns_if_needed():
         db.close()
         raise
 
+def run_application_startup() -> None:
+    """Инициализация БД и окружения (общая для основного API и сервиса import/export)."""
+    init_database()
+    add_moderation_columns_if_needed()
+    create_default_content()
+    create_default_users()
+
+    try:
+        from app.s3_utils import setup_minio_bucket_policy
+
+        setup_minio_bucket_policy()
+    except Exception as e:
+        logger.warning(
+            "Failed to setup MinIO bucket policy: %s. This is not critical, but images may not be accessible.",
+            e,
+        )
+
+    logger.info("Application startup completed successfully")
+
+    db = SessionLocal()
+    try:
+        from app.catalog_sync import ensure_catalog_sync_state_row, start_catalog_sync_background_thread
+
+        ensure_catalog_sync_state_row(db)
+        start_catalog_sync_background_thread()
+    except Exception as e:
+        logger.warning("Catalog sync init: %s", e)
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 async def startup_event():
     """Инициализация при запуске приложения"""
     try:
-        init_database()
-        add_moderation_columns_if_needed()
-        create_default_content()
-        create_default_users()
-        
-        # Настраиваем MinIO bucket policy для публичного доступа к изображениям
-        try:
-            from app.s3_utils import setup_minio_bucket_policy
-            setup_minio_bucket_policy()
-        except Exception as e:
-            logger.warning(f"Failed to setup MinIO bucket policy: {e}. This is not critical, but images may not be accessible.")
-        
-        logger.info("Application startup completed successfully")
+        run_application_startup()
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}")
         raise
@@ -420,11 +452,13 @@ async def post_asana(
     new_source_publisher: Optional[str] = Form(None),
     new_source_pages: Optional[str] = Form(None),  # Изменено на str для обработки пустых строк
     new_source_annotation: Optional[str] = Form(None),
-    photos: List[UploadFile] = File(...),  # Изменено на список фото
+    photos: Optional[List[UploadFile]] = File(None),
     user: str = Depends(is_expert_or_admin)
 ):
     """Добавить новую асану (только эксперты и админы)"""
     try:
+        if not photos:
+            photos = []
         logger.info(f"Adding new asana by user: {user}")
         logger.debug(f"Form data received - selected_name: {selected_name}, selected_source: {selected_source}")
         logger.debug(f"New name data: ru={new_name_ru}, sanskrit={new_name_sanskrit}")
@@ -571,7 +605,12 @@ async def post_asana(
                     logger.info(f"[INFO MAIN] Asana already exists, no new photos provided, skipping")
                     return {"message": "Asana already exists (identical record)", "id": existing_asana_id, "skipped": True}
 
-        # Асана не существует, создаем новую
+        # Асана не существует, создаем новую (источник в модели только у фото — без фото асану не создаём)
+        if not photo_s3_paths:
+            raise HTTPException(
+                status_code=400,
+                detail="Загрузите хотя бы одно фото: источник задаётся в связке с изображением.",
+            )
         logger.info(f"[DEBUG MAIN] Adding asana to ontology with {len(photo_s3_paths)} photo path(s)")
         logger.info(f"[DEBUG MAIN] Photo paths to add: {photo_s3_paths}")
         asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths, photo_hashes=photo_hashes)
@@ -755,9 +794,31 @@ async def delete_asana_name(user: str = Depends(is_expert_or_admin), uri: str = 
             raise HTTPException(status_code=404, detail="Asana name not found")
         logger.info(f"Successfully deleted asana name: {uri}")
         return {"message": "Asana name deleted successfully"}
+    except ValueError as e:
+        logger.warning(f"Cannot delete asana name: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error deleting asana name: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch("/api/asana-names")
+async def patch_asana_name(
+    name: AsanaNameCreate,
+    user: str = Depends(is_expert_or_admin),
+    uri: str = Query(..., description="URI сущности названия асаны"),
+):
+    """Изменить поля существующего названия (эксперты и администратор)."""
+    logger.info(f"Updating asana name {uri} by user: {user}")
+    try:
+        update_asana_name(uri, name.dict())
+        return {"message": "Asana name updated successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating asana name: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 # Маршруты для информации о проекте и инструкций
 @app.get("/api/about-project")
@@ -812,292 +873,12 @@ async def update_expert_instructions(data: TextContent, user: str = Depends(is_a
     db.close()
     return {"message": "Expert instructions updated successfully"}
 
-# Маршрут для скачивания/загрузки онтологии
-@app.get("/api/download-ontology")
-async def download_ontology(user: str = Depends(is_admin)):
-    """Скачать файл онтологии (только админ)"""
-    logger.info(f"Downloading ontology file by user: {user}")
-    if not os.path.exists(config.OWL_FILE_PATH):
-        logger.error("Ontology file not found")
-        raise HTTPException(status_code=404, detail="Файл онтологии не найден")
-    logger.info("Ontology file found, sending to client")
-    return FileResponse(
-        path=config.OWL_FILE_PATH,
-        filename="asana_ontology.owl",
-        media_type="application/rdf+xml"
-    )
-
-@app.post("/api/upload-ontology")
-async def upload_ontology(ontology_file: UploadFile = File(...), user: str = Depends(is_admin)):
-    """Загрузить файл онтологии (только админ)"""
-    logger.info(f"Uploading ontology file by user: {user}")
-    try:
-        content = await ontology_file.read()
-        with open(config.OWL_FILE_PATH, "wb") as f:
-            f.write(content)
-        logger.info("Ontology file uploaded successfully")
-        return {"message": "Ontology file uploaded successfully"}
-    except Exception as e:
-        logger.error(f"Error uploading ontology file: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Error uploading ontology file: {str(e)}")
-
-def run_import_asanas_task(task_id: str, tmp_path: str, source_id: str, user: str):
-    """Фоновая задача для импорта асан"""
-    try:
-        import_tasks[task_id]["status"] = "processing"
-        import_tasks[task_id]["progress"] = 0
-        
-        from app.excel_import import import_asanas_from_excel
-        
-        # Функция для обновления прогресса
-        def update_progress(current: int, total: int):
-            if total > 0:
-                progress = int((current / total) * 100)
-                import_tasks[task_id]["progress"] = progress
-                logger.debug(f"Import progress: {progress}% ({current}/{total})")
-        
-        result = import_asanas_from_excel(tmp_path, source_id, user=user, progress_callback=update_progress)
-        error_count = len(result.get('errors', []))
-        
-        import_tasks[task_id]["status"] = "completed"
-        import_tasks[task_id]["progress"] = 100
-        import_tasks[task_id]["result"] = {
-            "imported": result.get('imported', 0),
-            "errors_count": error_count,
-            "errors": result.get('errors', [])[:10]  # Только первые 10 ошибок
-        }
-        
-        # Удаляем временный файл
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-    except Exception as e:
-        import_tasks[task_id]["status"] = "error"
-        import_tasks[task_id]["error"] = str(e)
-        logger.error(f"Error in import task {task_id}: {str(e)}", exc_info=True)
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-@app.post("/api/import/asanas")
-async def import_asanas(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    source_id: str = Form(...),
-    user: str = Depends(is_expert_or_admin)
-):
-    """Импорт асан из Excel файла с привязкой к существующему источнику (асинхронно)"""
-    logger.info(f"Starting async import of asanas from Excel by user: {user}")
-    try:
-        # Сохраняем файл временно
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-        
-        # Создаем задачу
-        task_id = str(uuid.uuid4())
-        import_tasks[task_id] = {
-            "status": "pending",
-            "progress": 0,
-            "type": "asanas",
-            "user": user
-        }
-        
-        # Запускаем фоновую задачу
-        background_tasks.add_task(run_import_asanas_task, task_id, tmp_path, source_id, user)
-        
-        return {
-            "task_id": task_id,
-            "message": "Импорт запущен в фоновом режиме",
-            "status_url": f"/import/status/{task_id}"
-        }
-    except Exception as e:
-        logger.error(f"Error starting import task: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Ошибка при запуске импорта: {str(e)}")
-
-def run_import_full_task(task_id: str, tmp_path: str, user: str, source_mapping: Optional[Dict[str, str]] = None):
-    """Фоновая задача для полного импорта"""
-    try:
-        import_tasks[task_id]["status"] = "processing"
-        import_tasks[task_id]["progress"] = 0
-        
-        from app.excel_import import import_full_from_excel
-        
-        # Функция для обновления прогресса
-        def update_progress(current: int, total: int):
-            if total > 0:
-                progress = int((current / total) * 100)
-                import_tasks[task_id]["progress"] = progress
-                logger.debug(f"Import progress: {progress}% ({current}/{total})")
-        
-        result = import_full_from_excel(tmp_path, user=user, progress_callback=update_progress, source_mapping=source_mapping)
-        error_count = len(result.get('errors', []))
-        
-        import_tasks[task_id]["status"] = "completed"
-        import_tasks[task_id]["progress"] = 100
-        import_tasks[task_id]["result"] = {
-            "imported_asanas": result.get('imported_asanas', 0),
-            "imported_sources": result.get('imported_sources', 0),
-            "errors_count": error_count,
-            "errors": result.get('errors', [])[:10]  # Только первые 10 ошибок
-        }
-        
-        # Удаляем временный файл
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-    except Exception as e:
-        import_tasks[task_id]["status"] = "error"
-        import_tasks[task_id]["error"] = str(e)
-        logger.error(f"Error in import task {task_id}: {str(e)}", exc_info=True)
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-@app.post("/api/import/full/scan")
-async def scan_full_import(
-    file: UploadFile = File(...),
-    user: str = Depends(is_expert_or_admin)
-):
-    """Сканирует Excel файл и возвращает список источников для подтверждения"""
-    from app.excel_import import scan_sources_from_excel
-    
-    logger.info(f"Scanning full import file by user: {user}")
-    try:
-        # Сохраняем файл временно
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-        
-        # Сканируем источники
-        sources = scan_sources_from_excel(tmp_path)
-        
-        # Удаляем временный файл
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        
-        return {"sources": sources}
-    except Exception as e:
-        logger.error(f"Error scanning import file: {str(e)}", exc_info=True)
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise HTTPException(status_code=400, detail=f"Ошибка при сканировании файла: {str(e)}")
-
-@app.post("/api/import/full")
-async def import_full(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    source_mapping: Optional[str] = Form(None),
-    user: str = Depends(is_expert_or_admin)
-):
-    """Импорт асан и источников из Excel файла (полный импорт, асинхронно)"""
-    logger.info(f"Starting async import of full data from Excel by user: {user}")
-    try:
-        # Парсим source_mapping если есть
-        mapping = None
-        if source_mapping:
-            try:
-                mapping = json.loads(source_mapping)
-            except:
-                logger.warning(f"Failed to parse source_mapping: {source_mapping}")
-        
-        # Сохраняем файл временно
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-        
-        # Создаем задачу
-        task_id = str(uuid.uuid4())
-        import_tasks[task_id] = {
-            "status": "pending",
-            "progress": 0,
-            "type": "full",
-            "user": user
-        }
-        
-        # Запускаем фоновую задачу
-        background_tasks.add_task(run_import_full_task, task_id, tmp_path, user, mapping)
-        
-        return {
-            "task_id": task_id,
-            "message": "Импорт запущен в фоновом режиме",
-            "status_url": f"/import/status/{task_id}"
-        }
-    except Exception as e:
-        logger.error(f"Error starting import task: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Ошибка при запуске импорта: {str(e)}")
-
-@app.get("/api/import/status/{task_id}")
-async def get_import_status(
-    task_id: str = Path(...), 
-    user: str = Depends(is_expert_or_admin)
-):
-    """Получить статус задачи импорта"""
-    if task_id not in import_tasks:
-        raise HTTPException(status_code=404, detail="Задача не найдена")
-    
-    task = import_tasks[task_id]
-    
-    # Проверяем, что пользователь может видеть эту задачу (только если он создал её)
-    # Для админов можно разрешить просмотр всех задач, но для простоты оставляем только проверку на создателя
-    if task.get("user") != user:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
-    
-    response = {
-        "status": task.get("status", "unknown"),
-        "progress": task.get("progress", 0)
-    }
-    
-    # Если задача завершена, добавляем результат
-    if task.get("status") == "completed":
-        response["result"] = task.get("result", {})
-    # Если задача завершилась с ошибкой, добавляем ошибку
-    elif task.get("status") == "error":
-        response["error"] = task.get("error", "Неизвестная ошибка")
-    
-    return response
-
-@app.post("/api/import/asana-names")
-async def import_asana_names(
-    file: UploadFile = File(...),
-    user: str = Depends(is_expert_or_admin)
-):
-    """Импорт названий асан из Excel файла (только админ)"""
-    logger.info(f"Importing asana names from Excel by user: {user}")
-    try:
-        from app.excel_import import import_asana_names_from_excel
-        
-        # Сохраняем файл временно
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-        
-        try:
-            result = import_asana_names_from_excel(tmp_path, user=user)
-            error_count = len(result.get('errors', []))
-            return {
-                "message": f"Успешно импортировано {result['imported']} названий, пропущено {result['skipped']}" + (f", {error_count} ошибок" if error_count > 0 else ""),
-                "imported": result['imported'],
-                "skipped": result['skipped'],
-                "errors_count": error_count,
-                "errors": result.get('errors', [])
-            }
-        finally:
-            # Удаляем временный файл
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-    except Exception as e:
-        logger.error(f"Error importing asana names: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Ошибка при импорте названий асан: {str(e)}")
-
 # API для модерации
 @app.get("/api/moderation/items")
 async def get_moderation_items(
     resolved: Optional[bool] = None,
+    sort: str = Query("created_at", description="created_at — по дате, name — по названию"),
+    sort_dir: str = Query("desc", description="asc или desc"),
     user: str = Depends(is_expert_or_admin)
 ):
     """Получить список записей на модерацию (только для экспертов и админов)"""
@@ -1109,9 +890,20 @@ async def get_moderation_items(
         else:
             # По умолчанию показываем нерешенные
             query = query.filter(ModerationItem.resolved == False)
-        
-        # Сортировка по времени создания (новые сначала)
-        items = query.order_by(ModerationItem.created_at.desc()).all()
+
+        sort_key = (sort or "created_at").lower()
+        direction = (sort_dir or "desc").lower()
+        descending = direction == "desc"
+
+        if sort_key == "name":
+            name_expr = func.lower(
+                func.coalesce(ModerationItem.asana_name, ModerationItem.suggested_name_ru, "")
+            )
+            order_clause = desc(name_expr) if descending else asc(name_expr)
+        else:
+            order_clause = desc(ModerationItem.created_at) if descending else asc(ModerationItem.created_at)
+
+        items = query.order_by(order_clause).all()
         
         result = []
         for item in items:
@@ -1169,75 +961,6 @@ async def get_moderation_items_count(user: str = Depends(is_expert_or_admin)):
     try:
         count = db.query(ModerationItem).filter(ModerationItem.resolved == False).count()
         return {"count": count}
-    finally:
-        db.close()
-
-@app.get("/api/moderation/items/export")
-async def export_moderation_items(
-    resolved: Optional[bool] = Query(None),
-    user: str = Depends(is_expert_or_admin)
-):
-    """Экспортировать записи модерации в Excel файл
-    
-    Args:
-        resolved: Если True - экспортировать только решённые, если False - только нерешённые, если None - только нерешённые (по умолчанию)
-    """
-    from app.excel_import import export_moderation_to_excel
-    
-    db = SessionLocal()
-    try:
-        query = db.query(ModerationItem)
-        # Всегда экспортируем только нерешённые записи
-        query = query.filter(ModerationItem.resolved == False)
-        
-        # Сортировка по времени создания (новые сначала)
-        items = query.order_by(ModerationItem.created_at.desc()).all()
-        
-        # Преобразуем в список словарей
-        items_list = []
-        for item in items:
-            import_data = None
-            if item.import_data:
-                try:
-                    import_data = json.loads(item.import_data)
-                except:
-                    pass
-            
-            items_list.append({
-                "id": item.id,
-                "asana_name": item.asana_name,
-                "source_id": item.source_id,
-                "error_message": item.error_message,
-                "row_number": item.row_number,
-                "import_data": import_data,
-                "created_at": item.created_at,
-                "resolved": item.resolved,
-                "resolved_by": item.resolved_by,
-                "resolved_at": item.resolved_at,
-                "moderation_type": item.moderation_type,
-                "object_type": item.object_type,
-                "suggested_name_ru": item.suggested_name_ru,
-                "suggested_name_sanskrit": item.suggested_name_sanskrit,
-                "suggested_transliteration": item.suggested_transliteration,
-                "suggested_definition": item.suggested_definition,
-                "existing_name_id": item.existing_name_id,
-                "existing_name_ru": item.existing_name_ru
-            })
-        
-        # Экспортируем в Excel
-        excel_stream = export_moderation_to_excel(items_list)
-        
-        # Возвращаем файл
-        from datetime import datetime
-        filename = f"moderation_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        return StreamingResponse(
-            excel_stream,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}"
-            }
-        )
     finally:
         db.close()
 
@@ -1314,53 +1037,27 @@ async def add_asana_from_moderation(
                 photo_hash = None
                 logger.warning(f"Failed to process photo - will add asana without photo")
         elif keep_photo and item.import_data:
-            # Парсим JSON если это строка
-            import json
+            # Фото из сохранённого импорта: photo / photo_base64 / photo_url (см. moderation_photo.py)
             try:
-                if isinstance(item.import_data, str):
-                    import_data = json.loads(item.import_data)
-                else:
-                    import_data = item.import_data
-                
-                # Если фото есть в данных импорта
-                photo_info = import_data.get('photo_info') if isinstance(import_data, dict) else None
-                if photo_info:
-                    logger.info(f"[DEBUG] Photo info from import: {photo_info}")
-                    if 'removed' in photo_info:
-                        logger.warning(f"[WARNING] Photo was removed from import_data: {photo_info}")
-                        logger.warning(f"[WARNING] You need to upload a new photo manually")
-                
-                if isinstance(import_data, dict) and 'photo' in import_data:
-                    photo_data = import_data['photo']
-                    # Проверяем, что фото не было удалено
-                    if photo_data is None:
-                        logger.warning(f"Photo was removed from import_data (reason: {photo_info})")
-                    elif isinstance(photo_data, str) and photo_data.startswith('data:'):
-                        try:
-                            from app.s3_utils import upload_image_to_s3, compute_image_hash
-                            logger.info(f"[DEBUG] Processing photo from import data. Length: {len(photo_data)}, preview: {photo_data[:100]}")
-                            
-                            # Вычисляем хеш ДО загрузки в S3
-                            photo_hash = compute_image_hash(photo_data)
-                            logger.info(f"[DEBUG] Photo computed hash: {photo_hash}")
-                            
-                            # Проверяем, не является ли это дубликатом
-                            if existing_asana_id and photo_hash in existing_photo_hashes:
-                                logger.info(f"[INFO MAIN] Photo from import is duplicate (hash exists), skipping upload to S3")
-                                # Не загружаем в S3, но используем хеш для проверки
-                            else:
-                                # Загружаем в S3 только если фото новое
-                                photo_s3_path, _ = upload_image_to_s3(photo_data, prefix="asans")
-                                logger.info(f"[DEBUG] Successfully uploaded photo to S3: {photo_s3_path}, hash: {photo_hash}")
-                        except Exception as e:
-                            logger.error(f"Error processing photo from import data: {e}", exc_info=True)
-                            logger.error(f"Photo data preview (first 200 chars): {photo_data[:200] if len(photo_data) > 200 else photo_data}")
-                            # Не сохраняем base64 как путь S3, оставляем None
-                            photo_s3_path = None
-                            photo_hash = None
-                            logger.warning(f"Photo processing failed, will continue without photo")
+                import_data = parse_moderation_item_import(item.import_data)
+                if isinstance(import_data, dict):
+                    pi = import_data.get("photo_info")
+                    if isinstance(pi, dict) and pi.get("removed"):
+                        logger.warning("Photo was removed from import_data (photo_info.removed)")
+                    img_bytes = image_bytes_from_import_dict(import_data)
+                    if img_bytes:
+                        from app.s3_utils import upload_image_to_s3, compute_image_hash
+                        photo_hash = compute_image_hash(img_bytes)
+                        logger.info(f"[INFO MAIN] Photo from import bytes, hash={photo_hash}, size={len(img_bytes)}")
+                        if existing_asana_id and photo_hash in existing_photo_hashes:
+                            logger.info("[INFO MAIN] Import image duplicate by hash, skipping S3 upload")
+                        else:
+                            photo_s3_path, _ = upload_image_to_s3(img_bytes, prefix="asans")
+                            logger.info(f"[INFO MAIN] Uploaded moderation import image to S3: {photo_s3_path}")
+                    else:
+                        logger.warning("[INFO MAIN] keep_photo set but no image bytes extracted from import_data")
             except Exception as e:
-                logger.error(f"Error parsing import_data: {e}")
+                logger.error(f"Error processing import_data photo: {e}", exc_info=True)
         
         photo_paths = [photo_s3_path] if photo_s3_path else []
         photo_hashes = [photo_hash] if photo_hash else []

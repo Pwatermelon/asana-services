@@ -18,6 +18,16 @@ ASANA.photoHash = URIRef(f"{ASANA}photoHash")
 ASANA.base64Photo = URIRef(f"{ASANA}base64Photo")
 # Свойство для указания идентичных/аналогичных асан
 ASANA.isSameAsObject = URIRef(f"{ASANA}isSameAsObject")
+# Свойство «определение» в OWL (имя из Protégé)
+ASANA_DEFINITION = ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a
+
+
+def _persist_ontology_graph(g: Graph) -> None:
+    """DB-first: зеркало PostgreSQL + экспорт в OWL."""
+    from app.catalog_ontology import persist_ontology_graph
+
+    persist_ontology_graph(g)
+
 
 def ensure_ontology_file_exists():
     """Создает файл онтологии, если он не существует"""
@@ -36,30 +46,55 @@ def ensure_ontology_file_exists():
             
             # Создаем директорию, если её нет
             os.makedirs(os.path.dirname(config.OWL_FILE_PATH), exist_ok=True)
-            
-            # Сохраняем граф
-            g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+
+            _persist_ontology_graph(g)
             logger.info("Successfully created new ontology file")
         return True
     except Exception as e:
         logger.error(f"Error ensuring ontology file exists: {str(e)}")
         raise
 
+
 def get_graph():
+    """
+    DB-first: если в БД есть зеркало catalog_mirror_items — граф собирается из него.
+    Иначе — загрузка из ontology_updated.owl и первичное заполнение зеркала.
+    """
     try:
+        from app.main import SessionLocal
+        from app.models import CatalogMirrorItem
+        from app.catalog_ontology import build_graph_from_mirror, snapshot_graph_to_mirror
+
+        session = SessionLocal()
+        try:
+            n = session.query(CatalogMirrorItem).count()
+            if n > 0:
+                logger.info("Loading RDF graph from PostgreSQL mirror (DB-first)")
+                g = build_graph_from_mirror(session)
+                logger.debug("Loaded graph with %s triples from mirror", len(g))
+                return g
+        finally:
+            session.close()
+
         ensure_ontology_file_exists()
-        logger.info(f"Loading RDF graph from {config.OWL_FILE_PATH}")
+        logger.info(f"Loading RDF graph from {config.OWL_FILE_PATH} (bootstrap mirror)")
         g = Graph()
         g.parse(config.OWL_FILE_PATH, format="xml")
-        logger.debug(f"Successfully loaded graph with {len(g)} triples")
+        session = SessionLocal()
+        try:
+            snapshot_graph_to_mirror(session, g)
+            session.commit()
+            logger.info("Bootstrap: зеркало каталога заполнено из OWL-файла")
+        finally:
+            session.close()
         return g
     except Exception as e:
         logger.error(f"Failed to load RDF graph: {str(e)}")
         raise
 
-def load_asanas():
+def load_asanas_from_graph(g: Graph):
+    """Сериализуемый снимок асан для зеркала БД (включая URI названия и s3_path фото)."""
     logger.info("Starting to load asanas from graph")
-    g = get_graph()
     asanas = []
     all_asanas = list(g.subjects(RDF.type, ASANA.Asana))
     logger.info(f"Found {len(all_asanas)} asanas in graph")
@@ -70,6 +105,7 @@ def load_asanas():
         logger.debug(f"Name object: {name_obj}")
         logger.debug(f"Photo objects: {photo_objs}")
         name_data = {
+            "id": str(name_obj) if name_obj else "",
             "name_ru": str(g.value(name_obj, ASANA.nameInRussian)) if name_obj else "",
             "name_sanskrit": str(g.value(name_obj, ASANA.nameInSanskrit)) if name_obj and g.value(name_obj, ASANA.nameInSanskrit) else "",
             "transliteration": str(g.value(name_obj, ASANA.nameInTranslit)) if name_obj and g.value(name_obj, ASANA.nameInTranslit) else "",
@@ -86,11 +122,14 @@ def load_asanas():
             # Получаем фото: сначала пробуем S3 путь, потом base64 (для обратной совместимости)
             s3_path = g.value(photo, ASANA.s3PhotoPath)
             base64_photo = g.value(photo, ASANA.base64Photo)
+            ph_hash = g.value(photo, ASANA.photoHash)
             
             photo_data = {
-                "id": str(photo),  # Добавляем ID фото
+                "id": str(photo),
+                "s3_path": str(s3_path) if s3_path else None,
                 "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
-                "source": str(source_obj) if source_obj else None
+                "source": str(source_obj) if source_obj else None,
+                "photo_hash": str(ph_hash) if ph_hash else None,
             }
             if photo_data["image"]:
                 photos_with_sources.append(photo_data)
@@ -117,13 +156,15 @@ def load_asanas():
         photos = [p["image"] for p in photos_with_sources if p["image"]]
         
         logger.debug(f"Photos count: {len(photos)}, Sources count: {len(sources_list)}")
+        same_as_ids = [str(o) for o in g.objects(asana, ASANA.isSameAsObject)]
         asana_data = {
             "id": str(asana),
             "name": name_data,
             "source": source_data,  # Первый источник для обратной совместимости
             "sources": sources_list,  # Все источники
             "photos": photos_with_sources,  # Фото с источниками
-            "photo": photos[0] if photos else ""  # Первое фото для обратной совместимости
+            "photo": photos[0] if photos else "",  # Первое фото для обратной совместимости
+            "same_as_ids": same_as_ids,
         }
         logger.debug(f"Adding asana with ID: {asana_data['id']}")
         asanas.append(asana_data)
@@ -132,11 +173,14 @@ def load_asanas():
     asanas.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
     return asanas
 
+
+def load_asanas():
+    return load_asanas_from_graph(get_graph())
+
 def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
     """
     Ищет существующую асану с таким же названием И источником.
-    Фото добавляется к асане ТОЛЬКО если совпадают и название, и источник.
-    Если название совпадает, но источник другой - создается новая асана.
+    Источник учитывается только на фото: то же название и фото с тем же источником.
     
     Args:
         name_id: ID названия асаны
@@ -154,17 +198,12 @@ def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
         asanas_with_name = list(g.subjects(ASANA.hasName, name_uri))
         
         for asana_uri in asanas_with_name:
-            # Проверяем, есть ли у этой асаны фото с таким же источником
-            # ТОЛЬКО если есть фото с таким же источником - это та же асана
             photo_objs = list(g.objects(asana_uri, ASANA.hasPhoto))
             for photo_uri in photo_objs:
                 photo_source = g.value(photo_uri, ASANA.hasSource)
                 if photo_source == source_uri:
                     logger.info(f"Found existing asana: {str(asana_uri)} with same name and source (has photo with this source)")
                     return str(asana_uri)
-            
-            # Если у асаны нет фото с этим источником - это НЕ та же асана
-            # Создадим новую асану с тем же названием, но новым источником
         
         logger.debug(f"No existing asana found for name_id={name_id}, source_id={source_id} - will create new asana")
         return None
@@ -333,7 +372,7 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                 logger.info(f"[DEBUG ONTOLOGY] No photos to add to existing asana")
             
             logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
-            g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+            _persist_ontology_graph(g)
             logger.info("Successfully saved graph with added photos")
             
             return existing_asana_id
@@ -403,7 +442,7 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                 logger.info(f"[DEBUG ONTOLOGY] Creating new asana without photos")
             
             logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
-            g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+            _persist_ontology_graph(g)
             logger.info("Successfully saved graph")
             
             return str(asana_uri)
@@ -411,9 +450,8 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
         logger.error(f"Error adding asana: {str(e)}", exc_info=True)
         raise
 
-def load_sources():
+def load_sources_from_graph(g: Graph):
     logger.info("Starting to load sources from graph")
-    g = get_graph()
     sources = []
     for source in g.subjects(RDF.type, ASANA.AsanaSource):
         source_data = {
@@ -429,6 +467,10 @@ def load_sources():
         sources.append(source_data)
     logger.info(f"Successfully loaded {len(sources)} sources")
     return sources
+
+
+def load_sources():
+    return load_sources_from_graph(get_graph())
 
 def find_existing_source(source_data: Dict[str, Any]) -> Optional[str]:
     """
@@ -528,7 +570,7 @@ def add_source(source_data: Dict[str, Any], check_existing: bool = True) -> str:
         logger.debug("Added source triples")
         
         logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         logger.info("Successfully saved graph")
         
         return str(source_uri)
@@ -536,9 +578,8 @@ def add_source(source_data: Dict[str, Any], check_existing: bool = True) -> str:
         logger.error(f"Error adding source: {str(e)}", exc_info=True)
         raise
 
-def load_asana_names():
+def load_asana_names_from_graph(g: Graph):
     logger.info("Starting to load asana names from graph")
-    g = get_graph()
     names = []
     for name in g.subjects(RDF.type, ASANA.AsanaName):
         name_data = {
@@ -546,12 +587,72 @@ def load_asana_names():
             "name_ru": str(g.value(name, ASANA.nameInRussian)),
             "name_sanskrit": str(g.value(name, ASANA.nameInSanskrit)) if g.value(name, ASANA.nameInSanskrit) else "",
             "transliteration": str(g.value(name, ASANA.nameInTranslit)) if g.value(name, ASANA.nameInTranslit) else "",
-            "definition": str(g.value(name, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a)) if g.value(name, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a) else ""
+            "definition": str(g.value(name, ASANA_DEFINITION)) if g.value(name, ASANA_DEFINITION) else ""
         }
         logger.debug(f"Loaded asana name: {name_data}")
         names.append(name_data)
     logger.info(f"Successfully loaded {len(names)} asana names")
     return names
+
+
+def load_asana_names():
+    return load_asana_names_from_graph(get_graph())
+
+
+def _resolve_asana_name_uri(g, name_id: str) -> Optional[URIRef]:
+    """Находит URI сущности AsanaName по полному URI или по суффиксу UUID."""
+    obj = URIRef(name_id)
+    if (obj, RDF.type, ASANA.AsanaName) in g:
+        return obj
+    suffix = name_id.split("_")[-1]
+    for s in g.subjects(RDF.type, ASANA.AsanaName):
+        if str(s).endswith(suffix):
+            return URIRef(s)
+    return None
+
+
+def list_asanas_referencing_name(name_id: str) -> List[str]:
+    """Список URI асан, у которых выбрано это название (hasName)."""
+    g = get_graph()
+    name_uri = _resolve_asana_name_uri(g, name_id)
+    if not name_uri:
+        return []
+    return [str(s) for s in g.subjects(ASANA.hasName, name_uri)]
+
+
+def update_asana_name(name_id: str, name_data: Dict[str, Any]) -> None:
+    """Обновляет поля существующего AsanaName. URI не меняется."""
+    g = get_graph()
+    name_uri = _resolve_asana_name_uri(g, name_id)
+    if not name_uri:
+        raise ValueError("Название не найдено")
+
+    name_ru = (name_data.get("name_ru") or "").strip()
+    if not name_ru:
+        raise ValueError("Поле «название» обязательно")
+
+    name_ru_lower = name_ru.lower()
+    for n in g.subjects(RDF.type, ASANA.AsanaName):
+        if str(n) == str(name_uri):
+            continue
+        existing = g.value(n, ASANA.nameInRussian)
+        if existing and str(existing).lower().strip() == name_ru_lower:
+            raise ValueError("Название на русском уже занято другой записью")
+
+    for pred in (ASANA.nameInRussian, ASANA.nameInSanskrit, ASANA.nameInTranslit, ASANA_DEFINITION):
+        for o in list(g.objects(name_uri, pred)):
+            g.remove((name_uri, pred, o))
+
+    g.add((name_uri, ASANA.nameInRussian, Literal(name_ru)))
+    if name_data.get("name_sanskrit"):
+        g.add((name_uri, ASANA.nameInSanskrit, Literal(str(name_data["name_sanskrit"]).strip())))
+    if name_data.get("transliteration"):
+        g.add((name_uri, ASANA.nameInTranslit, Literal(str(name_data["transliteration"]).strip())))
+    if name_data.get("definition"):
+        g.add((name_uri, ASANA_DEFINITION, Literal(str(name_data["definition"]).strip())))
+
+    _persist_ontology_graph(g)
+
 
 def add_asana_name(name_data: Dict[str, str]) -> str:
     try:
@@ -569,10 +670,10 @@ def add_asana_name(name_data: Dict[str, str]) -> str:
         if "transliteration" in name_data and name_data["transliteration"]:
             g.add((name_uri, ASANA.nameInTranslit, Literal(name_data["transliteration"])))
         if "definition" in name_data and name_data["definition"]:
-            g.add((name_uri, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a, Literal(name_data["definition"])))
+            g.add((name_uri, ASANA_DEFINITION, Literal(name_data["definition"])))
         logger.debug("Added name triples")
         logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         logger.info("Successfully saved graph")
         return str(name_uri)
     except Exception as e:
@@ -608,7 +709,7 @@ def delete_any_by_uri(uri: str) -> bool:
         if not found:
             print(f'НЕ НАЙДЕН В ГРАФЕ: {uri}')
             return False
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         print(f'УДАЛЁН(Ы): {uri}')
         return True
     except Exception as e:
@@ -619,7 +720,17 @@ def delete_source_from_ontology(source_id: str) -> bool:
     return delete_any_by_uri(source_id)
 
 def delete_asana_name_from_ontology(name_id: str) -> bool:
-    return delete_any_by_uri(name_id)
+    g = get_graph()
+    name_uri = _resolve_asana_name_uri(g, name_id)
+    if not name_uri:
+        return False
+    refs = list(g.subjects(ASANA.hasName, name_uri))
+    if refs:
+        raise ValueError(
+            f"Нельзя удалить название: оно используется в {len(refs)} асанах. "
+            "Сначала смените название у этих асан или удалите их."
+        )
+    return delete_any_by_uri(str(name_uri))
 
 def delete_asana_from_ontology(asana_id: str) -> bool:
     try:
@@ -649,7 +760,7 @@ def delete_asana_from_ontology(asana_id: str) -> bool:
         # Удалить все триплеты, где фигурирует асана
         g.remove((asana_uri, None, None))
         g.remove((None, None, asana_uri))
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         print(f'Удалена асана и связанные фото: {asana_id}')
         return True
     except Exception as e:
@@ -695,7 +806,7 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
             g.add((photo_uri, ASANA.hasSource, source_uri))
             
         g.add((asana_uri, ASANA.hasPhoto, photo_uri))
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         
         return str(photo_uri)
     except Exception as e:
@@ -878,7 +989,7 @@ def delete_photo_from_asana(asana_id: str, photo_id: str) -> bool:
         g.remove((None, None, photo_uri))
         
         # Сохраняем онтологию
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         
         logger.info(f"Successfully deleted photo {photo_id} from asana {asana_id}")
         return True
@@ -932,7 +1043,7 @@ def replace_photo_in_asana(asana_id: str, photo_id: str, new_photo_bytes: bytes)
         g.add((photo_uri, ASANA.photoHash, Literal(new_hash)))
         
         # Сохраняем онтологию
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         
         logger.info(f"Successfully replaced photo {photo_id} for asana {asana_id}, new hash: {new_hash}")
         return True
@@ -1088,7 +1199,7 @@ def add_same_as_object(asana_id: str, target_asana_id: str) -> bool:
         # Добавляем связь (в одну сторону, при чтении ищем в обе)
         g.add((asana_uri, ASANA.isSameAsObject, target_uri))
         
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         logger.info(f"Successfully added isSameAsObject relation")
         return True
     except Exception as e:
@@ -1121,7 +1232,7 @@ def remove_same_as_object(asana_id: str, target_asana_id: str) -> bool:
         g.remove((asana_uri, ASANA.isSameAsObject, target_uri))
         g.remove((target_uri, ASANA.isSameAsObject, asana_uri))
         
-        g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+        _persist_ontology_graph(g)
         logger.info(f"Successfully removed isSameAsObject relation")
         return True
     except Exception as e:

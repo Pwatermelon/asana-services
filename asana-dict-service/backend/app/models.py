@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from enum import Enum
 from typing import Optional
@@ -104,3 +104,60 @@ class ModerationItem(Base):
     existing_name_ru = Column(String(500), nullable=True)  # Существующее название на русском
     moderation_type = Column(String(50), nullable=True)  # Тип модерации: 'error' или 'name_mismatch'
     object_type = Column(String(50), nullable=True)  # Тип объекта: 'asana_name', 'source', 'asana'
+
+
+class CatalogSyncState(Base):
+    """
+    Одна строка id=1: учёт активных операций записи в OWL и метаданные синхронизации OWL→PostgreSQL.
+    Пока write_lease_count > 0 — фоновая синхронизация зеркала каталога в БД не выполняется.
+    """
+
+    __tablename__ = "catalog_sync_state"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True)
+    write_lease_count = Column(Integer, nullable=False, default=0)
+    last_owl_to_db_at = Column(String(64), nullable=True)
+    last_owl_sha256 = Column(String(64), nullable=True)
+
+
+class CatalogMirrorItem(Base):
+    """Зеркало сущностей каталога из OWL (JSON) для запросов и будущего DB-first режима."""
+
+    __tablename__ = "catalog_mirror_items"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    uri = Column(String(2048), primary_key=True)
+    entity_type = Column(String(64), nullable=False, index=True)
+    payload = Column(JSON, nullable=False)
+
+
+class ImportBatch(Base):
+    """
+    Пакет импорта из Excel: сначала строки пишутся в staging без блокировки OWL,
+    затем один воркер применяет их к онтологии под lock.
+    """
+
+    __tablename__ = "import_batches"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user = Column(String(256), nullable=False)
+    mode = Column(String(32), nullable=False)  # asanas | full | names
+    source_id = Column(String(512), nullable=True)
+    source_mapping = Column(JSON, nullable=True)
+    status = Column(String(32), nullable=False, default="staged")
+    total_rows = Column(Integer, nullable=False, default=0)
+    created_at = Column(String(64), nullable=False)
+
+
+class ImportStagingRow(Base):
+    """Одна строка Excel (нормализованный payload) до применения к OWL."""
+
+    __tablename__ = "import_staging_rows"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(Integer, nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)
+    payload = Column(JSON, nullable=False)

@@ -10,13 +10,28 @@ const Settings = () => {
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importingNames, setImportingNames] = useState(false);
+  const [exportingNames, setExportingNames] = useState(false);
   const [importMode, setImportMode] = useState('asanas'); // 'asanas' or 'full'
   const [selectedSource, setSelectedSource] = useState('');
   const [sources, setSources] = useState([]);
+  /** Сообщения только для блока «Управление онтологией» (загрузка/выгрузка OWL) */
+  const [ontologyError, setOntologyError] = useState('');
+  const [ontologySuccess, setOntologySuccess] = useState('');
+  /** Сообщения только для блока «Импорт данных» (Excel) */
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [namesError, setNamesError] = useState('');
   const [namesSuccess, setNamesSuccess] = useState('');
+  /** Пропущенные при импорте: { row: номер строки Excel, name: название } */
+  const [lastSkippedItems, setLastSkippedItems] = useState([]);
+  /** Строки с ошибками импорта асан (полный/только асаны) — из ответа задачи */
+  const [importErrors, setImportErrors] = useState([]);
+  const [importErrorsMeta, setImportErrorsMeta] = useState({
+    total: 0,
+    truncated: false,
+  });
+  /** Ошибки при импорте названий из Excel */
+  const [namesImportErrors, setNamesImportErrors] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedNamesFile, setSelectedNamesFile] = useState(null);
   const [importTaskId, setImportTaskId] = useState(null);
@@ -50,25 +65,27 @@ const Settings = () => {
     if (!file) return;
 
     setUploading(true);
-    setError('');
-    setSuccess('');
+    setOntologyError('');
+    setOntologySuccess('');
 
     try {
       await settingsAPI.uploadOntology(file);
-      setSuccess('Онтология успешно загружена');
+      setOntologySuccess('Онтология успешно загружена');
       e.target.value = ''; // Reset input
     } catch (error) {
-      setError(error.response?.data?.detail || 'Ошибка при загрузке онтологии');
+      setOntologyError(error.response?.data?.detail || 'Ошибка при загрузке онтологии');
     } finally {
       setUploading(false);
     }
   };
 
   const handleDownloadOntology = async () => {
+    setOntologyError('');
+    setOntologySuccess('');
     try {
       await settingsAPI.downloadOntology();
     } catch (error) {
-      setError('Ошибка при выгрузке онтологии');
+      setOntologyError('Ошибка при выгрузке онтологии');
       console.error('Error downloading ontology:', error);
     }
   };
@@ -78,6 +95,8 @@ const Settings = () => {
     setSelectedFile(file || null);
     setError('');
     setSuccess('');
+    setImportErrors([]);
+    setImportErrorsMeta({ total: 0, truncated: false });
   };
 
   const handleImportFile = async () => {
@@ -130,10 +149,24 @@ const Settings = () => {
     await startImport(selectedFile);
   };
 
+  const applyImportResultToState = (result) => {
+    if (!result || typeof result !== 'object') return;
+    const errs = Array.isArray(result.errors) ? result.errors : [];
+    const total =
+      typeof result.errors_total === 'number' ? result.errors_total : errs.length;
+    setImportErrors(errs);
+    setImportErrorsMeta({
+      total,
+      truncated: Boolean(result.errors_truncated),
+    });
+  };
+
   const startImport = async (file, mapping = null) => {
     setImporting(true);
     setError('');
     setSuccess('');
+    setImportErrors([]);
+    setImportErrorsMeta({ total: 0, truncated: false });
     setImportProgress(0);
     setImportStatus('pending');
 
@@ -155,6 +188,7 @@ const Settings = () => {
         pollImportStatus(taskId);
       } else {
         // Если нет task_id, значит старый синхронный формат
+        applyImportResultToState(result);
         const errorText = result.errors_count > 0 ? ` (${result.errors_count} ошибок)` : '';
         if (importMode === 'asanas') {
           setSuccess(`Успешно импортировано ${result.imported} асан${errorText}`);
@@ -233,6 +267,7 @@ const Settings = () => {
         if (status.status === 'completed') {
           setImporting(false);
           const result = status.result || {};
+          applyImportResultToState(result);
           if (importMode === 'asanas') {
             const errorText = result.errors_count > 0 ? ` (${result.errors_count} ошибок)` : '';
             setSuccess(`Успешно импортировано ${result.imported || 0} асан${errorText}`);
@@ -273,6 +308,7 @@ const Settings = () => {
     setSelectedNamesFile(file || null);
     setNamesError('');
     setNamesSuccess('');
+    setNamesImportErrors([]);
   };
 
   const handleImportNames = async () => {
@@ -284,20 +320,40 @@ const Settings = () => {
     setImportingNames(true);
     setNamesError('');
     setNamesSuccess('');
+    setLastSkippedItems([]);
+    setNamesImportErrors([]);
 
     try {
       const result = await settingsAPI.importAsanaNames(selectedNamesFile);
       const errorText = result.errors_count > 0 ? ` (${result.errors_count} ошибок)` : '';
       const skippedText = result.skipped > 0 ? `, пропущено ${result.skipped}` : '';
       setNamesSuccess(`Успешно импортировано ${result.imported} названий${skippedText}${errorText}`);
+      setLastSkippedItems(Array.isArray(result.skipped_items) ? result.skipped_items : []);
+      setNamesImportErrors(Array.isArray(result.errors) ? result.errors : []);
       setSelectedNamesFile(null);
       // Reset file input
       const fileInput = document.getElementById('names-import-file');
       if (fileInput) fileInput.value = '';
     } catch (error) {
+      setLastSkippedItems([]);
+      setNamesImportErrors([]);
       setNamesError(error.response?.data?.detail || 'Ошибка при импорте названий асан');
     } finally {
       setImportingNames(false);
+    }
+  };
+
+  const handleExportNames = async () => {
+    setNamesError('');
+    setNamesSuccess('');
+    try {
+      setExportingNames(true);
+      await settingsAPI.exportAsanaNames();
+      setNamesSuccess('Файл с названиями скачан.');
+    } catch (error) {
+      setNamesError(error.response?.data?.detail || 'Ошибка при выгрузке названий');
+    } finally {
+      setExportingNames(false);
     }
   };
 
@@ -310,37 +366,46 @@ const Settings = () => {
           <div className="settings-section">
             <h2 className="settings-section-title">Управление онтологией</h2>
             <p className="settings-description">
-              Загрузите или выгрузите файл онтологии в формате OWL.
+              Файл онтологии в формате OWL: отдельно загрузка с компьютера на сервер и отдельно скачивание текущей версии с сервера.
             </p>
 
-            <div className="settings-actions">
-              <div className="form-group">
-                <label htmlFor="ontology-file" className="form-label">
-                  Загрузить онтологию
-                </label>
-                <input
-                  type="file"
-                  id="ontology-file"
-                  accept=".owl"
-                  onChange={handleOntologyUpload}
-                  disabled={uploading}
-                />
-                {uploading && <p>Загрузка...</p>}
+            <div className="ontology-actions">
+              <div className="ontology-action-card">
+                <h3 className="ontology-action-title">Загрузить на сервер</h3>
+                <p className="ontology-action-hint">
+                  Выберите локальный файл .owl — он будет записан вместо текущей онтологии.
+                </p>
+                <div className="form-group ontology-file-row">
+                  <label htmlFor="ontology-file" className="form-label">
+                    Файл OWL
+                  </label>
+                  <input
+                    type="file"
+                    id="ontology-file"
+                    accept=".owl"
+                    onChange={handleOntologyUpload}
+                    disabled={uploading}
+                  />
+                  {uploading && <p className="ontology-status">Загрузка…</p>}
+                </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label" style={{ opacity: 0, pointerEvents: 'none' }}>
-                  &nbsp;
-                </label>
+              <div className="ontology-action-card ontology-action-card--download">
+                <h3 className="ontology-action-title">Скачать с сервера</h3>
+                <p className="ontology-action-hint">
+                  Сохранить актуальную онтологию из базы в файл на ваш компьютер.
+                </p>
                 <button
+                  type="button"
                   onClick={handleDownloadOntology}
-                  className="btn-primary"
-                  style={{ width: '100%' }}
+                  className="btn-secondary ontology-download-btn"
                 >
-                  Выгрузить онтологию
+                  Скачать онтологию (.owl)
                 </button>
               </div>
             </div>
+            {ontologyError && <div className="error-message">{ontologyError}</div>}
+            {ontologySuccess && <div className="success-message">{ontologySuccess}</div>}
           </div>
         )}
 
@@ -353,6 +418,36 @@ const Settings = () => {
 
           {error && <div className="error-message">{error}</div>}
           {success && <div className="success-message">{success}</div>}
+          {importErrorsMeta.total > 0 && (
+            <div className="import-errors-box">
+              <div className="import-errors-toolbar">
+                <strong>
+                  Не импортировано (ошибки по строкам): {importErrorsMeta.total}
+                  {importErrorsMeta.truncated &&
+                    ` — в списке ниже первые ${importErrors.length} из ${importErrorsMeta.total}`}
+                </strong>
+                <button
+                  type="button"
+                  className="btn-secondary import-errors-copy"
+                  onClick={() => {
+                    const text = importErrors.join('\n');
+                    navigator.clipboard.writeText(text).catch(() => {});
+                  }}
+                >
+                  Копировать список
+                </button>
+              </div>
+              <p className="import-errors-hint">
+                Частые причины: название не совпало со справочником (нужно 100% совпадение) — такие
+                строки также попадают в «Требует модерации».
+              </p>
+              <ul className="import-errors-list">
+                {importErrors.map((line, i) => (
+                  <li key={`${i}-${line.slice(0, 48)}`}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">Режим импорта</label>
@@ -457,15 +552,62 @@ const Settings = () => {
 
         {isExpertOrAdmin && (
           <div className="settings-section">
-            <h2 className="settings-section-title">Импорт названий асан</h2>
+            <h2 className="settings-section-title">Импорт и выгрузка названий асан</h2>
             <p className="settings-description">
-              Импортируйте названия асан из Excel файла. Ожидаются колонки:
-              название (обязательно), санскрит, транслитерация, определение.
-              Если название уже существует, оно будет пропущено.
+              Импорт и экспорт используют один формат Excel: колонки «название» (обязательно),
+              «санскрит», «транслитерация», «определение». При импорте уже существующие названия
+              пропускаются. Выгрузка формирует файл из текущей базы (онтологии).
             </p>
+
+            <div className="form-group">
+              <button
+                type="button"
+                onClick={handleExportNames}
+                className="btn-secondary"
+                disabled={exportingNames}
+                style={{ width: '100%' }}
+              >
+                {exportingNames ? 'Выгрузка…' : 'Скачать названия из базы (Excel)'}
+              </button>
+            </div>
 
             {namesError && <div className="error-message">{namesError}</div>}
             {namesSuccess && <div className="success-message">{namesSuccess}</div>}
+            {namesImportErrors.length > 0 && (
+              <div className="import-errors-box">
+                <div className="import-errors-toolbar">
+                  <strong>Ошибки при импорте названий ({namesImportErrors.length})</strong>
+                  <button
+                    type="button"
+                    className="btn-secondary import-errors-copy"
+                    onClick={() => {
+                      navigator.clipboard.writeText(namesImportErrors.join('\n')).catch(() => {});
+                    }}
+                  >
+                    Копировать список
+                  </button>
+                </div>
+                <ul className="import-errors-list">
+                  {namesImportErrors.map((line, i) => (
+                    <li key={`ne-${i}-${line.slice(0, 48)}`}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {lastSkippedItems.length > 0 && (
+              <div className="names-skipped-box">
+                <strong>Пропущенные строки (название уже было в базе):</strong>
+                <ul className="names-skipped-list">
+                  {lastSkippedItems.map((item, i) => (
+                    <li key={`${item.row}-${item.name}-${i}`}>
+                      <span className="names-skipped-row">Строка {item.row}</span>
+                      {' — '}
+                      {item.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="form-group">
               <label htmlFor="names-import-file" className="form-label">

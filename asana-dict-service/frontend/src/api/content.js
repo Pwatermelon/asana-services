@@ -25,5 +25,24 @@ export const contentAPI = {
     const response = await apiClient.get('/api/asana-names');
     return response.data;
   },
+
+  createAsanaName: async (payload) => {
+    const response = await apiClient.post('/api/asana-names', payload);
+    return response.data;
+  },
+
+  updateAsanaName: async (uri, payload) => {
+    const response = await apiClient.patch('/api/asana-names', payload, {
+      params: { uri },
+    });
+    return response.data;
+  },
+
+  deleteAsanaName: async (uri) => {
+    const response = await apiClient.delete('/api/delete-asana-name', {
+      params: { uri },
+    });
+    return response.data;
+  },
 };
 

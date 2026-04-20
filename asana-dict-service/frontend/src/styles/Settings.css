@@ -1,13 +1,13 @@
 .settings-container {
   max-width: 900px;
-  margin: 2rem auto;
+  margin: 1rem auto 2rem;
   padding: 0 1rem;
 }
 
 .settings-title {
-  font-size: 2.25em;
+  font-size: 1.75em;
   font-weight: 700;
-  margin-bottom: 2em;
+  margin-bottom: 1.25em;
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -17,11 +17,11 @@
 
 .settings-section {
   background: var(--card-background);
-  padding: 2.5em;
-  border-radius: 16px;
-  box-shadow: var(--shadow-md);
+  padding: 1.25em 1.5em;
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-light);
-  margin-bottom: 2em;
+  margin-bottom: 1.25em;
   transition: all 0.3s;
 }
 
@@ -41,9 +41,77 @@
 
 .settings-description {
   color: var(--text-secondary);
-  margin-bottom: 2em;
-  font-size: 1.0625em;
-  line-height: 1.6;
+  margin-bottom: 1em;
+  font-size: 0.95em;
+  line-height: 1.45;
+}
+
+.names-skipped-box {
+  margin-top: 1em;
+  padding: 0.75em 1em;
+  background: var(--background-alt);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  font-size: 0.9em;
+  color: var(--text-primary);
+}
+
+.names-skipped-list {
+  margin: 0.5em 0 0 1.25em;
+  max-height: 220px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+
+.names-skipped-row {
+  font-weight: 600;
+  color: var(--primary-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-errors-box {
+  margin-top: 1em;
+  padding: 0.85em 1em;
+  background: #fff7ed;
+  border-radius: 8px;
+  border: 1px solid #fed7aa;
+  font-size: 0.9em;
+  color: var(--text-primary);
+}
+
+.import-errors-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.35em;
+}
+
+.import-errors-copy {
+  padding: 0.35em 0.75em;
+  font-size: 0.88rem;
+  min-height: auto;
+}
+
+.import-errors-hint {
+  margin: 0 0 0.5em;
+  font-size: 0.88em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.import-errors-list {
+  margin: 0.35em 0 0;
+  padding-left: 1.2em;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.import-errors-list li {
+  margin-bottom: 0.35em;
 }
 
 .file-selected {
@@ -53,5 +121,52 @@
   border-radius: 8px;
   color: var(--text-secondary);
   font-size: 0.9375em;
+}
+
+/* Онтология: две независимые операции, не в одной строке */
+.ontology-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25em;
+}
+
+.ontology-action-card {
+  padding: 1em 1.1em;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: var(--background-alt);
+}
+
+.ontology-action-card--download {
+  border-style: dashed;
+}
+
+.ontology-action-title {
+  margin: 0 0 0.35em;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ontology-action-hint {
+  margin: 0 0 0.85em;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.ontology-file-row {
+  margin-bottom: 0;
+}
+
+.ontology-status {
+  margin-top: 0.5em;
+  font-size: 0.9em;
+  color: var(--text-secondary);
+}
+
+.ontology-download-btn {
+  width: 100%;
+  max-width: 22rem;
 }
 

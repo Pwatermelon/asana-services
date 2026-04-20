@@ -80,71 +80,53 @@ const AddAsana = () => {
     setPhotoPreviews(newPreviews);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const validateNameAndSource = () => {
+    if (nameOption === 'existing' && !selectedName) {
+      return 'Пожалуйста, выберите существующее название асаны';
+    }
+    if (nameOption === 'new' && !newName.name_ru) {
+      return 'Пожалуйста, введите название асаны на русском';
+    }
+    if (sourceOption === 'existing' && !selectedSource) {
+      return 'Пожалуйста, выберите существующий источник';
+    }
+    if (sourceOption === 'new' && (!newSource.title || !newSource.author || !newSource.year)) {
+      return 'Пожалуйста, заполните все обязательные поля источника (название, автор, год)';
+    }
+    return null;
+  };
+
+  const buildFormData = () => {
+    const formData = new FormData();
+    formData.append('selected_name', nameOption === 'existing' ? selectedName : 'new');
+    formData.append('selected_source', sourceOption === 'existing' ? selectedSource : 'new');
+
+    if (nameOption === 'new') {
+      formData.append('new_name_ru', newName.name_ru);
+      if (newName.name_sanskrit) formData.append('new_name_sanskrit', newName.name_sanskrit);
+      if (newName.transliteration) formData.append('transliteration', newName.transliteration);
+      if (newName.definition) formData.append('definition', newName.definition);
+    }
+
+    if (sourceOption === 'new') {
+      formData.append('new_source_title', newSource.title);
+      formData.append('new_source_author', newSource.author);
+      if (newSource.year) formData.append('new_source_year', newSource.year);
+      if (newSource.publisher) formData.append('new_source_publisher', newSource.publisher);
+      if (newSource.pages) formData.append('new_source_pages', newSource.pages);
+      if (newSource.annotation) formData.append('new_source_annotation', newSource.annotation);
+    }
+
+    photos.forEach((photo) => {
+      formData.append('photos', photo);
+    });
+    return formData;
+  };
+
+  const submitForm = async (formData) => {
     setError('');
     setLoading(true);
-
     try {
-      // Валидация перед отправкой
-      if (nameOption === 'existing' && !selectedName) {
-        setError('Пожалуйста, выберите существующее название асаны');
-        setLoading(false);
-        return;
-      }
-      
-      if (nameOption === 'new' && !newName.name_ru) {
-        setError('Пожалуйста, введите название асаны на русском');
-        setLoading(false);
-        return;
-      }
-      
-      if (sourceOption === 'existing' && !selectedSource) {
-        setError('Пожалуйста, выберите существующий источник');
-        setLoading(false);
-        return;
-      }
-      
-      if (sourceOption === 'new' && (!newSource.title || !newSource.author || !newSource.year)) {
-        setError('Пожалуйста, заполните все обязательные поля источника (название, автор, год)');
-        setLoading(false);
-        return;
-      }
-      
-      if (photos.length === 0) {
-        setError('Пожалуйста, загрузите хотя бы одну фотографию асаны');
-        setLoading(false);
-        return;
-      }
-
-      const formData = new FormData();
-      
-      // Отправляем "new" если выбрано новое название, иначе ID существующего
-      formData.append('selected_name', nameOption === 'existing' ? selectedName : 'new');
-      // Отправляем "new" если выбран новый источник, иначе ID существующего
-      formData.append('selected_source', sourceOption === 'existing' ? selectedSource : 'new');
-      
-      if (nameOption === 'new') {
-        formData.append('new_name_ru', newName.name_ru);
-        if (newName.name_sanskrit) formData.append('new_name_sanskrit', newName.name_sanskrit);
-        if (newName.transliteration) formData.append('transliteration', newName.transliteration);
-        if (newName.definition) formData.append('definition', newName.definition);
-      }
-
-      if (sourceOption === 'new') {
-        formData.append('new_source_title', newSource.title);
-        formData.append('new_source_author', newSource.author);
-        if (newSource.year) formData.append('new_source_year', newSource.year);
-        if (newSource.publisher) formData.append('new_source_publisher', newSource.publisher);
-        if (newSource.pages) formData.append('new_source_pages', newSource.pages);
-        if (newSource.annotation) formData.append('new_source_annotation', newSource.annotation);
-      }
-
-      // Добавляем все фото
-      photos.forEach((photo, index) => {
-        formData.append('photos', photo);
-      });
-
       await asanasAPI.add(formData);
       setSuccess(true);
       setTimeout(() => {
@@ -155,6 +137,20 @@ const AddAsana = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const v = validateNameAndSource();
+    if (v) {
+      setError(v);
+      return;
+    }
+    if (photos.length === 0) {
+      setError('Загрузите хотя бы одно фото: в каталоге источник указывается вместе с изображением.');
+      return;
+    }
+    await submitForm(buildFormData());
   };
 
   if (success) {
@@ -432,7 +428,7 @@ const AddAsana = () => {
             <h2 className="form-section-title">Фотографии</h2>
             <div className="form-group">
               <label htmlFor="photos" className="form-label">
-                Фотографии асаны * (можно выбрать несколько)
+                Фотографии асаны (обязательно хотя бы одно; можно несколько)
               </label>
               <input
                 type="file"
@@ -440,7 +436,6 @@ const AddAsana = () => {
                 accept="image/*"
                 multiple
                 onChange={handlePhotoChange}
-                required
               />
               {photoPreviews.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1em', marginTop: '1em' }}>

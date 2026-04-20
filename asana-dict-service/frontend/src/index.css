@@ -4,6 +4,11 @@
   box-sizing: border-box;
 }
 
+/* Стабильная ширина под скроллбар: меню не «прыгает» при lock scroll у модалок/оверлеев */
+html {
+  scrollbar-gutter: stable;
+}
+
 :root {
   /* Основные цвета */
   --primary-color: #6366f1;
@@ -50,12 +55,12 @@
 
 body {
   font-family: 'Inter', sans-serif;
-  line-height: 1.6;
+  line-height: 1.45;
   margin: 0;
   padding: 0;
   background: var(--background);
   color: var(--text-primary);
-  margin-bottom: 60px;
+  margin-bottom: 48px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -68,25 +73,26 @@ body {
 
 .main-content {
   flex: 1;
+  /* Запас под двухстрочную шапку, если пункты переносятся (без горизонтального скролла) */
   padding-top: 100px;
 }
 
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2em;
+  padding: 1rem 1.25rem 1.5rem;
 }
 
 .page-header {
-  margin-bottom: 2em;
-  padding-bottom: 1.5em;
-  border-bottom: 2px solid var(--border-light);
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .page-title {
-  font-size: 2.25em;
+  font-size: 1.65em;
   font-weight: 700;
-  margin-bottom: 0.5em;
+  margin-bottom: 0.35em;
   color: var(--text-primary);
   background: var(--gradient-primary);
   -webkit-background-clip: text;
@@ -96,10 +102,10 @@ body {
 }
 
 .page-description {
-  font-size: 1.125em;
+  font-size: 0.95em;
   color: var(--text-secondary);
   margin-bottom: 0;
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 /* Унифицированные стили кнопок */
@@ -223,7 +229,7 @@ body {
 }
 
 .form-group {
-  margin-bottom: 1.2em;
+  margin-bottom: 0.85em;
 }
 
 .form-label {
@@ -303,8 +309,16 @@ textarea::placeholder {
 }
 
 @media (max-width: 768px) {
+  .main-content {
+    padding-top: 78px;
+  }
+
   .container {
-    padding: 1em;
+    padding: 0.85rem 0.9rem 1.25rem;
+  }
+
+  .page-title {
+    font-size: 1.4em;
   }
 }
 

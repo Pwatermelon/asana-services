@@ -84,6 +84,27 @@ export const settingsAPI = {
     return response.data;
   },
 
+  /** Тот же формат колонок, что и при импорте названий (эксперт / админ). */
+  exportAsanaNames: async () => {
+    const response = await apiClient.get('/api/export/asana-names', {
+      responseType: 'blob',
+    });
+    let filename = 'asana_names.xlsx';
+    const cd = response.headers['content-disposition'];
+    if (cd && cd.includes('filename=')) {
+      const m = cd.match(/filename="([^"]+)"/);
+      if (m) filename = m[1];
+    }
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   getImportStatus: async (taskId) => {
     const response = await apiClient.get(`/api/import/status/${taskId}`);
     return response.data;

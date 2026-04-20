@@ -11,9 +11,23 @@
   margin-bottom: 20px;
 }
 
-.users-header h1 {
+.users-header--with-action {
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.admin-toolbar-meta {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.users-header h1,
+.users-header h2 {
   margin: 0;
   color: var(--text-primary);
+  font-size: 1.35rem;
+  font-weight: 700;
 }
 
 .users-table-container {
@@ -73,27 +87,81 @@
   background: #c82333;
 }
 
+/* Группа действий в таблицах (админка): одинаковая ширина, отступ, перекрытие глобального .btn-delete из index.css */
+.users-table .table-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 7.75rem;
+}
+
+.users-table .table-action-group .btn-edit,
+.users-table .table-action-group .btn-delete {
+  margin: 0;
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  box-shadow: none;
+  border: 2px solid transparent;
+}
+
+.users-table .table-action-group .btn-edit {
+  background: #ffffff;
+  color: var(--primary-color, #6366f1);
+  border-color: var(--primary-color, #6366f1);
+}
+
+.users-table .table-action-group .btn-edit:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-dark, #4338ca);
+}
+
+.users-table .table-action-group .btn-delete {
+  background: #ffffff;
+  color: var(--danger-color, #ef4444);
+  border-color: var(--danger-light, #fca5a5);
+}
+
+.users-table .table-action-group .btn-delete:hover {
+  background: var(--danger-color, #ef4444);
+  color: #ffffff;
+  border-color: var(--danger-color, #ef4444);
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  padding: 16px;
 }
 
 .modal-content {
-  background: var(--bg-primary);
+  background: #ffffff;
   padding: 24px;
-  border-radius: 8px;
+  border-radius: 12px;
   max-width: 500px;
   width: 90%;
   max-height: 90vh;
   overflow-y: auto;
+  border: 1px solid var(--border-color, #e2e8f0);
+  box-shadow:
+    0 25px 50px -12px rgba(15, 23, 42, 0.25),
+    0 0 0 1px rgba(15, 23, 42, 0.04);
 }
 
 .modal-content h2 {
@@ -115,12 +183,21 @@
 
 .form-group input[type="text"],
 .form-group input[type="email"],
-.form-group input[type="password"] {
+.form-group input[type="password"],
+.form-group textarea {
   width: 100%;
-  padding: 8px 12px;
+  padding: 10px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 14px;
+  background: #ffffff;
+  color: var(--text-primary, #0f172a);
+  font-family: inherit;
+}
+
+.form-group textarea {
+  min-height: 100px;
+  line-height: 1.45;
 }
 
 .form-group input[type="checkbox"] {
@@ -178,10 +255,15 @@
     padding: 8px;
   }
 
-  .btn-edit,
-  .btn-delete {
-    padding: 4px 8px;
-    font-size: 12px;
+  .users-table .table-action-group {
+    min-width: 6.5rem;
+  }
+
+  .users-table .table-action-group .btn-edit,
+  .users-table .table-action-group .btn-delete {
+    min-height: 2rem;
+    font-size: 0.8125rem;
+    padding: 0.4rem 0.5rem;
   }
 }
 

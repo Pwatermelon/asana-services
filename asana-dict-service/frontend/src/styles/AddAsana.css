@@ -1,9 +1,9 @@
 .form-container {
   background: var(--card-background);
-  border-radius: 16px;
-  box-shadow: var(--shadow-md);
-  margin: 2em 0;
-  padding: 2.5em;
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  margin: 1rem 0 1.5rem;
+  padding: 1.25em 1.5em;
   border: 1px solid var(--border-light);
   transition: all 0.3s;
 }
@@ -13,9 +13,9 @@
 }
 
 .form-section {
-  margin-bottom: 2.5em;
-  border-bottom: 2px solid var(--border-light);
-  padding-bottom: 2em;
+  margin-bottom: 1.25em;
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 1.25em;
 }
 
 .form-section:last-child {

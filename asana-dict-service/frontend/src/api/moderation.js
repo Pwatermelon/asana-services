@@ -1,8 +1,12 @@
 import apiClient from './client';
 
 export const moderationAPI = {
-  getItems: async (resolved = false) => {
-    const params = { resolved: resolved };
+  getItems: async (resolved = false, sortOptions = {}) => {
+    const params = {
+      resolved,
+      sort: sortOptions.sort || 'created_at',
+      sort_dir: sortOptions.sort_dir || 'desc',
+    };
     const response = await apiClient.get('/api/moderation/items', { params });
     return response.data;
   },

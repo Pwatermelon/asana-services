@@ -1,13 +1,13 @@
 .asana-detail {
   background: var(--card-background);
-  border-radius: 16px;
-  box-shadow: var(--shadow-md);
-  margin: 2em 0;
-  padding: 2.5em;
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  margin: 0.75rem 0 1.25rem;
+  padding: 1.25em 1.5em;
   border: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  gap: 2.5em;
+  gap: 1.15em;
 }
 
 .asana-header {
@@ -18,14 +18,14 @@
 }
 
 .asana-title {
-  font-size: 2.5em;
+  font-size: 1.65em;
   font-weight: 700;
   color: var(--text-primary);
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  line-height: 1.2;
+  line-height: 1.25;
   margin: 0;
 }
 
@@ -38,13 +38,13 @@
 .asana-info {
   display: flex;
   flex-direction: column;
-  gap: 2.5em;
+  gap: 1em;
 }
 
 .detail-section {
-  margin-bottom: 2.5em;
-  padding-bottom: 2em;
-  border-bottom: 2px solid var(--border-light);
+  margin-bottom: 1em;
+  padding-bottom: 1em;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .detail-section:last-child {
@@ -52,9 +52,9 @@
 }
 
 .detail-title {
-  font-size: 1.75em;
+  font-size: 1.15em;
   font-weight: 700;
-  margin-bottom: 1.25em;
+  margin-bottom: 0.65em;
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -62,10 +62,10 @@
 }
 
 .detail-item {
-  margin-bottom: 1em;
-  font-size: 1.0625em;
-  line-height: 1.7;
-  padding: 0.75em 1em;
+  margin-bottom: 0.5em;
+  font-size: 0.95em;
+  line-height: 1.45;
+  padding: 0.45em 0.65em;
   background: var(--background-alt);
   border-radius: 10px;
   border-left: 3px solid var(--primary-color);
@@ -80,9 +80,9 @@
 
 .photo-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 2em;
-  margin-top: 1.5em;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 0.75em;
 }
 
 .photo-container {

@@ -8,7 +8,7 @@ const Footer = () => {
 
   return (
     <footer>
-      © {yearText} Каталог асан
+      © {yearText} Каталог асан традиционных школ йоги
     </footer>
   );
 };

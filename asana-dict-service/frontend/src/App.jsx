@@ -21,6 +21,8 @@ import ExpertInstructions from './pages/ExpertInstructions';
 import Settings from './pages/Settings';
 import Moderation from './pages/Moderation';
 import Users from './pages/Users';
+import Admin from './pages/Admin';
+import ScrollToTop from './components/ScrollToTop';
 
 // Защищенные маршруты
 import PrivateRoute from './components/PrivateRoute';
@@ -31,6 +33,7 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <div className="app">
           <Navbar />
           <main className="main-content">
@@ -94,6 +97,14 @@ function App() {
                 }
               />
               
+              <Route
+                path="/admin"
+                element={
+                  <ExpertRoute>
+                    <Admin />
+                  </ExpertRoute>
+                }
+              />
               <Route
                 path="/users"
                 element={

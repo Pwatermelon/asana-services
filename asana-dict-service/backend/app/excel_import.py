@@ -4,6 +4,7 @@
 import base64
 import json
 import logging
+import re
 from datetime import datetime
 from io import BytesIO
 from typing import Dict, Any, List, Optional, Tuple, Callable
@@ -36,7 +37,6 @@ def is_base64_string(value: str) -> bool:
         return False
     
     # Base64 содержит только A-Z, a-z, 0-9, +, /, = (padding)
-    import re
     base64_pattern = re.compile(r'^[A-Za-z0-9+/]+=*$')
     if not base64_pattern.match(value):
         return False
@@ -316,6 +316,93 @@ def get_db_session():
     return SessionLocal()
 
 
+_RE_ROW_PREFIX = re.compile(r"^\s*Строка\s+\d+:\s*", re.IGNORECASE)
+
+
+def _canonical_moderation_error(msg: Optional[str]) -> str:
+    """Убирает префикс с номером строки Excel — при повторном импорте того же файла номер может отличаться."""
+    if not msg:
+        return ""
+    return _RE_ROW_PREFIX.sub("", msg).strip().lower()
+
+
+def _suggestion_key(
+    suggested_name_ru: Optional[str],
+    suggested_name_sanskrit: Optional[str],
+    suggested_transliteration: Optional[str],
+    suggested_definition: Optional[str],
+    existing_name_id: Optional[str],
+    existing_name_ru: Optional[str],
+) -> Tuple[str, ...]:
+    return (
+        (suggested_name_ru or "").strip().lower(),
+        (suggested_name_sanskrit or "").strip().lower(),
+        (suggested_transliteration or "").strip().lower(),
+        (suggested_definition or "").strip().lower()[:500] if suggested_definition else "",
+        (existing_name_id or "").strip().lower(),
+        (existing_name_ru or "").strip().lower(),
+    )
+
+
+def _suggestion_key_from_row(row: ModerationItem) -> Tuple[str, ...]:
+    return _suggestion_key(
+        row.suggested_name_ru,
+        row.suggested_name_sanskrit,
+        row.suggested_transliteration,
+        row.suggested_definition,
+        row.existing_name_id,
+        row.existing_name_ru,
+    )
+
+
+def _find_duplicate_unresolved(
+    db,
+    asana_name: str,
+    source_id: Optional[str],
+    error_message: str,
+    moderation_type: str,
+    object_type: Optional[str],
+    suggested_name_ru: Optional[str],
+    suggested_name_sanskrit: Optional[str],
+    suggested_transliteration: Optional[str],
+    suggested_definition: Optional[str],
+    existing_name_id: Optional[str],
+    existing_name_ru: Optional[str],
+) -> Optional[ModerationItem]:
+    q = (
+        db.query(ModerationItem)
+        .filter(ModerationItem.resolved.is_(False))
+        .filter(ModerationItem.moderation_type == moderation_type)
+        .filter(ModerationItem.asana_name == (asana_name or ""))
+    )
+    if source_id is None:
+        q = q.filter(ModerationItem.source_id.is_(None))
+    else:
+        q = q.filter(ModerationItem.source_id == source_id)
+    if object_type is None:
+        q = q.filter(ModerationItem.object_type.is_(None))
+    else:
+        q = q.filter(ModerationItem.object_type == object_type)
+
+    canon_new = _canonical_moderation_error(error_message)
+    key_new = _suggestion_key(
+        suggested_name_ru,
+        suggested_name_sanskrit,
+        suggested_transliteration,
+        suggested_definition,
+        existing_name_id,
+        existing_name_ru,
+    )
+
+    for row in q.all():
+        if _canonical_moderation_error(row.error_message) != canon_new:
+            continue
+        if _suggestion_key_from_row(row) != key_new:
+            continue
+        return row
+    return None
+
+
 def save_moderation_item(
     asana_name: str,
     source_id: Optional[str],
@@ -409,7 +496,24 @@ def save_moderation_item(
                         import_data_clean['photo_info'] = f'all_{len(photos_list)}_photos_removed'
             
             import_data = import_data_clean
-        
+
+        if _find_duplicate_unresolved(
+            db,
+            asana_name or "",
+            source_id,
+            error_message,
+            moderation_type,
+            object_type,
+            suggested_name_ru,
+            suggested_name_sanskrit,
+            suggested_transliteration,
+            suggested_definition,
+            existing_name_id,
+            existing_name_ru,
+        ):
+            db.close()
+            return
+
         moderation_item = ModerationItem(
             asana_name=asana_name,
             source_id=source_id,
@@ -434,29 +538,22 @@ def save_moderation_item(
         logger.error(f"Failed to save moderation item: {e}")
 
 
-def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str] = None, progress_callback: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
+def run_asanas_indexed_rows(
+    indexed_rows: List[Tuple[int, Dict[str, Any]]],
+    source_id: str,
+    user: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
     """
-    Импортирует асаны из Excel файла с привязкой к существующему источнику.
-    Ожидает колонку с названием асаны на русском языке.
-    Система автоматически найдет существующее название (только точное совпадение, без учета регистра)
-    или создаст новое, если не найдено.
-    Если найдено похожее название - отправляется в модерацию.
-    Также поддерживается колонка с фото (опционально).
-    
-    Args:
-        file_path: Путь к Excel файлу
-        source_id: ID источника
-        user: Имя пользователя
-        progress_callback: Функция для обновления прогресса (current, total)
+    Импорт асан по уже нормализованным строкам (idx = номер строки Excel).
+    Используется напрямую и после чтения из import_staging_rows.
     """
-    rows = parse_excel_file(file_path)
-    total_rows = len(rows)
+    total_rows = len(indexed_rows)
     imported = 0
     errors = []
-    
-    for idx, row in enumerate(rows, start=2):
+
+    for idx, normalized in indexed_rows:
         try:
-            normalized = normalize_column_names(row)
             
             if not normalized.get('name_ru'):
                 error_msg = f"Строка {idx}: отсутствует название асаны"
@@ -693,6 +790,20 @@ def import_asanas_from_excel(file_path: str, source_id: str, user: Optional[str]
     }
 
 
+def import_asanas_from_excel(
+    file_path: str,
+    source_id: str,
+    user: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Импортирует асаны из Excel файла с привязкой к существующему источнику.
+    """
+    rows = parse_excel_file(file_path)
+    indexed = [(idx, normalize_column_names(row)) for idx, row in enumerate(rows, start=2)]
+    return run_asanas_indexed_rows(indexed, source_id, user=user, progress_callback=progress_callback)
+
+
 def scan_sources_from_excel(file_path: str) -> List[Dict[str, Any]]:
     """
     Сканирует Excel файл и возвращает список уникальных источников из файла.
@@ -738,32 +849,25 @@ def scan_sources_from_excel(file_path: str) -> List[Dict[str, Any]]:
     return list(sources_found.values())
 
 
-def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_callback: Optional[Callable[[int, int], None]] = None, source_mapping: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def run_full_indexed_rows(
+    indexed_rows: List[Tuple[int, Dict[str, Any]]],
+    user: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    source_mapping: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """
-    Импортирует асаны и источники из Excel файла.
-    Если в строке есть данные источника, создается новый источник.
-    Иначе асана привязывается к последнему созданному источнику.
-    
-    Args:
-        file_path: Путь к Excel файлу
-        user: Имя пользователя
-        progress_callback: Функция для обновления прогресса (current, total)
-        source_mapping: Словарь для маппинга новых источников на существующие.
-                       Ключ - строка вида "title|author|year", значение - ID существующего источника
+    Полный импорт по списку (номер_строки, нормализованный dict).
     """
-    rows = parse_excel_file(file_path)
-    total_rows = len(rows)
+    total_rows = len(indexed_rows)
     imported_asanas = 0
     imported_sources = 0
     errors = []
     current_source_id = None
-    
-    # Кеш для уже проверенных источников (чтобы не загружать граф каждый раз)
+
     source_cache = {}  # {tuple(title, author, year): source_id}
-    
-    for idx, row in enumerate(rows, start=2):
+
+    for idx, normalized in indexed_rows:
         try:
-            normalized = normalize_column_names(row)
             
             # Проверяем, нужно ли создать новый источник
             if has_source_data(normalized):
@@ -1069,22 +1173,34 @@ def import_full_from_excel(file_path: str, user: Optional[str] = None, progress_
     }
 
 
-def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) -> Dict[str, Any]:
+def import_full_from_excel(
+    file_path: str,
+    user: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    source_mapping: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """
-    Импортирует названия асан из Excel файла.
-    Ожидает колонки: название (name_ru), санскрит (name_sanskrit),
-    транслитерация (transliteration), определение (definition).
-    Если название уже существует (точное совпадение), пропускает его.
-    Если найдено похожее - отправляет в модерацию.
+    Импортирует асаны и источники из Excel файла (парсинг файла → run_full_indexed_rows).
     """
     rows = parse_excel_file(file_path)
+    indexed = [(idx, normalize_column_names(row)) for idx, row in enumerate(rows, start=2)]
+    return run_full_indexed_rows(
+        indexed, user=user, progress_callback=progress_callback, source_mapping=source_mapping
+    )
+
+
+def run_asana_names_indexed_rows(
+    indexed_rows: List[Tuple[int, Dict[str, Any]]],
+    user: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Импорт названий по списку (номер строки, нормализованные поля)."""
     imported = 0
     skipped = 0
+    skipped_items: List[Dict[str, Any]] = []
     errors = []
-    
-    for idx, row in enumerate(rows, start=2):
+
+    for idx, normalized in indexed_rows:
         try:
-            normalized = normalize_column_names(row)
             
             if not normalized.get('name_ru'):
                 error_msg = f"Строка {idx}: отсутствует название асаны"
@@ -1102,6 +1218,7 @@ def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) ->
             
             if existing_name_id:
                 skipped += 1
+                skipped_items.append({"row": idx, "name": name_ru})
                 continue
             
             # Создаем новое название асаны
@@ -1116,17 +1233,27 @@ def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) ->
             
             add_asana_name(name_data)
             imported += 1
-            
+
         except Exception as e:
             error_msg = f"Строка {idx}: {str(e)}"
             errors.append(error_msg)
             logger.error(error_msg)
-    
+
     return {
         "imported": imported,
         "skipped": skipped,
-        "errors": errors
+        "skipped_items": skipped_items,
+        "errors": errors,
     }
+
+
+def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Импортирует названия асан из Excel файла.
+    """
+    rows = parse_excel_file(file_path)
+    indexed = [(idx, normalize_column_names(row)) for idx, row in enumerate(rows, start=2)]
+    return run_asana_names_indexed_rows(indexed, user=user)
 
 
 def export_moderation_to_excel(items: List[Dict[str, Any]]) -> BytesIO:
@@ -1254,5 +1381,30 @@ def export_moderation_to_excel(items: List[Dict[str, Any]]) -> BytesIO:
     wb.save(output)
     output.seek(0)
     
+    return output
+
+
+def export_asana_names_to_excel() -> BytesIO:
+    """
+    Выгружает названия асан из онтологии в Excel в том же формате колонок,
+    что ожидает import_asana_names_from_excel (название, санскрит, транслитерация, определение).
+    """
+    names = load_asana_names()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Названия"
+    headers = ["название", "санскрит", "транслитерация", "определение"]
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = Font(bold=True)
+    sorted_names = sorted(names, key=lambda x: (x.get("name_ru") or "").lower())
+    for row_idx, n in enumerate(sorted_names, start=2):
+        ws.cell(row=row_idx, column=1, value=n.get("name_ru") or "")
+        ws.cell(row=row_idx, column=2, value=n.get("name_sanskrit") or "")
+        ws.cell(row=row_idx, column=3, value=n.get("transliteration") or "")
+        ws.cell(row=row_idx, column=4, value=n.get("definition") or "")
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
     return output
 

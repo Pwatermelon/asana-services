@@ -41,15 +41,15 @@ services:
       - asana-network
 
   # ============================================
-  # Сервис каталога асан (asana-dict-service)
+  # Сервис каталога асан (asana-dict-service) — основной API
+  # Тяжёлый импорт/экспорт — отдельный сервис asana-import (масштаб: --scale asana-import=N + Redis).
+  # Один общий файл онтологии на хосте: не запускайте параллельно тяжёлые импорты в OWL.
   # ============================================
   asana-backend:
+    image: asana-dict-api:${ASANA_DICT_TAG:-latest}
     build:
       context: ./asana-dict-service/backend
       dockerfile: Dockerfile
-    container_name: asana-backend
-    ports:
-      - "8000:8000"
     restart: unless-stopped
     environment:
       - POSTGRES_HOST=${DB_HOST:-postgres}
@@ -69,6 +69,41 @@ services:
     networks:
       - asana-network
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - asana-network
+
+  asana-import:
+    image: asana-dict-import:${ASANA_IMPORT_TAG:-latest}
+    build:
+      context: ./asana-dict-service
+      dockerfile: import-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=${DB_HOST:-postgres}
+      - POSTGRES_PORT=${DB_PORT:-5432}
+      - POSTGRES_DB=${DB_NAME:-asana_db}
+      - POSTGRES_USER=${DB_USER:-asana_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-asana_password}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - REDIS_URL=redis://redis:6379/0
+      # Фоновую синхронизацию OWL→БД запускает только asana-backend (один поток на кластер)
+      - CATALOG_SYNC_BACKGROUND=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./asana-dict-service/backend/ontology_updated.owl:/app/ontology_updated.owl
+    networks:
+      - asana-network
+
   asana-frontend:
     build:
       context: ./asana-dict-service/frontend
@@ -79,6 +114,7 @@ services:
     restart: unless-stopped
     depends_on:
       - asana-backend
+      - asana-import
       - server-module
     networks:
       - asana-network
@@ -180,6 +216,9 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - asana-frontend
+      - asana-backend
+      - asana-import
+      - redis
       - server-module
     networks:
       - asana-network
