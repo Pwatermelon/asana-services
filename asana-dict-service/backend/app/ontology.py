@@ -4,6 +4,7 @@ from app.s3_utils import get_s3_url
 from typing import Optional, Dict, Any, List
 import uuid
 import logging
+from datetime import datetime, timezone
 import os
 import base64
 
@@ -20,6 +21,8 @@ ASANA.base64Photo = URIRef(f"{ASANA}base64Photo")
 ASANA.isSameAsObject = URIRef(f"{ASANA}isSameAsObject")
 # Свойство «определение» в OWL (имя из Protégé)
 ASANA_DEFINITION = ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a
+# Дата создания записи названия (ISO 8601), для сортировки в каталоге
+ASANA.nameCreatedAt = URIRef(f"{ASANA}nameCreatedAt")
 
 
 def _persist_ontology_graph(g: Graph) -> None:
@@ -582,12 +585,14 @@ def load_asana_names_from_graph(g: Graph):
     logger.info("Starting to load asana names from graph")
     names = []
     for name in g.subjects(RDF.type, ASANA.AsanaName):
+        created_lit = g.value(name, ASANA.nameCreatedAt)
         name_data = {
             "id": str(name),
             "name_ru": str(g.value(name, ASANA.nameInRussian)),
             "name_sanskrit": str(g.value(name, ASANA.nameInSanskrit)) if g.value(name, ASANA.nameInSanskrit) else "",
             "transliteration": str(g.value(name, ASANA.nameInTranslit)) if g.value(name, ASANA.nameInTranslit) else "",
-            "definition": str(g.value(name, ASANA_DEFINITION)) if g.value(name, ASANA_DEFINITION) else ""
+            "definition": str(g.value(name, ASANA_DEFINITION)) if g.value(name, ASANA_DEFINITION) else "",
+            "name_created_at": str(created_lit) if created_lit else None,
         }
         logger.debug(f"Loaded asana name: {name_data}")
         names.append(name_data)
@@ -665,6 +670,13 @@ def add_asana_name(name_data: Dict[str, str]) -> str:
         
         g.add((name_uri, RDF.type, ASANA.AsanaName))
         g.add((name_uri, ASANA.nameInRussian, Literal(name_data["name_ru"])))
+        g.add(
+            (
+                name_uri,
+                ASANA.nameCreatedAt,
+                Literal(datetime.now(timezone.utc).isoformat()),
+            )
+        )
         if "name_sanskrit" in name_data and name_data["name_sanskrit"]:
             g.add((name_uri, ASANA.nameInSanskrit, Literal(name_data["name_sanskrit"])))
         if "transliteration" in name_data and name_data["transliteration"]:

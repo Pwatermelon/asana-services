@@ -22,6 +22,38 @@
   font-weight: 500;
 }
 
+.admin-names-sort-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 200px;
+  max-width: 420px;
+}
+
+.admin-names-sort-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.admin-names-sort-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45em 0.65em;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--card-background, var(--bg-secondary));
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.cell-nowrap-muted {
+  white-space: nowrap;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
 .users-header h1,
 .users-header h2 {
   margin: 0;

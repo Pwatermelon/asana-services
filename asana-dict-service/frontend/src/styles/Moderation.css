@@ -55,6 +55,37 @@
   cursor: pointer;
 }
 
+.moderation-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-left: auto;
+}
+
+.moderation-clear-btn {
+  border-color: #c62828;
+  color: #b71c1c;
+}
+
+.moderation-clear-btn:hover:not(:disabled) {
+  background: #ffebee;
+}
+
+.moderation-clear-dialog {
+  max-width: 480px;
+}
+
+.moderation-clear-warning {
+  line-height: 1.5;
+  margin: 0.75rem 0 1.25rem;
+  color: var(--text-primary);
+}
+
+.moderation-clear-actions {
+  justify-content: flex-end;
+}
+
 .no-items {
   text-align: center;
   padding: 3rem;

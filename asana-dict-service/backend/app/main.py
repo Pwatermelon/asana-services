@@ -161,6 +161,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 engine = None
 SessionLocal = None
 
+# Один lock на все процессы (backend + import, несколько реплик): без него create_all гоняется и ловит
+# duplicate key на pg_type (catalog_sync_state, …) при одновременном старте контейнеров.
+_DICT_DB_INIT_ADVISORY_LOCK_ID = 584920171
+
+
 def init_database():
     """Инициализация базы данных"""
     global engine, SessionLocal
@@ -169,17 +174,7 @@ def init_database():
         engine = create_engine(config.SQLALCHEMY_DATABASE_URL)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         
-        # Создаем схему если её нет
         from sqlalchemy import text
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("CREATE SCHEMA IF NOT EXISTS dict_schema"))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to create schema: {e}")
-            raise
-        
-        # Создаем все таблицы включая User в схеме dict_schema
         from app.models import (
             AboutProject,
             CatalogMirrorItem,
@@ -191,18 +186,33 @@ def init_database():
             User,
         )
         try:
-            Base.metadata.create_all(bind=engine, tables=[
-                User.__table__,
-                AboutProject.__table__,
-                ExpertInstructions.__table__,
-                ModerationItem.__table__,
-                CatalogSyncState.__table__,
-                CatalogMirrorItem.__table__,
-                ImportBatch.__table__,
-                ImportStagingRow.__table__,
-            ])
+            with engine.begin() as conn:
+                conn.execute(
+                    text("SELECT pg_advisory_lock(:id)"),
+                    {"id": _DICT_DB_INIT_ADVISORY_LOCK_ID},
+                )
+                try:
+                    conn.execute(text("CREATE SCHEMA IF NOT EXISTS dict_schema"))
+                    Base.metadata.create_all(
+                        bind=conn,
+                        tables=[
+                            User.__table__,
+                            AboutProject.__table__,
+                            ExpertInstructions.__table__,
+                            ModerationItem.__table__,
+                            CatalogSyncState.__table__,
+                            CatalogMirrorItem.__table__,
+                            ImportBatch.__table__,
+                            ImportStagingRow.__table__,
+                        ],
+                    )
+                finally:
+                    conn.execute(
+                        text("SELECT pg_advisory_unlock(:id)"),
+                        {"id": _DICT_DB_INIT_ADVISORY_LOCK_ID},
+                    )
         except Exception as e:
-            logger.error(f"Failed to create tables: {e}")
+            logger.error(f"Failed to create schema/tables: {e}")
             raise
 
 # Создаем записи о проекте и инструкции, если их нет
@@ -963,6 +973,20 @@ async def get_moderation_items_count(user: str = Depends(is_expert_or_admin)):
         return {"count": count}
     finally:
         db.close()
+
+
+@app.delete("/api/moderation/items/all")
+async def delete_all_moderation_items(user: str = Depends(is_expert_or_admin)):
+    """Безвозвратно удалить все записи модерации (эксперт и администратор)."""
+    db = SessionLocal()
+    try:
+        deleted = db.query(ModerationItem).delete(synchronize_session=False)
+        db.commit()
+        logger.info("Moderation table cleared by %s, deleted %s rows", user, deleted)
+        return {"deleted": deleted, "message": "Все записи модерации удалены"}
+    finally:
+        db.close()
+
 
 @app.post("/api/moderation/items/{item_id}/add-asana")
 async def add_asana_from_moderation(

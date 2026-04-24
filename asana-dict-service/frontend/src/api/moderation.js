@@ -38,6 +38,11 @@ export const moderationAPI = {
     return response.data;
   },
 
+  clearAll: async () => {
+    const response = await apiClient.delete('/api/moderation/items/all');
+    return response.data;
+  },
+
   exportItems: async () => {
     const response = await apiClient.get('/api/moderation/items/export', {
       responseType: 'blob',

@@ -17,6 +17,8 @@ const Moderation = () => {
   const [addFormData, setAddFormData] = useState({});
   const [keepPhotoFromRequest, setKeepPhotoFromRequest] = useState({}); // Галочка для сохранения фото из запроса
   const [exporting, setExporting] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
   /** created_at — по умолчанию новые сверху; name — по алфавиту названия */
   const [sortBy, setSortBy] = useState('created_at');
   const [sortDir, setSortDir] = useState('desc');
@@ -155,6 +157,22 @@ const Moderation = () => {
     }
   };
 
+  const handleConfirmClearModeration = async () => {
+    if (clearing) return;
+    setClearing(true);
+    try {
+      await moderationAPI.clearAll();
+      setShowClearModal(false);
+      await loadItems();
+      window.dispatchEvent(new CustomEvent('moderation-updated'));
+    } catch (error) {
+      console.error('Error clearing moderation:', error);
+      alert(error.response?.data?.detail || 'Не удалось очистить модерацию');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   if (loading) {
     return <div className="container">Загрузка...</div>;
   }
@@ -196,17 +214,66 @@ const Moderation = () => {
               <option value="asc">{sortBy === 'name' ? 'А → Я' : 'Сначала старые'}</option>
             </select>
           </div>
-          <div className="filter-group" style={{ marginLeft: 'auto' }}>
+          <div className="filter-group moderation-toolbar-actions">
             <button
+              type="button"
+              className="btn-secondary moderation-clear-btn"
+              onClick={() => setShowClearModal(true)}
+              disabled={clearing}
+            >
+              Очистить модерацию
+            </button>
+            <button
+              type="button"
               className="btn-primary"
               onClick={handleExport}
               disabled={exporting || items.length === 0}
-              style={{ marginLeft: '1em' }}
             >
               {exporting ? 'Экспорт...' : 'Экспорт в Excel'}
             </button>
           </div>
         </div>
+
+        {showClearModal && (
+          <div
+            className="modal-overlay moderation-clear-overlay"
+            role="presentation"
+            onClick={() => !clearing && setShowClearModal(false)}
+          >
+            <div
+              className="modal-content moderation-clear-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="moderation-clear-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="moderation-clear-title">Очистить модерацию?</h2>
+              <p className="moderation-clear-warning">
+                Будут <strong>безвозвратно удалены все записи</strong> в таблице модерации: и нерешённые,
+                и уже отмеченные как решённые. Отменить это действие будет невозможно. При необходимости
+                сначала сделайте экспорт в Excel.
+              </p>
+              <div className="form-actions moderation-clear-actions">
+                <button
+                  type="button"
+                  className="btn-delete"
+                  onClick={handleConfirmClearModeration}
+                  disabled={clearing}
+                >
+                  {clearing ? 'Удаление…' : 'Да, удалить всё'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowClearModal(false)}
+                  disabled={clearing}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {items.length === 0 ? (
           <p className="no-items">Нет записей для модерации</p>

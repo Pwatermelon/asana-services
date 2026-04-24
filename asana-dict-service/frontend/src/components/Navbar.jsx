@@ -34,8 +34,16 @@ const Navbar = () => {
       };
       loadModerationCount();
       const interval = setInterval(loadModerationCount, 30000);
-      return () => clearInterval(interval);
+      const onModerationUpdated = () => {
+        loadModerationCount();
+      };
+      window.addEventListener('moderation-updated', onModerationUpdated);
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('moderation-updated', onModerationUpdated);
+      };
     }
+    return undefined;
   }, [isExpertOrAdmin]);
 
   useEffect(() => {

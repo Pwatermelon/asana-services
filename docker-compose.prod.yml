@@ -1,3 +1,11 @@
+# Продовый стек: объединяет ваш текущий compose с актуальной схемой репозитория
+# (отдельный сервис импорта + Redis, маршруты в nginx.prod.conf на asana-import).
+#
+# В .env на сервере должны быть в т.ч.:
+#   SMTP_HOST, URL_NETWORK_SERVER (compose подставляет их в server-module)
+#
+# Имена и теги образов ниже — ориентир; при необходимости замените сами.
+
 version: "3.8"
 
 services:
@@ -5,10 +13,7 @@ services:
   # Основной сервис (asana-server-module)
   # ============================================
   server-module:
-    platform: linux/amd64
-    build:
-      context: ./asana-server-module
-      dockerfile: Dockerfile
+    image: plwatermelon/server-module:1.0.2-beta
     container_name: server-module
     ports:
       - "8001:8000"
@@ -43,17 +48,23 @@ services:
 
   # ============================================
   # Сервис каталога асан (asana-dict-service) — основной API
-  # Тяжёлый импорт/экспорт — отдельный сервис asana-import (масштаб: --scale asana-import=N + Redis).
+  # Тяжёлый импорт/экспорт — asana-import + Redis (см. ниже).
   # Один общий файл онтологии на хосте: не запускайте параллельно тяжёлые импорты в OWL.
   # ============================================
   asana-backend:
-    platform: linux/amd64
-    image: asana-dict-api:${ASANA_DICT_TAG:-latest}
-    build:
-      context: ./asana-dict-service/backend
-      dockerfile: Dockerfile
+    image: plwatermelon/asana-backend:2.0.1-beta
+    container_name: asana-backend
+    ports:
+      - "8000:8000"
     restart: unless-stopped
     environment:
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://katalog-asan.online/images}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - EXPERT_USERNAME=${EXPERT_USERNAME:-expert}
+      - EXPERT_PASSWORD=${EXPERT_PASSWORD:-expert123}
+      - USER_MINIO=${USER_MINIO:-minioadmin}
+      - PASSWORD_MINIO=${PASSWORD_MINIO:-minioadmin}
       - POSTGRES_HOST=${DB_HOST:-postgres}
       - POSTGRES_PORT=${DB_PORT:-5432}
       - POSTGRES_DB=${DB_NAME:-asana_db}
@@ -67,7 +78,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ./asana-dict-service/backend/ontology_updated.owl:/app/ontology_updated.owl
+      - /app/ontology_updated.owl:/app/ontology_updated.owl
     networks:
       - asana-network
 
@@ -77,12 +88,9 @@ services:
     networks:
       - asana-network
 
+  # Очередь/воркер тяжёлого импорта (тот же OWL, что у asana-backend)
   asana-import:
-    platform: linux/amd64
-    image: asana-dict-import:${ASANA_IMPORT_TAG:-latest}
-    build:
-      context: ./asana-dict-service
-      dockerfile: import-service/Dockerfile
+    image: plwatermelon/asana-backend-import:2.0.1-beta
     restart: unless-stopped
     environment:
       - POSTGRES_HOST=${DB_HOST:-postgres}
@@ -103,16 +111,12 @@ services:
       redis:
         condition: service_started
     volumes:
-      - ./asana-dict-service/backend/ontology_updated.owl:/app/ontology_updated.owl
+      - /app/ontology_updated.owl:/app/ontology_updated.owl
     networks:
       - asana-network
 
   asana-frontend:
-    platform: linux/amd64
-    image: asana-dict-frontend:${ASANA_IMPORT_TAG:-latest}
-    build:
-      context: ./asana-dict-service/frontend
-      dockerfile: Dockerfile
+    image: plwatermelon/asana-frontend:2.0.1-beta
     container_name: asana-frontend
     ports:
       - "3000:3000"
@@ -128,7 +132,7 @@ services:
   # # Сервис с нейронкой (asana-network-service)
   # # ============================================
   # server-network:
-  #   build: 
+  #   build:
   #     context: ./asana-network-service
   #     dockerfile: Dockerfile
   #   image: server-network
@@ -139,7 +143,7 @@ services:
   #   environment:
   #     - HOST_SERVER=${HOST_NETWORK_SERVER}
   #     - PORT_SERVER=${PORT_NETWORK_SERVER}
-  
+
   # ============================================
   # База данных PostgreSQL (общая для всех сервисов)
   # ============================================
@@ -210,23 +214,41 @@ services:
       - asana-network
 
   # ============================================
-  # Nginx для проксирования
+  # Certbot для получения SSL сертификатов
+  # ============================================
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - asana-network
+
+  # ============================================
+  # Nginx для проксирования с SSL
   # ============================================
   nginx:
     image: nginx:alpine
     container_name: nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /app/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       - asana-frontend
       - asana-backend
       - asana-import
       - redis
       - server-module
+      - certbot
     networks:
       - asana-network
+    restart: unless-stopped
 
 volumes:
   pgdata:
@@ -235,4 +257,3 @@ volumes:
 networks:
   asana-network:
     driver: bridge
-
