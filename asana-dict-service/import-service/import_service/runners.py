@@ -49,8 +49,19 @@ def run_import_asanas_task(task_id: str, tmp_path: str, source_id: str, user: st
     batch_id = None
     try:
         task_update(task_id, status="processing", progress=2)
+
+        def on_staging(cur: int, total: int) -> None:
+            if total <= 0:
+                return
+            p = 2 + int((cur / total) * 7)
+            task_update(task_id, progress=min(9, max(2, p)))
+
         batch_id = ingest_excel_to_staging(
-            tmp_path, mode="asanas", user=user, source_id=source_id
+            tmp_path,
+            mode="asanas",
+            user=user,
+            source_id=source_id,
+            staging_progress_callback=on_staging,
         )
         task_update(task_id, status="processing", progress=10, batch_id=batch_id)
         if os.path.exists(tmp_path):
@@ -112,8 +123,19 @@ def run_import_full_task(
     batch_id = None
     try:
         task_update(task_id, status="processing", progress=2)
+
+        def on_staging(cur: int, total: int) -> None:
+            if total <= 0:
+                return
+            p = 2 + int((cur / total) * 7)
+            task_update(task_id, progress=min(9, max(2, p)))
+
         batch_id = ingest_excel_to_staging(
-            tmp_path, mode="full", user=user, source_mapping=source_mapping
+            tmp_path,
+            mode="full",
+            user=user,
+            source_mapping=source_mapping,
+            staging_progress_callback=on_staging,
         )
         task_update(task_id, status="processing", progress=10, batch_id=batch_id)
         if os.path.exists(tmp_path):

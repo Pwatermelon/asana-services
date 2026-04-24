@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.excel_import import (
+    materialize_embedded_photos_to_staging_payload,
     normalize_column_names,
     parse_excel_file,
     run_asana_names_indexed_rows,
@@ -21,12 +22,16 @@ from app.models import ImportBatch, ImportStagingRow
 logger = logging.getLogger("asana_service.excel_import_staging")
 
 
+_STAGING_COMMIT_EVERY = 40
+
+
 def ingest_excel_to_staging(
     file_path: str,
     mode: str,
     user: str,
     source_id: Optional[str] = None,
     source_mapping: Optional[Dict[str, str]] = None,
+    staging_progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> int:
     """
     Парсит Excel, нормализует строки, пишет в import_batches + import_staging_rows.
@@ -48,15 +53,23 @@ def ingest_excel_to_staging(
         )
         session.add(batch)
         session.flush()
-        for idx, row in enumerate(rows, start=2):
+        batch_id = batch.id
+        total = len(rows)
+        step = max(1, total // 25) if total else 1
+        for i, row in enumerate(rows):
+            idx = i + 2
             normalized = normalize_column_names(row)
+            normalized = materialize_embedded_photos_to_staging_payload(normalized)
             session.add(
-                ImportStagingRow(batch_id=batch.id, row_number=idx, payload=normalized)
+                ImportStagingRow(batch_id=batch_id, row_number=idx, payload=normalized)
             )
+            if staging_progress_callback and total and (i % step == 0 or i == total - 1):
+                staging_progress_callback(i + 1, total)
+            if (i + 1) % _STAGING_COMMIT_EVERY == 0:
+                session.commit()
         session.commit()
-        bid = batch.id
-        logger.info("Staging: batch_id=%s mode=%s rows=%s", bid, mode, len(rows))
-        return bid
+        logger.info("Staging: batch_id=%s mode=%s rows=%s", batch_id, mode, len(rows))
+        return batch_id
     except Exception:
         session.rollback()
         raise
