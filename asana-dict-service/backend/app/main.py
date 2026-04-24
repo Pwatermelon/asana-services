@@ -283,6 +283,45 @@ def run_application_startup() -> None:
             e,
         )
 
+    # Удаление «битых» асан без ни одного фото (после сбойного импорта). Только там, где включено
+    # (у asana-import в compose выставляют OWL_PURGE_EMPTY_ASANAS_ON_START=false — один писатель OWL).
+    if os.getenv("OWL_PURGE_EMPTY_ASANAS_ON_START", "true").lower() in ("1", "true", "yes"):
+        db_owl = SessionLocal()
+        lease_acquired = False
+        removed_empty = 0
+        try:
+            from app.catalog_sync import acquire_owl_write_lease, release_owl_write_lease
+            from app.ontology import purge_asanas_without_photos_from_ontology
+
+            acquire_owl_write_lease(db_owl)
+            lease_acquired = True
+            removed_empty = purge_asanas_without_photos_from_ontology()
+            if removed_empty:
+                logger.info(
+                    "Стартовая очистка OWL: удалено асан без фото: %s",
+                    removed_empty,
+                )
+        except Exception as purge_err:
+            logger.warning(
+                "Стартовая очистка асан без фото пропущена из-за ошибки: %s",
+                purge_err,
+                exc_info=True,
+            )
+        finally:
+            if lease_acquired:
+                try:
+                    release_owl_write_lease(db_owl)
+                except Exception as rel_err:
+                    logger.warning("release_owl_write_lease после очистки: %s", rel_err)
+            db_owl.close()
+        if removed_empty:
+            try:
+                from app.catalog_sync import run_sync_with_new_session
+
+                run_sync_with_new_session()
+            except Exception as sync_err:
+                logger.warning("Синхронизация зеркала после очистки асан без фото: %s", sync_err)
+
     logger.info("Application startup completed successfully")
 
     db = SessionLocal()
@@ -1149,8 +1188,13 @@ async def add_asana_from_moderation(
                     db.commit()
                     return {"message": "Asana already exists (identical record)", "id": existing_asana_id, "skipped": True}
         
-        # Асана не существует, создаем новую
+        # Асана не существует, создаем новую (только с фото)
         photo_hashes_list = [photo_hash] if photo_hash else []
+        if not photo_paths:
+            raise HTTPException(
+                status_code=400,
+                detail="Нельзя создать асану из модерации без фото: загрузите файл, включите фото из импорта или исправьте загрузку в S3.",
+            )
         try:
             asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_paths, photo_hashes=photo_hashes_list)
             # Успешно создано - отмечаем как решенную

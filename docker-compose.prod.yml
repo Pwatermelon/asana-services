@@ -34,8 +34,8 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
-      - USER_MINIO=${USER_MINIO:-minioadmin}
-      - PASSWORD_MINIO=${PASSWORD_MINIO:-minioadmin}
+      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
     depends_on:
@@ -63,8 +63,11 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - EXPERT_USERNAME=${EXPERT_USERNAME:-expert}
       - EXPERT_PASSWORD=${EXPERT_PASSWORD:-expert123}
-      - USER_MINIO=${USER_MINIO:-minioadmin}
-      - PASSWORD_MINIO=${PASSWORD_MINIO:-minioadmin}
+      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - HOST_MINIO=${HOST_MINIO:-minio}
+      - PORT_MINIO=${PORT_MINIO:-9000}
+      - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - POSTGRES_HOST=${DB_HOST:-postgres}
       - POSTGRES_PORT=${DB_PORT:-5432}
       - POSTGRES_DB=${DB_NAME:-asana_db}
@@ -105,6 +108,13 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Фоновую синхронизацию OWL→БД запускает только asana-backend (один поток на кластер)
       - CATALOG_SYNC_BACKGROUND=false
+      - OWL_PURGE_EMPTY_ASANAS_ON_START=false
+      - HOST_MINIO=${HOST_MINIO:-minio}
+      - PORT_MINIO=${PORT_MINIO:-9000}
+      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://katalog-asan.online/images}
     depends_on:
       postgres:
         condition: service_healthy

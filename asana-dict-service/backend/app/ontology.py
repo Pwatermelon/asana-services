@@ -277,10 +277,6 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
         photo_hashes = valid_hashes
         logger.info(f"[DEBUG ONTOLOGY] After validation: {len(photo_paths)} valid photo paths, {len([h for h in photo_hashes if h])} hashes")
         
-        # Асана может быть без фото, не пропускаем добавление
-        if not photo_paths:
-            logger.warning(f"[WARNING ONTOLOGY] No photos provided after validation, will add asana without photos")
-        
         logger.info("Starting to add/update asana")
         logger.debug(f"Parameters: name_id={name_id}, source_id={source_id}, photos_count={len(photo_paths)}")
         
@@ -380,7 +376,12 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
             
             return existing_asana_id
         else:
-            # Создаем новую асану
+            # Создаём только новую асану с хотя бы одним фото в S3 (источник задаётся у AsanaPhoto)
+            if not photo_paths:
+                raise ValueError(
+                    "Нельзя добавить новую асану без хотя бы одного успешно загруженного фото в хранилище (S3). "
+                    "Проверьте файл импорта, колонки с изображениями и настройки MinIO (логин/пароль)."
+                )
             logger.info("Creating new asana")
             asana_uri = URIRef(f"{ASANA}asana_{uuid.uuid4()}")
             logger.debug(f"Created asana URI: {asana_uri}")
@@ -441,9 +442,16 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                     g.add((photo_uri, ASANA.hasSource, source_uri))
                     g.add((asana_uri, ASANA.hasPhoto, photo_uri))
                     logger.info(f"[DEBUG ONTOLOGY] Added photo and source triples for photo {i+1}")
-            else:
-                logger.info(f"[DEBUG ONTOLOGY] Creating new asana without photos")
             
+            linked = list(g.objects(asana_uri, ASANA.hasPhoto))
+            if not linked:
+                g.remove((asana_uri, None, None))
+                g.remove((None, None, asana_uri))
+                raise ValueError(
+                    "Ни одно изображение не было привязано к новой асане (все пути пустые или неверного формата). "
+                    "Проверьте данные и загрузку в S3."
+                )
+
             logger.info(f"Saving graph to {config.OWL_FILE_PATH}")
             _persist_ontology_graph(g)
             logger.info("Successfully saved graph")
@@ -778,6 +786,34 @@ def delete_asana_from_ontology(asana_id: str) -> bool:
     except Exception as e:
         print(f'ОШИБКА ПРИ УДАЛЕНИИ АСАНЫ: {e}')
         raise
+
+
+def purge_asanas_without_photos_from_ontology() -> int:
+    """
+    Удаляет индивидов Asana без ни одного hasPhoto (битые записи после сбойного импорта).
+    Снимает связи isSameAsObject в обе стороны. Файлы в S3 не трогаем (фото нет).
+    Персистит OWL только если что-то удалили.
+    """
+    g = get_graph()
+    removed = 0
+    candidates = [uri for uri in g.subjects(RDF.type, ASANA.Asana)]
+    for asana_uri in candidates:
+        if list(g.objects(asana_uri, ASANA.hasPhoto)):
+            continue
+        for o in list(g.objects(asana_uri, ASANA.isSameAsObject)):
+            g.remove((asana_uri, ASANA.isSameAsObject, o))
+            g.remove((o, ASANA.isSameAsObject, asana_uri))
+        for s in list(g.subjects(ASANA.isSameAsObject, asana_uri)):
+            g.remove((s, ASANA.isSameAsObject, asana_uri))
+            g.remove((asana_uri, ASANA.isSameAsObject, s))
+        g.remove((asana_uri, None, None))
+        g.remove((None, None, asana_uri))
+        removed += 1
+    if removed:
+        _persist_ontology_graph(g)
+        logger.info("purge_asanas_without_photos_from_ontology: удалено асан без фото: %s", removed)
+    return removed
+
 
 def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None):
     try:

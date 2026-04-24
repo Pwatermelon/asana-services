@@ -29,8 +29,9 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
-      - USER_MINIO=${USER_MINIO:-minioadmin}
-      - PASSWORD_MINIO=${PASSWORD_MINIO:-minioadmin}
+      # Совпадают с контейнером minio (MINIO_ROOT_*); при отсутствии — fallback на USER_MINIO из .env
+      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
     depends_on:
@@ -63,6 +64,12 @@ services:
       - ALGORITHM=${ALGORITHM:-HS256}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - HOST_MINIO=${HOST_MINIO:-minio}
+      - PORT_MINIO=${PORT_MINIO:-9000}
+      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,6 +104,14 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Фоновую синхронизацию OWL→БД запускает только asana-backend (один поток на кластер)
       - CATALOG_SYNC_BACKGROUND=false
+      # Не чистить OWL при старте воркера импорта (очистка только на asana-backend)
+      - OWL_PURGE_EMPTY_ASANAS_ON_START=false
+      - HOST_MINIO=${HOST_MINIO:-minio}
+      - PORT_MINIO=${PORT_MINIO:-9000}
+      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
     depends_on:
       postgres:
         condition: service_healthy
