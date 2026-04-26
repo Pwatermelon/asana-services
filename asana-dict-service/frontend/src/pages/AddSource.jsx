@@ -3,6 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { sourcesAPI } from '../api/sources';
 import '../styles/AddSource.css';
 
+const emptyForm = {
+  title: '',
+  author: '',
+  year: '',
+  publisher: '',
+  pages: '',
+  annotation: '',
+};
+
 const AddSource = () => {
   const { id: editId } = useParams();
   const isEdit = Boolean(editId);

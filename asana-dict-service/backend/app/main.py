@@ -752,11 +752,12 @@ async def replace_asana_photo_endpoint(
 async def rotate_asana_photo_endpoint(
     asana_id: str,
     photo_id: str,
-    degrees: int = Form(90),
+    degrees: int = Query(90, description="Угол по часовой стрелке: 90, 180 или 270"),
     user: str = Depends(is_expert_or_admin),
 ):
     """
     Поворот фото на 90°, 180° или 270° по часовой стрелке с перезаписью того же объекта в S3 (UUID в пути не меняется).
+    Угол передаётся query-параметром ?degrees= (раньше был FormData — с axios + JSON default ломалось).
     """
     if degrees not in (90, 180, 270):
         raise HTTPException(status_code=400, detail="degrees must be 90, 180 or 270")

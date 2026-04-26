@@ -498,16 +498,15 @@
   font-size: 1rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease;
 }
 
 .user-dropdown-logout:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
 
 .user-dropdown-logout:active {
-  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 
 @media (max-width: 768px) {

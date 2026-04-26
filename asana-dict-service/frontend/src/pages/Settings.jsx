@@ -39,7 +39,7 @@ const Settings = () => {
   /** Сообщения только для блока «Управление онтологией» (загрузка/выгрузка OWL) */
   const [ontologyError, setOntologyError] = useState('');
   const [ontologySuccess, setOntologySuccess] = useState('');
-  /** Сообщения только для блока «Импорт данных» (Excel) */
+  /** Сообщения только для блока «Импорт сведений об асанах» (Excel) */
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [namesError, setNamesError] = useState('');
@@ -484,7 +484,7 @@ const Settings = () => {
 
         {isExpertOrAdmin && (
           <div className="settings-section">
-            <h2 className="settings-section-title">Импорт данных</h2>
+            <h2 className="settings-section-title">Импорт сведений об асанах</h2>
             <p className="settings-description">
               Импортируйте асаны из Excel файла. Выберите режим импорта.
             </p>

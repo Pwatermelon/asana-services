@@ -1,5 +1,17 @@
 import apiClient from './client';
 
+/** Нормализация флагов из /api/users/me (разные форматы JSON / полей). */
+function roleFromUserMe(user) {
+  if (!user || typeof user !== 'object') return null;
+  const truthy = (v) => v === true || v === 1 || v === '1' || v === 'true';
+  const roleStr = user.role || user.user_role;
+  if (truthy(user.is_admin) || truthy(user.isAdmin) || roleStr === 'admin') return 'admin';
+  if (truthy(user.permission_study) || truthy(user.permissionStudy) || roleStr === 'expert') {
+    return 'expert';
+  }
+  return null;
+}
+
 export const authAPI = {
   login: async (username, password, rememberMe = false) => {
     // Используем эндпоинт server-module через nginx прокси
@@ -23,11 +35,7 @@ export const authAPI = {
       const response = await apiClient.get('/api/users/me', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const user = response.data;
-      // Маппинг: is_admin → admin, permission_study → expert, иначе → null (неавторизованный)
-      if (user.is_admin) return 'admin';
-      if (user.permission_study) return 'expert';
-      return null; // Обычный пользователь = неавторизованный
+      return roleFromUserMe(response.data);
     } catch (error) {
       console.error('Failed to get user role:', error);
       return null; // Неавторизованный пользователь
@@ -90,11 +98,7 @@ export const authAPI = {
       // Проверяем токен через server-module API /api/users/me
       try {
         const response = await apiClient.get('/api/users/me');
-        const user = response.data;
-        // Маппинг ролей: is_admin → admin, permission_study → expert, иначе → null (неавторизованный)
-        let role = null;
-        if (user.is_admin) role = 'admin';
-        else if (user.permission_study) role = 'expert';
+        const role = roleFromUserMe(response.data);
         
         if (role) {
           localStorage.setItem('user_role', role);

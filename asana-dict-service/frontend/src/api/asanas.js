@@ -149,11 +149,8 @@ export const asanasAPI = {
     return response.data;
   },
 
-  /** degrees: 90 | 180 | 270 — по часовой стрелке (см. бэкенд). */
+  /** degrees: 90 | 180 | 270 — по часовой стрелке (см. бэкенд). Query, не FormData: иначе с axios default Content-Type: application/json поле degrees не доходило до FastAPI. */
   rotatePhoto: async (asanaId, photoId, degrees) => {
-    const formData = new FormData();
-    formData.append('degrees', String(degrees));
-
     let shortId = asanaId;
     if (asanaId.includes('#')) {
       shortId = asanaId.split('#').pop();
@@ -166,10 +163,9 @@ export const asanasAPI = {
     }
     shortPhotoId = shortPhotoId.replace('photo_', '');
 
+    const q = new URLSearchParams({ degrees: String(degrees) });
     const response = await apiClient.post(
-      `/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}/rotate`,
-      formData,
-      formDataConfig
+      `/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}/rotate?${q.toString()}`
     );
     return response.data;
   },

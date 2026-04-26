@@ -22,7 +22,7 @@
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-light);
   margin-bottom: 1.25em;
-  transition: all 0.3s;
+  transition: box-shadow 0.3s ease;
 }
 
 .settings-section:hover {
