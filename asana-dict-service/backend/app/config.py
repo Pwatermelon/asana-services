@@ -51,6 +51,8 @@ PORT_MINIO = os.getenv("PORT_MINIO", "9000")
 USER_MINIO = os.getenv("USER_MINIO", "minioadmin")
 PASSWORD_MINIO = os.getenv("PASSWORD_MINIO", "minioadmin")
 NAME_BUCKET_IMAGES_MINIO = os.getenv("NAME_BUCKET_IMAGES_MINIO", "images")
+# Префикс объектов в bucket только для шага Excel→staging (до OWL). Успешный импорт всё равно пишет этот путь в онтологию; при обрыве импорта сироты можно чистить по префиксу (lifecycle/ручной gc), не трогая asans/.
+S3_IMPORT_STAGING_PREFIX = os.getenv("S3_IMPORT_STAGING_PREFIX", "import-staging").strip().strip("/") or "import-staging"
 # Используем Nginx прокси для доступа к MinIO, чтобы фронтенд мог получать изображения
 MINIO_URL_PREFIX = os.getenv("MINIO_URL_PREFIX", "http://localhost/images")
 

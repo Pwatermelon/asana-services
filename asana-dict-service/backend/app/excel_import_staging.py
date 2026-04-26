@@ -31,7 +31,8 @@ def ingest_excel_to_staging(
     user: str,
     source_id: Optional[str] = None,
     source_mapping: Optional[Dict[str, str]] = None,
-    staging_progress_callback: Optional[Callable[[int, int], None]] = None,
+    staging_progress_callback: Optional[Callable[..., None]] = None,
+    parse_progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> int:
     """
     Парсит Excel, нормализует строки, пишет в import_batches + import_staging_rows.
@@ -39,7 +40,7 @@ def ingest_excel_to_staging(
     """
     from app.main import SessionLocal
 
-    rows = parse_excel_file(file_path)
+    rows = parse_excel_file(file_path, progress_callback=parse_progress_callback)
     session = SessionLocal()
     try:
         batch = ImportBatch(
@@ -59,12 +60,32 @@ def ingest_excel_to_staging(
         for i, row in enumerate(rows):
             idx = i + 2
             normalized = normalize_column_names(row)
-            normalized = materialize_embedded_photos_to_staging_payload(normalized)
+            if staging_progress_callback and total and (i % step == 0 or i == 0):
+                try:
+                    staging_progress_callback(i, total, 0.0)
+                except Exception:
+                    pass
+
+            def _photo_heartbeat(pi: int, ptot: int) -> None:
+                if staging_progress_callback and total and ptot > 0:
+                    try:
+                        staging_progress_callback(i, total, (pi + 1) / float(ptot))
+                    except Exception:
+                        pass
+
+            normalized = materialize_embedded_photos_to_staging_payload(
+                normalized,
+                heartbeat=_photo_heartbeat if staging_progress_callback else None,
+            )
             session.add(
                 ImportStagingRow(batch_id=batch_id, row_number=idx, payload=normalized)
             )
-            if staging_progress_callback and total and (i % step == 0 or i == total - 1):
-                staging_progress_callback(i + 1, total)
+            # После каждой строки — иначе на быстром проде между опросами UI (раз в сотни мс) пропадают 5–99%.
+            if staging_progress_callback and total:
+                try:
+                    staging_progress_callback(i + 1, total, 0.0)
+                except Exception:
+                    pass
             if (i + 1) % _STAGING_COMMIT_EVERY == 0:
                 session.commit()
         session.commit()

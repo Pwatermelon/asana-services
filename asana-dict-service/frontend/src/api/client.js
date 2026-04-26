@@ -3,12 +3,17 @@ import axios from 'axios';
 // Используем относительные пути - nginx проксирует запросы к бэкенду
 const API_BASE_URL = '';
 
+/** Глобальный лимит axios (мс). Раньше 300000 → «timeout of 300000ms exceeded» на проде при долгом импорте/экспорте/опросе с тяжёлым ответом. */
+const _apiTimeout = Number(import.meta.env?.VITE_API_TIMEOUT_MS);
+const API_TIMEOUT_MS =
+  Number.isFinite(_apiTimeout) && _apiTimeout > 0 ? _apiTimeout : 3600000;
+
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 300000, // 5 минут для импорта больших файлов
+  timeout: API_TIMEOUT_MS,
 });
 
 // Интерсептор для добавления токена и схемы БД к запросам

@@ -2,10 +2,14 @@
 Утилиты для работы с MINIO S3 хранилищем
 """
 import base64
-import uuid
 import hashlib
+import os
+import uuid
 from io import BytesIO
 from typing import Optional, Tuple
+
+import urllib3
+from urllib3.util.retry import Retry
 from minio import Minio
 from minio.error import S3Error
 
@@ -16,12 +20,19 @@ from app.config import (
 
 
 def get_minio_client() -> Minio:
-    """Создает и возвращает клиент MINIO"""
+    """Создает и возвращает клиент MINIO с таймаутами (без них put_object может «висеть» при сетевых сбоях)."""
+    connect = float(os.getenv("MINIO_HTTP_CONNECT_TIMEOUT_SEC", "15"))
+    read = float(os.getenv("MINIO_HTTP_READ_TIMEOUT_SEC", "300"))
+    http_client = urllib3.PoolManager(
+        timeout=urllib3.Timeout(connect=connect, read=read),
+        retries=Retry(total=3, backoff_factor=0.2),
+    )
     return Minio(
         f"{HOST_MINIO}:{PORT_MINIO}",
         access_key=USER_MINIO,
         secret_key=PASSWORD_MINIO,
-        secure=False
+        secure=False,
+        http_client=http_client,
     )
 
 
@@ -337,6 +348,49 @@ def delete_file_from_s3(s3_path: str) -> bool:
         return False
 
 
+def delete_all_objects_with_prefix(bucket_name: str, object_key_prefix: str) -> int:
+    """
+    Удаляет все объекты в bucket, ключ которых начинается с object_key_prefix.
+    Префикс нормализуется: без ведущего «/»; если не заканчивается на «/», добавляется
+    (чтобы «import-staging» не задело «import-staging-extra/…»).
+    """
+    raw = (object_key_prefix or "").strip().lstrip("/")
+    if not raw:
+        return 0
+    prefix = raw if raw.endswith("/") else f"{raw}/"
+    removed = 0
+    try:
+        minio_client = get_minio_client()
+        if not minio_client.bucket_exists(bucket_name):
+            logger.warning("[DEBUG S3] delete_all_objects_with_prefix: bucket missing: %s", bucket_name)
+            return 0
+        for obj in minio_client.list_objects(bucket_name, prefix=prefix, recursive=True):
+            try:
+                minio_client.remove_object(bucket_name, obj.object_name)
+                removed += 1
+            except S3Error as e:
+                logger.warning(
+                    "[DEBUG S3] remove_object failed %s/%s: %s",
+                    bucket_name,
+                    getattr(obj, "object_name", "?"),
+                    e,
+                )
+        if removed:
+            logger.info(
+                "[DEBUG S3] delete_all_objects_with_prefix: bucket=%s prefix=%r removed=%s",
+                bucket_name,
+                prefix,
+                removed,
+            )
+        return removed
+    except S3Error as e:
+        logger.error("[DEBUG S3] delete_all_objects_with_prefix S3Error: %s", e, exc_info=True)
+        raise
+    except Exception as e:
+        logger.error("[DEBUG S3] delete_all_objects_with_prefix: %s", e, exc_info=True)
+        raise
+
+
 def replace_file_in_s3(s3_path: str, new_image_data: bytes | str) -> Tuple[str, str]:
     """
     Заменяет файл в S3 по существующему пути без изменения пути.
@@ -447,4 +501,41 @@ def get_s3_url(s3_path: str) -> str:
     url = f"{MINIO_URL_PREFIX}/{s3_path}"
     logger.debug(f"Generated S3 URL for {s3_path}: {url}")
     return url
+
+
+def get_s3_object_bytes(s3_path: str) -> Optional[bytes]:
+    """
+    Оригинальные байты объекта из MinIO (без HTTP и без отдельного «превью»-эндпоинта).
+    Путь в том же формате, что для get_s3_url (например images/asans/uuid.webp).
+    """
+    try:
+        p = (s3_path or "").strip().lstrip("/")
+        if not p:
+            return None
+        if not p.startswith(NAME_BUCKET_IMAGES_MINIO + "/"):
+            if p.startswith(NAME_BUCKET_IMAGES_MINIO):
+                p = f"{NAME_BUCKET_IMAGES_MINIO}/{p[len(NAME_BUCKET_IMAGES_MINIO):].lstrip('/')}"
+            else:
+                p = f"{NAME_BUCKET_IMAGES_MINIO}/{p.lstrip('/')}"
+        if not p.startswith(NAME_BUCKET_IMAGES_MINIO + "/"):
+            return None
+        object_name = p[len(NAME_BUCKET_IMAGES_MINIO) + 1 :].lstrip("/")
+        if not object_name:
+            return None
+        minio_client = get_minio_client()
+        if not minio_client.bucket_exists(NAME_BUCKET_IMAGES_MINIO):
+            return None
+        resp = minio_client.get_object(NAME_BUCKET_IMAGES_MINIO, object_name)
+        try:
+            data = resp.read()
+            return data if data else None
+        finally:
+            try:
+                resp.close()
+                resp.release_conn()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("get_s3_object_bytes failed for %r: %s", s3_path, e)
+        return None
 

@@ -1,5 +1,20 @@
 import apiClient from './client';
 
+/** Импорт файлов: совпадает с глобальным VITE_API_TIMEOUT_MS или отдельный VITE_IMPORT_TIMEOUT_MS. */
+const _importT = Number(import.meta.env?.VITE_IMPORT_TIMEOUT_MS);
+const _apiT = Number(import.meta.env?.VITE_API_TIMEOUT_MS);
+const IMPORT_FILE_TIMEOUT_MS =
+  Number.isFinite(_importT) && _importT > 0
+    ? _importT
+    : Number.isFinite(_apiT) && _apiT > 0
+      ? _apiT
+      : 3600000;
+
+/** Опрос /api/import/status — короткий таймаут: при залипшем TCP сразу новый запрос, а не pending на час. */
+const _statusPollT = Number(import.meta.env?.VITE_IMPORT_STATUS_TIMEOUT_MS);
+const IMPORT_STATUS_POLL_TIMEOUT_MS =
+  Number.isFinite(_statusPollT) && _statusPollT > 0 ? _statusPollT : 15000;
+
 export const settingsAPI = {
   uploadOntology: async (file) => {
     const formData = new FormData();
@@ -8,6 +23,7 @@ export const settingsAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: IMPORT_FILE_TIMEOUT_MS,
     });
     return response.data;
   },
@@ -35,6 +51,7 @@ export const settingsAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: IMPORT_FILE_TIMEOUT_MS,
     });
     return response.data;
   },
@@ -47,6 +64,7 @@ export const settingsAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: IMPORT_FILE_TIMEOUT_MS,
     });
     return response.data;
   },
@@ -63,6 +81,7 @@ export const settingsAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: IMPORT_FILE_TIMEOUT_MS,
     });
     return response.data;
   },
@@ -80,6 +99,7 @@ export const settingsAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: IMPORT_FILE_TIMEOUT_MS,
     });
     return response.data;
   },
@@ -106,7 +126,15 @@ export const settingsAPI = {
   },
 
   getImportStatus: async (taskId) => {
-    const response = await apiClient.get(`/api/import/status/${taskId}`);
+    const response = await apiClient.get(`/api/import/status/${taskId}`, {
+      timeout: IMPORT_STATUS_POLL_TIMEOUT_MS,
+      // Сброс кэша: на проде прокси/CDN иногда отдают один и тот же JSON — прогресс «застывает»
+      params: { _t: Date.now() },
+      headers: {
+        'Cache-Control': 'no-store',
+        Pragma: 'no-cache',
+      },
+    });
     return response.data;
   },
 };

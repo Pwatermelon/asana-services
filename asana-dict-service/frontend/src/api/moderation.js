@@ -57,9 +57,11 @@ export const moderationAPI = {
     const contentDisposition = response.headers['content-disposition'];
     let filename = 'moderation_export.xlsx';
     if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-      if (filenameMatch) {
-        filename = filenameMatch[1];
+      const quoted = contentDisposition.match(/filename="([^"]+)"/i);
+      const unquoted = contentDisposition.match(/filename=([^;\s]+)/i);
+      const raw = quoted?.[1] ?? unquoted?.[1];
+      if (raw) {
+        filename = String(raw).trim().replace(/^["']|["']$/g, '');
       }
     }
     

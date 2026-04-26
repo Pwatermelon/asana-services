@@ -14,9 +14,19 @@ from openpyxl.drawing.image import Image
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from app.config import logger, SQLALCHEMY_DATABASE_URL
+from app.config import S3_IMPORT_STAGING_PREFIX, logger, SQLALCHEMY_DATABASE_URL
 from app.models import ModerationItem
-from app.ontology import load_asana_names, add_asana_name, add_asana, find_existing_source, add_source
+from app.moderation_photo import enrich_moderation_import_data, moderation_export_image_bytes_list
+from app.ontology import (
+    add_asana,
+    add_asana_name,
+    add_source,
+    find_existing_source,
+    load_asana_names,
+    norm_image_hash_hex,
+    norm_s3_path,
+    rdf_property_value_str,
+)
 from app.s3_utils import compute_image_hash, upload_image_to_s3
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -82,23 +92,38 @@ def diagnose_image_type(img, row: int):
         return "link"
 
 
-def extract_images_from_worksheet(ws) -> Dict[int, List[str]]:
+def extract_images_from_worksheet(
+    ws,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    parse_total: int = 1,
+) -> Dict[int, List[str]]:
     """
     Извлекает все изображения из листа Excel и возвращает словарь {row_number: [base64, ...]}.
     Привязывает изображения к строке, в которой они находятся.
     Поддерживает несколько изображений в одной строке.
     Использует упрощенную логику извлечения через img._data().
+    progress_callback — чтобы на проде не «висеть» на 2% на десятки минут между (0) и следующим этапом parse.
     """
     images = {}
     try:
-        # Проверяем наличие изображений в листе
+        # Проверяем наличие изображений на листе
         if not hasattr(ws, '_images'):
             return images
-            
+
         if not ws._images:
             return images
-        
+
+        n_img = len(ws._images)
+        # Двигаем cur в [1 .. max(1, parse_total//10 - 1)] пока крутятся картинки (до второго «якорного» колбэка parse).
+        cap = max(1, parse_total // 10 - 1)
+
         for img_idx, img in enumerate(ws._images):
+            if progress_callback and n_img > 0:
+                try:
+                    cur = max(1, int((img_idx + 1) / n_img * cap))
+                    progress_callback(cur, parse_total)
+                except Exception:
+                    pass
             try:
                 # Получаем координаты ячейки (используем логику из рабочего скрипта)
                 row = None
@@ -239,7 +264,10 @@ def _photo_raw_to_data_url(photo_raw: Any) -> Optional[str]:
         return None
 
 
-def materialize_embedded_photos_to_staging_payload(normalized: Dict[str, Any]) -> Dict[str, Any]:
+def materialize_embedded_photos_to_staging_payload(
+    normalized: Dict[str, Any],
+    heartbeat: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
     """
     Перед записью в import_staging_rows: грузим встроенные фото в S3, в JSON остаются только пути и хеши.
     Иначе один commit пытается вставить мегабайты base64 → обрыв соединения, зависание на 2% прогресса.
@@ -255,7 +283,13 @@ def materialize_embedded_photos_to_staging_payload(normalized: Dict[str, Any]) -
     if not photos_list:
         return out
     staged: List[Dict[str, str]] = []
-    for photo_raw in photos_list:
+    n_ph = len(photos_list)
+    for pi, photo_raw in enumerate(photos_list):
+        if heartbeat and n_ph > 0:
+            try:
+                heartbeat(pi, n_ph)
+            except Exception:
+                pass
         if not photo_raw:
             continue
         data_url = _photo_raw_to_data_url(photo_raw)
@@ -263,13 +297,14 @@ def materialize_embedded_photos_to_staging_payload(normalized: Dict[str, Any]) -
             continue
         try:
             h = compute_image_hash(data_url)
-            path, h2 = upload_image_to_s3(data_url, prefix="asans")
+            path, h2 = upload_image_to_s3(data_url, prefix=S3_IMPORT_STAGING_PREFIX)
             staged.append({"s3_path": path, "hash": str(h2 or h)})
         except Exception as e:
             logger.warning("Staging: не удалось загрузить фото в S3: %s", e)
-    out.pop("photo", None)
-    out.pop("photos", None)
+    # Не удаляем встроенные фото, если в S3 ничего не залились — иначе на apply остаётся пустой payload и add_asana падает.
     if staged:
+        out.pop("photo", None)
+        out.pop("photos", None)
         out["_staged_import_photos"] = staged
     return out
 
@@ -311,28 +346,50 @@ def has_source_data(row: Dict[str, Any]) -> bool:
     return any(row.get(field) for field in source_fields)
 
 
-def parse_excel_file(file_path: str) -> List[Dict[str, Any]]:
+def parse_excel_file(
+    file_path: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> List[Dict[str, Any]]:
     """Парсит Excel файл и возвращает список словарей с данными"""
     try:
         # НЕ используем data_only=True, так как это может помешать загрузке изображений
         wb = load_workbook(file_path, data_only=False)
         ws = wb.active
-        
+
+        sheet_last_row = int(ws.max_row or 2)
+        parse_total = max(1, sheet_last_row - 1)
+        if progress_callback:
+            try:
+                progress_callback(0, parse_total)
+            except Exception:
+                pass
+
         # Извлекаем все изображения из листа (если ошибка - продолжаем без изображений)
         images = {}
         try:
-            images = extract_images_from_worksheet(ws)
+            images = extract_images_from_worksheet(
+                ws,
+                progress_callback=progress_callback,
+                parse_total=parse_total,
+            )
         except Exception as img_error:
             logger.warning(f"Ошибка при извлечении изображений из Excel (продолжаем без изображений): {img_error}")
             images = {}
-        
+
+        if progress_callback:
+            try:
+                progress_callback(max(1, parse_total // 10), parse_total)
+            except Exception:
+                pass
+
         # Определяем заголовки (первая строка)
         headers = []
         for cell in ws[1]:
             headers.append(cell.value.lower().strip() if cell.value else '')
-        
+
         # Парсим данные
         rows = []
+        _parse_progress_every = 25
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
             row_data = {}
             photo_base64_from_cell = None
@@ -369,7 +426,19 @@ def parse_excel_file(file_path: str) -> List[Dict[str, Any]]:
             # Пропускаем пустые строки
             if any(row_data.values()):
                 rows.append(row_data)
-        
+                if progress_callback and len(rows) % _parse_progress_every == 0:
+                    try:
+                        est = min(parse_total, row_idx - 1)
+                        progress_callback(est, parse_total)
+                    except Exception:
+                        pass
+
+        if progress_callback:
+            try:
+                progress_callback(parse_total, parse_total)
+            except Exception:
+                pass
+
         return rows
     except Exception as e:
         logger.error(f"Error parsing Excel file: {e}")
@@ -470,6 +539,175 @@ def _find_duplicate_unresolved(
     return None
 
 
+def _parse_moderation_import_dict(raw: Optional[str]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+def _dedupe_moderation_staged_photos_in_place(d: Dict[str, Any]) -> None:
+    """
+    Один раз перед сохранением/обогащением: убрать дубликаты в _staged_import_photos.
+    Повторный импорт того же файла даёт новые s3_path в staging, но тот же MD5 — без этого в карточке модерации копятся «одинаковые» фото.
+    """
+    raw = d.get("_staged_import_photos")
+    if not isinstance(raw, list) or not raw:
+        return
+    out: List[Dict[str, str]] = []
+    seen_hash: set[str] = set()
+    seen_path: set[str] = set()
+    for e in raw:
+        if not isinstance(e, dict):
+            continue
+        p_raw = e.get("s3_path")
+        h_raw = e.get("hash")
+        p_n = norm_s3_path(p_raw)
+        h_n = norm_image_hash_hex(h_raw) if h_raw else ""
+        if not p_n and not h_n:
+            continue
+        if h_n and h_n in seen_hash:
+            continue
+        if p_n and p_n in seen_path:
+            continue
+        if h_n:
+            seen_hash.add(h_n)
+        if p_n:
+            seen_path.add(p_n)
+        p_store = (str(p_raw).strip() if p_raw is not None else "") or p_n
+        h_store = (str(h_raw).strip() if h_raw is not None else "") or h_n
+        out.append({"s3_path": p_store, "hash": h_store})
+    d["_staged_import_photos"] = out
+
+
+def _import_photo_fingerprint(data: Optional[Dict[str, Any]]) -> str:
+    """
+    Стабильный ключ для дедупа записей модерации по фото.
+    Для staging — только нормализованные MD5 (путь при каждом импорте новый); иначе повторный импорт не даёт skipped.
+    """
+    if not data or not isinstance(data, dict):
+        return ""
+    staged = data.get("_staged_import_photos")
+    if isinstance(staged, list):
+        hashes: List[str] = []
+        paths_only: List[str] = []
+        for e in staged:
+            if isinstance(e, dict):
+                h = norm_image_hash_hex(e.get("hash"))
+                p = norm_s3_path(e.get("s3_path"))
+                if h:
+                    hashes.append(h)
+                elif p:
+                    paths_only.append(p)
+        if hashes:
+            return "staged:" + "|".join(sorted(hashes))
+        if paths_only:
+            return "staged_paths:" + "|".join(sorted(paths_only))
+    raw_parts: List[str] = []
+    pl = data.get("photos")
+    if isinstance(pl, list):
+        for i, ph in enumerate(pl):
+            if isinstance(ph, str) and ph.startswith("data:") and "," in ph:
+                b64 = ph.split(",", 1)[1]
+                raw_parts.append(f"p{i}:{len(b64)}")
+            elif isinstance(ph, bytes):
+                raw_parts.append(f"pb{i}:{len(ph)}")
+    one = data.get("photo")
+    if isinstance(one, str) and one.startswith("data:") and "," in one:
+        b64 = one.split(",", 1)[1]
+        raw_parts.append(f"one:{len(b64)}")
+    elif isinstance(one, bytes):
+        raw_parts.append(f"oneb:{len(one)}")
+    if raw_parts:
+        return "embed:" + ",".join(raw_parts)
+    return ""
+
+
+def _merge_duplicate_moderation_row(
+    row: ModerationItem,
+    incoming: Dict[str, Any],
+    excel_row: int,
+) -> None:
+    """Дополняет существующую нерешённую запись: новые staged-фото + список объединённых строк Excel."""
+    old = _parse_moderation_import_dict(row.import_data)
+    old_staged = old.get("_staged_import_photos")
+    if not isinstance(old_staged, list):
+        old_staged = []
+    inc_staged = incoming.get("_staged_import_photos")
+    if not isinstance(inc_staged, list):
+        inc_staged = []
+    seen_hash: set[str] = set()
+    seen_path: set[str] = set()
+    for e in old_staged:
+        if not isinstance(e, dict):
+            continue
+        hs = norm_image_hash_hex(e.get("hash"))
+        ps = norm_s3_path(e.get("s3_path"))
+        if hs:
+            seen_hash.add(hs)
+        if ps:
+            seen_path.add(ps)
+    for e in inc_staged:
+        if not isinstance(e, dict):
+            continue
+        h_n = norm_image_hash_hex(e.get("hash"))
+        p_n = norm_s3_path(e.get("s3_path"))
+        if not p_n and not h_n:
+            continue
+        if h_n and h_n in seen_hash:
+            continue
+        if p_n and p_n in seen_path:
+            continue
+        old_staged.append(e)
+        if h_n:
+            seen_hash.add(h_n)
+        if p_n:
+            seen_path.add(p_n)
+    old["_staged_import_photos"] = old_staged
+    _dedupe_moderation_staged_photos_in_place(old)
+
+    merged_rows = old.get("_merged_excel_rows")
+    if not isinstance(merged_rows, list):
+        merged_rows = []
+    if row.row_number is not None and row.row_number not in merged_rows:
+        merged_rows.insert(0, int(row.row_number))
+    if excel_row not in merged_rows:
+        merged_rows.append(int(excel_row))
+    old["_merged_excel_rows"] = merged_rows
+
+    for k in ("name_ru", "name_sanskrit", "transliteration", "definition"):
+        if incoming.get(k) and not old.get(k):
+            old[k] = incoming[k]
+
+    old = enrich_moderation_import_data(old)
+    row.import_data = json.dumps(old, ensure_ascii=False)
+
+
+def _new_moderation_import_counters() -> Dict[str, int]:
+    return {
+        "moderation_inserted": 0,
+        "moderation_merged": 0,
+        "moderation_skipped": 0,
+        "moderation_save_errors": 0,
+    }
+
+
+def _note_moderation_save_result(counters: Dict[str, int], mod_res: Optional[str]) -> None:
+    if not mod_res:
+        return
+    key = {
+        "inserted": "moderation_inserted",
+        "merged": "moderation_merged",
+        "skipped": "moderation_skipped",
+        "error": "moderation_save_errors",
+    }.get(mod_res)
+    if key:
+        counters[key] = counters.get(key, 0) + 1
+
+
 def save_moderation_item(
     asana_name: str,
     source_id: Optional[str],
@@ -485,8 +723,16 @@ def save_moderation_item(
     existing_name_id: Optional[str] = None,
     existing_name_ru: Optional[str] = None,
     object_type: Optional[str] = None  # 'asana_name', 'source', 'asana'
-):
-    """Сохраняет запись в таблицу модерации"""
+) -> str:
+    """
+    Сохраняет запись в таблицу модерации.
+
+    Returns:
+        inserted — новая строка;
+        merged — та же мета+ошибка, но другие фото: объединено в существующую запись;
+        skipped — уже есть та же запись с теми же фото (дедуп);
+        error — исключение при сохранении.
+    """
     try:
         # Определяем тип объекта, если не указан
         if not object_type:
@@ -564,7 +810,11 @@ def save_moderation_item(
             
             import_data = import_data_clean
 
-        if _find_duplicate_unresolved(
+        if import_data:
+            _dedupe_moderation_staged_photos_in_place(import_data)
+            import_data = enrich_moderation_import_data(import_data)
+
+        dup = _find_duplicate_unresolved(
             db,
             asana_name or "",
             source_id,
@@ -577,9 +827,17 @@ def save_moderation_item(
             suggested_definition,
             existing_name_id,
             existing_name_ru,
-        ):
+        )
+        fp_new = _import_photo_fingerprint(import_data)
+        if dup:
+            fp_old = _import_photo_fingerprint(_parse_moderation_import_dict(dup.import_data))
+            if fp_new == fp_old:
+                db.close()
+                return "skipped"
+            _merge_duplicate_moderation_row(dup, import_data or {}, row_number)
+            db.commit()
             db.close()
-            return
+            return "merged"
 
         moderation_item = ModerationItem(
             asana_name=asana_name,
@@ -601,8 +859,10 @@ def save_moderation_item(
         db.add(moderation_item)
         db.commit()
         db.close()
+        return "inserted"
     except Exception as e:
         logger.error(f"Failed to save moderation item: {e}")
+        return "error"
 
 
 def run_asanas_indexed_rows(
@@ -618,21 +878,25 @@ def run_asanas_indexed_rows(
     total_rows = len(indexed_rows)
     imported = 0
     errors = []
+    mod_res_stats = _new_moderation_import_counters()
+    skipped_identical_in_catalog = 0
 
     for idx, normalized in indexed_rows:
         try:
             
             if not normalized.get('name_ru'):
                 error_msg = f"Строка {idx}: отсутствует название асаны"
-                errors.append(error_msg)
-                save_moderation_item(
+                mr = save_moderation_item(
                     asana_name="",
                     source_id=source_id,
                     error_message=error_msg,
                     row_number=idx,
                     import_data=normalized,
-                    user=user
+                    user=user,
                 )
+                _note_moderation_save_result(mod_res_stats, mr)
+                if mr == "inserted":
+                    errors.append(error_msg)
                 if progress_callback:
                     progress_callback(idx - 1, total_rows)
                 continue
@@ -640,15 +904,17 @@ def run_asanas_indexed_rows(
             name_ru = str(normalized['name_ru']).strip()
             if not name_ru:
                 error_msg = f"Строка {idx}: пустое название асаны"
-                errors.append(error_msg)
-                save_moderation_item(
+                mr = save_moderation_item(
                     asana_name="",
                     source_id=source_id,
                     error_message=error_msg,
                     row_number=idx,
                     import_data=normalized,
-                    user=user
+                    user=user,
                 )
+                _note_moderation_save_result(mod_res_stats, mr)
+                if mr == "inserted":
+                    errors.append(error_msg)
                 if progress_callback:
                     progress_callback(idx - 1, total_rows)
                 continue
@@ -659,8 +925,7 @@ def run_asanas_indexed_rows(
             if not name_id:
                 # Если не найдено точное совпадение, отправляем в модерацию
                 error_msg = f"Строка {idx}: название '{name_ru}' не найдено в существующих (требуется 100% совпадение)"
-                errors.append(error_msg)
-                save_moderation_item(
+                mod_res = save_moderation_item(
                     asana_name=name_ru,
                     source_id=source_id,
                     error_message=error_msg,
@@ -668,8 +933,11 @@ def run_asanas_indexed_rows(
                     import_data=normalized,
                     user=user,
                     moderation_type="name_mismatch",
-                    suggested_name_ru=normalized.get('name_ru')
+                    suggested_name_ru=normalized.get("name_ru"),
                 )
+                _note_moderation_save_result(mod_res_stats, mod_res)
+                if mod_res == "inserted":
+                    errors.append(error_msg)
                 if progress_callback:
                     progress_callback(idx - 1, total_rows)
                 continue  # Пропускаем эту строку
@@ -693,14 +961,14 @@ def run_asanas_indexed_rows(
                 for existing_photo_uri in existing_photos:
                     existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
                     if existing_photo_source == source_uri:
-                        # Приоритет: проверяем хеш, если есть
                         existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
                         if existing_hash:
-                            existing_photo_hashes.add(str(existing_hash))
-                        # Для обратной совместимости также сохраняем пути
+                            existing_photo_hashes.add(
+                                norm_image_hash_hex(rdf_property_value_str(existing_hash))
+                            )
                         existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                         if existing_s3_path:
-                            existing_photo_paths.add(str(existing_s3_path))
+                            existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
                 
                 # Обрабатываем фото из импорта (после staging — уже в S3, без base64 в JSON)
                 photo_s3_paths = []
@@ -713,21 +981,33 @@ def run_asanas_indexed_rows(
                 if not isinstance(staged_entries, list):
                     staged_entries = []
                 if staged_entries:
+                    pending_paths: set[str] = set()
+                    pending_hashes: set[str] = set()
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
                         path = e.get("s3_path")
-                        h = str(e.get("hash") or "")
-                        if not path or not h:
+                        h_raw = e.get("hash")
+                        path_n = norm_s3_path(path)
+                        h = norm_image_hash_hex(h_raw) if h_raw else ""
+                        if not path_n or not h:
                             continue
-                        if h in existing_photo_hashes:
+                        if path_n in existing_photo_paths or path_n in pending_paths:
+                            logger.info(
+                                f"Строка {idx}: фото уже есть у асаны '{name_ru}' (путь S3), пропускаем"
+                            )
+                            continue
+                        if h in existing_photo_hashes or h in pending_hashes:
                             logger.info(
                                 f"Строка {idx}: фото уже существует для асаны '{name_ru}' (по хешу), пропускаем"
                             )
                             continue
-                        photo_s3_paths.append(path)
+                        pending_paths.add(path_n)
+                        pending_hashes.add(h)
+                        photo_s3_paths.append(path_n)
                         photo_hashes.append(h)
                 else:
+                    pending_row_hashes: set[str] = set()
                     for photo_base64 in photos_list:
                         if not photo_base64:
                             continue
@@ -761,15 +1041,15 @@ def run_asanas_indexed_rows(
                             
                             # Вычисляем хеш ДО загрузки в S3
                             photo_hash = compute_image_hash(photo_base64_str)
+                            ph_n = norm_image_hash_hex(photo_hash)
                             
-                            # Проверяем, не является ли это фото идентичным уже существующему (по хешу)
-                            if photo_hash not in existing_photo_hashes:
-                                # Загружаем в S3 только если фото новое
-                                photo_s3_path, _ = upload_image_to_s3(photo_base64_str, prefix="asans")
-                                photo_s3_paths.append(photo_s3_path)
-                                photo_hashes.append(photo_hash)
-                            else:
+                            if ph_n in existing_photo_hashes or ph_n in pending_row_hashes:
                                 logger.info(f"Строка {idx}: фото уже существует для асаны '{name_ru}' (по хешу), пропускаем загрузку в S3")
+                                continue
+                            pending_row_hashes.add(ph_n)
+                            photo_s3_path, _ = upload_image_to_s3(photo_base64_str, prefix="asans")
+                            photo_s3_paths.append(photo_s3_path)
+                            photo_hashes.append(photo_hash)
                         except Exception as e:
                             error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                             logger.warning(error_msg)
@@ -783,14 +1063,17 @@ def run_asanas_indexed_rows(
                 elif staged_entries or photos_list:
                     # Все фото были дубликатами - идентичная запись, пропускаем
                     logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичными фото, пропускаем")
+                    skipped_identical_in_catalog += 1
                 else:
                     # Фото нет в импорте
                     if existing_photo_paths:
                         # У асаны есть фото, в импорте нет - пропускаем
                         logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует с фото, пропускаем (в импорте фото нет)")
+                        skipped_identical_in_catalog += 1
                     else:
                         # У асаны нет фото и в импорте нет - идентичная запись, пропускаем
                         logger.info(f"Строка {idx}: асана '{name_ru}' с источником уже существует без фото, пропускаем (идентичная запись)")
+                        skipped_identical_in_catalog += 1
             else:
                 # Асана не существует, обрабатываем фото и создаем новую
                 photo_s3_paths = []
@@ -803,16 +1086,23 @@ def run_asanas_indexed_rows(
                 if not isinstance(staged_entries, list):
                     staged_entries = []
                 if staged_entries:
+                    seen_p: set[str] = set()
+                    seen_h: set[str] = set()
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
-                        path = e.get("s3_path")
-                        h = str(e.get("hash") or "")
-                        if not path or not h:
+                        path_n = norm_s3_path(e.get("s3_path"))
+                        h = norm_image_hash_hex(e.get("hash"))
+                        if not path_n or not h:
                             continue
-                        photo_s3_paths.append(path)
+                        if path_n in seen_p or h in seen_h:
+                            continue
+                        seen_p.add(path_n)
+                        seen_h.add(h)
+                        photo_s3_paths.append(path_n)
                         photo_hashes.append(h)
                 else:
+                    pending_new_hashes: set[str] = set()
                     for photo_base64 in photos_list:
                         if not photo_base64:
                             continue
@@ -835,8 +1125,8 @@ def run_asanas_indexed_rows(
                                         mime_type = 'image/jpeg'
                                     elif decoded.startswith(b'GIF8'):
                                         mime_type = 'image/gif'
-                                    elif decoded.startswith(b'RIFF') and b'WEBP' in decoded[:12]:
-                                        mime_type = 'image/webp'
+                                    elif decoded.startswith(b"RIFF") and b"WEBP" in decoded[:12]:
+                                        mime_type = "image/webp"
                                     else:
                                         mime_type = 'image/png'
                                 except Exception:
@@ -846,6 +1136,10 @@ def run_asanas_indexed_rows(
                             
                             # Загружаем в S3 (возвращает кортеж (путь, хеш))
                             photo_s3_path, photo_hash = upload_image_to_s3(photo_base64_str, prefix="asans")
+                            ph_n = norm_image_hash_hex(photo_hash)
+                            if ph_n in pending_new_hashes:
+                                continue
+                            pending_new_hashes.add(ph_n)
                             photo_s3_paths.append(photo_s3_path)
                             photo_hashes.append(photo_hash)
                         except Exception as e:
@@ -863,29 +1157,35 @@ def run_asanas_indexed_rows(
             
         except Exception as e:
             error_msg = f"Строка {idx}: {str(e)}"
-            errors.append(error_msg)
             logger.error(error_msg)
             # Сохраняем в модерацию
             try:
-                asana_name = normalized.get('name_ru', '') if 'normalized' in locals() else ''
-                save_moderation_item(
+                asana_name = normalized.get("name_ru", "") if "normalized" in locals() else ""
+                mod_res = save_moderation_item(
                     asana_name=str(asana_name),
                     source_id=source_id,
                     error_message=error_msg,
                     row_number=idx,
-                    import_data=normalized if 'normalized' in locals() else None,
-                    user=user
+                    import_data=normalized if "normalized" in locals() else None,
+                    user=user,
                 )
+                _note_moderation_save_result(mod_res_stats, mod_res)
+                if mod_res == "inserted":
+                    errors.append(error_msg)
             except Exception as save_error:
                 logger.error(f"Failed to save moderation item: {save_error}")
-            
+                errors.append(error_msg)
+
             # Обновляем прогресс даже при ошибке
             if progress_callback:
                 progress_callback(idx - 1, total_rows)
     
     return {
         "imported": imported,
-        "errors": errors
+        "errors": errors,
+        **mod_res_stats,
+        "skipped_identical_in_catalog": skipped_identical_in_catalog,
+        "rows_processed": total_rows,
     }
 
 
@@ -961,6 +1261,8 @@ def run_full_indexed_rows(
     imported_asanas = 0
     imported_sources = 0
     errors = []
+    mod_res_stats = _new_moderation_import_counters()
+    skipped_identical_in_catalog = 0
     current_source_id = None
 
     source_cache = {}  # {tuple(title, author, year): source_id}
@@ -1053,9 +1355,8 @@ def run_full_indexed_rows(
             if not name_id:
                 # Если не найдено точное совпадение, отправляем в модерацию
                 error_msg = f"Строка {idx}: название '{name_ru}' не найдено в существующих (требуется 100% совпадение)"
-                errors.append(error_msg)
                 logger.warning(error_msg)
-                save_moderation_item(
+                mod_res = save_moderation_item(
                     asana_name=name_ru,
                     source_id=current_source_id,
                     error_message=error_msg,
@@ -1063,8 +1364,11 @@ def run_full_indexed_rows(
                     import_data=normalized,
                     user=user,
                     moderation_type="name_mismatch",
-                    suggested_name_ru=normalized.get('name_ru')
+                    suggested_name_ru=normalized.get("name_ru"),
                 )
+                _note_moderation_save_result(mod_res_stats, mod_res)
+                if mod_res == "inserted":
+                    errors.append(error_msg)
                 if progress_callback:
                     progress_callback(idx - 1, total_rows)
                 continue  # Пропускаем эту строку
@@ -1088,14 +1392,14 @@ def run_full_indexed_rows(
                 for existing_photo_uri in existing_photos:
                     existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
                     if existing_photo_source == source_uri:
-                        # Приоритет: проверяем хеш, если есть
                         existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
                         if existing_hash:
-                            existing_photo_hashes.add(str(existing_hash))
-                        # Для обратной совместимости также сохраняем пути
+                            existing_photo_hashes.add(
+                                norm_image_hash_hex(rdf_property_value_str(existing_hash))
+                            )
                         existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                         if existing_s3_path:
-                            existing_photo_paths.add(str(existing_s3_path))
+                            existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
                 
                 # Обрабатываем фото из импорта (staging — только пути в S3)
                 staged_entries = normalized.get("_staged_import_photos") or []
@@ -1106,21 +1410,28 @@ def run_full_indexed_rows(
                 if staged_entries:
                     new_paths: List[str] = []
                     new_hashes: List[str] = []
+                    pending_paths_f: set[str] = set()
+                    pending_hashes_f: set[str] = set()
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
-                        path = e.get("s3_path")
-                        h = str(e.get("hash") or "")
-                        if not path or not h:
+                        path_n = norm_s3_path(e.get("s3_path"))
+                        h = norm_image_hash_hex(e.get("hash"))
+                        if not path_n or not h:
                             continue
-                        if h in existing_photo_hashes:
+                        if path_n in existing_photo_paths or path_n in pending_paths_f:
                             continue
-                        new_paths.append(path)
+                        if h in existing_photo_hashes or h in pending_hashes_f:
+                            continue
+                        pending_paths_f.add(path_n)
+                        pending_hashes_f.add(h)
+                        new_paths.append(path_n)
                         new_hashes.append(h)
                     if not new_paths:
                         logger.info(
                             f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (по хешу), пропускаем загрузку в S3"
                         )
+                        skipped_identical_in_catalog += 1
                         if progress_callback:
                             progress_callback(idx - 1, total_rows)
                         continue
@@ -1151,10 +1462,12 @@ def run_full_indexed_rows(
                                 mime_type = "image/png"
                             photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
                         photo_hash = compute_image_hash(photo_base64_str)
-                        if photo_hash and photo_hash in existing_photo_hashes:
+                        ph_n = norm_image_hash_hex(photo_hash)
+                        if ph_n and ph_n in existing_photo_hashes:
                             logger.info(
                                 f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (по хешу), пропускаем загрузку в S3"
                             )
+                            skipped_identical_in_catalog += 1
                             if progress_callback:
                                 progress_callback(idx - 1, total_rows)
                             continue
@@ -1163,7 +1476,7 @@ def run_full_indexed_rows(
                         error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                         logger.error(error_msg)
                         logger.warning(error_msg)
-                        save_moderation_item(
+                        mod_res = save_moderation_item(
                             asana_name=name_ru,
                             source_id=current_source_id,
                             error_message=error_msg,
@@ -1171,6 +1484,9 @@ def run_full_indexed_rows(
                             import_data=normalized,
                             user=user,
                         )
+                        _note_moderation_save_result(mod_res_stats, mod_res)
+                        if mod_res == "inserted":
+                            errors.append(error_msg)
                         photo_s3_path = None
                         photo_hash = None
                     photo_paths = [photo_s3_path] if photo_s3_path else []
@@ -1182,12 +1498,14 @@ def run_full_indexed_rows(
                         logger.info(
                             f"Строка {idx}: асана '{name_ru}' с источником уже существует с фото, пропускаем (в импорте фото нет)"
                         )
+                        skipped_identical_in_catalog += 1
                         if progress_callback:
                             progress_callback(idx - 1, total_rows)
                         continue
                     logger.info(
                         f"Строка {idx}: асана '{name_ru}' с источником уже существует без фото, пропускаем (идентичная запись)"
                     )
+                    skipped_identical_in_catalog += 1
                     if progress_callback:
                         progress_callback(idx - 1, total_rows)
                     continue
@@ -1199,18 +1517,30 @@ def run_full_indexed_rows(
                 if not isinstance(staged_entries, list):
                     staged_entries = []
                 if staged_entries:
+                    seen_pf: set[str] = set()
+                    seen_hf: set[str] = set()
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
-                        path = e.get("s3_path")
-                        h = str(e.get("hash") or "")
-                        if not path or not h:
+                        path_n = norm_s3_path(e.get("s3_path"))
+                        h = norm_image_hash_hex(e.get("hash"))
+                        if not path_n or not h:
                             continue
-                        photo_s3_paths.append(path)
+                        if path_n in seen_pf or h in seen_hf:
+                            continue
+                        seen_pf.add(path_n)
+                        seen_hf.add(h)
+                        photo_s3_paths.append(path_n)
                         photo_hashes_list.append(h)
                 else:
-                    photo_base64 = normalized.get("photo")
-                    if photo_base64:
+                    embed_list = list(normalized.get("photos") or [])
+                    if normalized.get("photo") and not embed_list:
+                        embed_list = [normalized.get("photo")]
+                    embed_list = [p for p in embed_list if p]
+                    pending_embed_full: set[str] = set()
+                    for photo_base64 in embed_list:
+                        if not photo_base64:
+                            continue
                         try:
                             if isinstance(photo_base64, bytes):
                                 photo_base64 = base64.b64encode(photo_base64).decode("utf-8")
@@ -1233,13 +1563,17 @@ def run_full_indexed_rows(
                                     mime_type = "image/png"
                                 photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
                             photo_s3_path, photo_hash = upload_image_to_s3(photo_base64_str, prefix="asans")
-                            photo_s3_paths = [photo_s3_path]
-                            photo_hashes_list = [photo_hash] if photo_hash else []
+                            ph_n = norm_image_hash_hex(photo_hash)
+                            if ph_n in pending_embed_full:
+                                continue
+                            pending_embed_full.add(ph_n)
+                            photo_s3_paths.append(photo_s3_path)
+                            photo_hashes_list.append(photo_hash)
                         except Exception as e:
                             error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                             logger.error(error_msg)
                             logger.warning(error_msg)
-                            save_moderation_item(
+                            mod_res = save_moderation_item(
                                 asana_name=name_ru,
                                 source_id=current_source_id,
                                 error_message=error_msg,
@@ -1247,6 +1581,9 @@ def run_full_indexed_rows(
                                 import_data=normalized,
                                 user=user,
                             )
+                            _note_moderation_save_result(mod_res_stats, mod_res)
+                            if mod_res == "inserted":
+                                errors.append(error_msg)
                 asana_id = add_asana(name_id, current_source_id, photo_s3_paths, photo_hashes_list)
                 imported_asanas += 1
             
@@ -1256,22 +1593,25 @@ def run_full_indexed_rows(
             
         except Exception as e:
             error_msg = f"Строка {idx}: {str(e)}"
-            errors.append(error_msg)
             logger.error(error_msg)
             # Сохраняем в модерацию
             try:
-                asana_name = normalized.get('name_ru', '') if 'normalized' in locals() else ''
-                save_moderation_item(
+                asana_name = normalized.get("name_ru", "") if "normalized" in locals() else ""
+                mod_res = save_moderation_item(
                     asana_name=str(asana_name),
                     source_id=current_source_id,
                     error_message=error_msg,
                     row_number=idx,
-                    import_data=normalized if 'normalized' in locals() else None,
-                    user=user
+                    import_data=normalized if "normalized" in locals() else None,
+                    user=user,
                 )
+                _note_moderation_save_result(mod_res_stats, mod_res)
+                if mod_res == "inserted":
+                    errors.append(error_msg)
             except Exception as save_error:
                 logger.error(f"Failed to save moderation item: {save_error}")
-            
+                errors.append(error_msg)
+
             # Обновляем прогресс даже при ошибке
             if progress_callback:
                 progress_callback(idx - 1, total_rows)
@@ -1279,7 +1619,10 @@ def run_full_indexed_rows(
     return {
         "imported_asanas": imported_asanas,
         "imported_sources": imported_sources,
-        "errors": errors
+        "errors": errors,
+        **mod_res_stats,
+        "skipped_identical_in_catalog": skipped_identical_in_catalog,
+        "rows_processed": total_rows,
     }
 
 
@@ -1368,19 +1711,10 @@ def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) ->
 
 def export_moderation_to_excel(items: List[Dict[str, Any]]) -> BytesIO:
     """
-    Экспортирует записи модерации в Excel файл в том же формате, что и при импорте.
-    Изображения вставляются как картинки в Excel.
-    
-    Args:
-        items: Список записей модерации с полями:
-            - row_number: номер строки
-            - import_data: словарь с данными импорта (может содержать photo, photo_base64, photo_url)
-            - asana_name: название асаны
-            - error_message: сообщение об ошибке
-            - и другие поля
-    
-    Returns:
-        BytesIO: поток с Excel файлом
+    Экспортирует записи модерации в Excel в том же наборе колонок, что и импорт асан.
+    У одной записи несколько фото → несколько строк: одинаковые текстовые поля, в колонке «фото»
+    по одному снимку (как несколько встроенных картинок в одной строке при импорте).
+    Байты читаются из MinIO по s3_path (оригинал), без склейки в одну картинку.
     """
     wb = Workbook()
     ws = wb.active
@@ -1404,72 +1738,51 @@ def export_moderation_to_excel(items: List[Dict[str, Any]]) -> BytesIO:
         cell = ws.cell(row=1, column=col_idx, value=col_name)
         cell.font = Font(bold=True)
     
-    # Заполняем данные
-    for item_idx, item in enumerate(items, start=2):
-        import_data = item.get('import_data', {}) or {}
-        
-        # Название асаны
-        ws.cell(row=item_idx, column=1, value=item.get('asana_name') or import_data.get('name_ru', ''))
-        
-        # Фото - вставляем как изображение
-        photo_col = 2
-        photo_data = None
-        
-        # Пробуем получить фото из разных источников
-        if import_data.get('photo_base64'):
-            photo_data = import_data['photo_base64']
-        elif import_data.get('photo'):
-            photo_data = import_data['photo']
-        elif import_data.get('photo_url'):
-            # Если это URL, пропускаем (не загружаем из интернета при экспорте)
-            # Можно было бы загрузить, но это может быть медленно и требует requests
-            photo_data = None
-        
-        # Вставляем изображение в Excel
-        if photo_data:
+    photo_col = 2
+    current_row = 2
+
+    def _fill_text_columns(row: int, item: Dict[str, Any], imp: Dict[str, Any]) -> None:
+        ws.cell(row=row, column=1, value=item.get("asana_name") or imp.get("name_ru", ""))
+        ws.cell(row=row, column=3, value=imp.get("source_title", ""))
+        ws.cell(row=row, column=4, value=imp.get("source_author", ""))
+        ws.cell(row=row, column=5, value=imp.get("source_year", ""))
+        ws.cell(row=row, column=6, value=imp.get("source_publisher", ""))
+        ws.cell(row=row, column=7, value=imp.get("source_pages", ""))
+        ws.cell(row=row, column=8, value=imp.get("source_annotation", ""))
+
+    for item in items:
+        raw_imp = item.get("import_data") or {}
+        if isinstance(raw_imp, dict):
+            imp = enrich_moderation_import_data(dict(raw_imp))
+        else:
+            imp = {}
+
+        chunks: List[bytes] = moderation_export_image_bytes_list(imp) if imp else []
+
+        if not chunks:
+            _fill_text_columns(current_row, item, imp)
+            current_row += 1
+            continue
+
+        for blob in chunks:
+            _fill_text_columns(current_row, item, imp)
             try:
-                # Декодируем base64
-                if isinstance(photo_data, str):
-                    # Убираем префикс data: если есть
-                    if photo_data.startswith('data:'):
-                        photo_data = photo_data.split(',', 1)[1]
-                    
-                    # Декодируем base64
-                    try:
-                        img_bytes = base64.b64decode(photo_data)
-                    except Exception:
-                        # Если не base64, пробуем как URL или путь
-                        img_bytes = None
-                else:
-                    img_bytes = photo_data
-                
-                if img_bytes:
-                    # Создаем временный файл изображения
-                    img_io = BytesIO(img_bytes)
-                    
-                    # Создаем объект Image
-                    img = Image(img_io)
-                    
-                    # Устанавливаем размер (опционально, можно настроить)
-                    img.width = 200
-                    img.height = 200
-                    
-                    # Вставляем изображение в ячейку
-                    cell_ref = ws.cell(row=item_idx, column=photo_col).coordinate
-                    ws.add_image(img, cell_ref)
-                    
-                    # Увеличиваем высоту строки для изображения
-                    ws.row_dimensions[item_idx].height = 150
+                from PIL import Image as PILImage
+
+                img_io = BytesIO(blob)
+                pil_im = PILImage.open(img_io)
+                ow, oh = pil_im.size
+                img_io.seek(0)
+                img = Image(img_io)
+                scale = min(220 / max(ow, 1), 380 / max(oh, 1), 1.0)
+                img.width = int(ow * scale)
+                img.height = int(oh * scale)
+                cell_ref = ws.cell(row=current_row, column=photo_col).coordinate
+                ws.add_image(img, cell_ref)
+                ws.row_dimensions[current_row].height = min(420, max(110, img.height * 0.85 + 12))
             except Exception as e:
-                logger.warning(f"Не удалось вставить изображение в строку {item_idx}: {e}")
-        
-        # Данные источника
-        ws.cell(row=item_idx, column=3, value=import_data.get('source_title', ''))
-        ws.cell(row=item_idx, column=4, value=import_data.get('source_author', ''))
-        ws.cell(row=item_idx, column=5, value=import_data.get('source_year', ''))
-        ws.cell(row=item_idx, column=6, value=import_data.get('source_publisher', ''))
-        ws.cell(row=item_idx, column=7, value=import_data.get('source_pages', ''))
-        ws.cell(row=item_idx, column=8, value=import_data.get('source_annotation', ''))
+                logger.warning("Не удалось вставить изображение в строку %s: %s", current_row, e)
+            current_row += 1
     
     # Настраиваем ширину колонок
     column_widths = {

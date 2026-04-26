@@ -22,11 +22,12 @@ from fastapi import (
     Query,
     UploadFile,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import desc
+from starlette.concurrency import run_in_threadpool
 
 from app import config
-from app.auth import is_admin, is_expert_or_admin
+from app.auth import import_status_user_from_jwt, is_admin, is_expert_or_admin
 from app.excel_import import (
     export_asana_names_to_excel,
     export_moderation_to_excel,
@@ -121,7 +122,12 @@ async def import_asanas(
         task_id = str(uuid.uuid4())
         task_set(
             task_id,
-            {"status": "pending", "progress": 0, "type": "asanas", "user": user},
+            {
+                "status": "pending",
+                "progress": 0,
+                "type": "asanas",
+                "user": (user or "").strip(),
+            },
         )
 
         background_tasks.add_task(run_import_asanas_task, task_id, tmp_path, source_id, user)
@@ -182,7 +188,12 @@ async def import_full(
         task_id = str(uuid.uuid4())
         task_set(
             task_id,
-            {"status": "pending", "progress": 0, "type": "full", "user": user},
+            {
+                "status": "pending",
+                "progress": 0,
+                "type": "full",
+                "user": (user or "").strip(),
+            },
         )
 
         background_tasks.add_task(run_import_full_task, task_id, tmp_path, user, mapping)
@@ -200,12 +211,25 @@ async def import_full(
 
 
 @router.get("/api/import/status/{task_id}")
-async def get_import_status(task_id: str = Path(...), user: str = Depends(is_expert_or_admin)):
-    task = task_get(task_id)
+async def get_import_status(task_id: str = Path(...), user: str = Depends(import_status_user_from_jwt)):
+    # task_get — синхронный Redis; не блокировать event loop (иначе poll статуса стопорится вместе с фоном).
+    task = await run_in_threadpool(task_get, task_id)
     if not task:
+        logger.warning(
+            "import status 404: task_id=%s (нет записи в Redis/памяти; при scale>1 нужен REDIS_URL на всех репликах asana-import)",
+            task_id,
+        )
         raise HTTPException(status_code=404, detail="Задача не найдена")
 
-    if task.get("user") != user:
+    owner = (task.get("user") or "").strip()
+    viewer = (user or "").strip()
+    if owner != viewer:
+        logger.warning(
+            "import status 403: task_id=%s owner=%r viewer=%r",
+            task_id,
+            owner,
+            viewer,
+        )
         raise HTTPException(status_code=403, detail="Доступ запрещен")
 
     response = {"status": task.get("status", "unknown"), "progress": task.get("progress", 0)}
@@ -217,7 +241,15 @@ async def get_import_status(task_id: str = Path(...), user: str = Depends(is_exp
     elif task.get("status") == "error":
         response["error"] = task.get("error", "Неизвестная ошибка")
 
-    return response
+    # Не кэшировать: иначе CDN/браузер может отдавать старый progress и UI «прыгает» 4% → 100%.
+    return JSONResponse(
+        content=response,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Surrogate-Control": "no-store",
+        },
+    )
 
 
 @router.post("/api/import/asana-names")
@@ -279,6 +311,10 @@ async def export_moderation_items(
             if item.import_data:
                 try:
                     import_data = json.loads(item.import_data)
+                    if isinstance(import_data, dict):
+                        from app.moderation_photo import enrich_moderation_import_data
+
+                        import_data = enrich_moderation_import_data(import_data)
                 except Exception:
                     pass
 
@@ -308,10 +344,11 @@ async def export_moderation_items(
         excel_stream = export_moderation_to_excel(items_list)
         filename = f"moderation_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
+        # Без лишних кавычек вокруг имени — иначе в браузере в имя файла попадает "
         return StreamingResponse(
             excel_stream,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     finally:
         db.close()

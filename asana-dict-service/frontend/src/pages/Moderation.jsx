@@ -5,6 +5,17 @@ import { contentAPI } from '../api/content';
 import SearchableSelect from '../components/SearchableSelect';
 import '../styles/Moderation.css';
 
+/** Ссылки на изображения из API (оригиналы в хранилище / data URL). */
+const isModerationImageSrc = (u) =>
+  typeof u === 'string' &&
+  (u.trim().startsWith('http') || u.trim().startsWith('data:image/'));
+
+const moderationPhotoUrlList = (d) => {
+  if (!d || typeof d !== 'object') return [];
+  const u = d.import_photo_urls || d.photo_preview_urls;
+  return Array.isArray(u) ? u : [];
+};
+
 const Moderation = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,14 +37,19 @@ const Moderation = () => {
   const importHasPhoto = (item) => {
     const d = item?.import_data;
     if (!d || typeof d !== 'object') return false;
-    if (d.photo_url && String(d.photo_url).trim().startsWith('http')) return true;
+    const urls = moderationPhotoUrlList(d);
+    if (urls.some(isModerationImageSrc)) return true;
+    if (d.photo_url && isModerationImageSrc(String(d.photo_url))) return true;
     if (d.photo_base64 && String(d.photo_base64).trim().length > 20) return true;
     const p = d.photo;
     if (p && typeof p === 'string') {
       const t = p.trim();
       if (t.startsWith('data:') || t.startsWith('http')) return true;
+      if (t.startsWith('images/')) return true;
       if (t.length > 80) return true;
     }
+    const staged = d._staged_import_photos;
+    if (Array.isArray(staged) && staged.some((e) => e && e.s3_path)) return true;
     return false;
   };
 
@@ -352,8 +368,15 @@ const Moderation = () => {
                   {item.import_data && typeof item.import_data === 'object' && (
                     <div className="moderation-item-import-data">
                       {Object.entries(item.import_data).map(([key, value]) => {
-                        // Пропускаем фото - показываем отдельно
-                        if (key === 'photo' || key === 'photo_url' || key === 'photo_base64') {
+                        // Пропускаем фото — превью отдельно (в т.ч. несколько URL)
+                        if (
+                          key === 'photo' ||
+                          key === 'photo_url' ||
+                          key === 'photo_base64' ||
+                          key === 'photo_preview_urls' ||
+                          key === 'import_photo_urls' ||
+                          key === '_staged_import_photos'
+                        ) {
                           return null;
                         }
                         
@@ -375,43 +398,92 @@ const Moderation = () => {
                         );
                       })}
                       
-                      {/* Показываем фото если есть */}
-                      {(item.import_data.photo || item.import_data.photo_url || item.import_data.photo_base64) && (
+                      {/* Фото из импорта: несколько URL (staging S3) или одно встроенное */}
+                      {(moderationPhotoUrlList(item.import_data).length > 0) ||
+                      item.import_data.photo_url ||
+                      item.import_data.photo_base64 ||
+                      item.import_data.photo ? (
                         <div className="moderation-item-field">
-                          <strong>Фотография из запроса:</strong>
-                          <div className="moderation-photo-preview" style={{ marginTop: '0.5em' }}>
-                            {item.import_data.photo_url ? (
-                              <img 
-                                src={item.import_data.photo_url} 
-                                alt="Фото из запроса"
-                                style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
-                              />
-                            ) : item.import_data.photo_base64 ? (
-                              <img 
-                                src={`data:image/jpeg;base64,${item.import_data.photo_base64}`} 
-                                alt="Фото из запроса"
-                                style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
-                              />
-                            ) : item.import_data.photo ? (
-                              typeof item.import_data.photo === 'string' ? (
-                                item.import_data.photo.startsWith('http') || item.import_data.photo.startsWith('data:') ? (
-                                  <img 
-                                    src={item.import_data.photo} 
-                                    alt="Фото из запроса"
-                                    style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
-                                  />
-                                ) : (
-                                  <img 
-                                    src={`data:image/jpeg;base64,${item.import_data.photo}`} 
-                                    alt="Фото из запроса"
-                                    style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ddd' }}
-                                  />
+                          <strong>Изображения из импорта:</strong>
+                          <div
+                            className="moderation-photo-preview"
+                            style={{ marginTop: '0.5em', display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}
+                          >
+                            {moderationPhotoUrlList(item.import_data).length > 0
+                              ? moderationPhotoUrlList(item.import_data).map((url, i) =>
+                                  isModerationImageSrc(url) ? (
+                                    <img
+                                      key={`pv-${i}`}
+                                      src={url.trim()}
+                                      alt={`Фото ${i + 1}`}
+                                      style={{
+                                        maxWidth: '280px',
+                                        maxHeight: '280px',
+                                        borderRadius: '8px',
+                                        border: '1px solid #ddd',
+                                        objectFit: 'contain',
+                                      }}
+                                    />
+                                  ) : null
                                 )
-                              ) : null
+                              : null}
+                            {!moderationPhotoUrlList(item.import_data).length &&
+                            item.import_data.photo_url ? (
+                              <img
+                                src={item.import_data.photo_url}
+                                alt="Фото из запроса"
+                                style={{
+                                  maxWidth: '300px',
+                                  maxHeight: '300px',
+                                  borderRadius: '8px',
+                                  border: '1px solid #ddd',
+                                }}
+                              />
+                            ) : null}
+                            {!moderationPhotoUrlList(item.import_data).length &&
+                            item.import_data.photo_base64 ? (
+                              <img
+                                src={`data:image/jpeg;base64,${item.import_data.photo_base64}`}
+                                alt="Фото из запроса"
+                                style={{
+                                  maxWidth: '300px',
+                                  maxHeight: '300px',
+                                  borderRadius: '8px',
+                                  border: '1px solid #ddd',
+                                }}
+                              />
+                            ) : null}
+                            {!moderationPhotoUrlList(item.import_data).length &&
+                            item.import_data.photo &&
+                            typeof item.import_data.photo === 'string' ? (
+                              item.import_data.photo.startsWith('http') ||
+                              item.import_data.photo.startsWith('data:') ? (
+                                <img
+                                  src={item.import_data.photo}
+                                  alt="Фото из запроса"
+                                  style={{
+                                    maxWidth: '300px',
+                                    maxHeight: '300px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #ddd',
+                                  }}
+                                />
+                              ) : (
+                                <img
+                                  src={`data:image/jpeg;base64,${item.import_data.photo}`}
+                                  alt="Фото из запроса"
+                                  style={{
+                                    maxWidth: '300px',
+                                    maxHeight: '300px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #ddd',
+                                  }}
+                                />
+                              )
                             ) : null}
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </div>

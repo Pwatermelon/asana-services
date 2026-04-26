@@ -10,6 +10,31 @@ import base64
 
 logger = logging.getLogger("asana_service.ontology")
 
+
+def rdf_property_value_str(val: Any) -> str:
+    """Значение из RDF graph.value (Literal) — стабильная строка для сравнения путей/хешей."""
+    if val is None:
+        return ""
+    try:
+        if hasattr(val, "toPython"):
+            py = val.toPython()
+            return "" if py is None else str(py).strip()
+    except Exception:
+        pass
+    return str(val).strip()
+
+
+def norm_s3_path(p: Any) -> str:
+    if p is None:
+        return ""
+    return str(p).strip().replace("\\", "/")
+
+
+def norm_image_hash_hex(h: Any) -> str:
+    if h is None:
+        return ""
+    return str(h).strip().lower()
+
 ASANA = Namespace("http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#")
 # Добавляем новое свойство для S3 пути к фото
 ASANA.s3PhotoPath = URIRef(f"{ASANA}s3PhotoPath")
@@ -304,26 +329,28 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                         # Приоритет: проверяем хеш, если есть
                         existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
                         if existing_hash:
-                            existing_photo_hashes.add(str(existing_hash))
+                            existing_photo_hashes.add(norm_image_hash_hex(rdf_property_value_str(existing_hash)))
                         # Для обратной совместимости также сохраняем пути
                         existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                         if existing_s3_path:
-                            existing_photo_paths.add(str(existing_s3_path))
+                            existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
                 
                 for i, photo_path in enumerate(photo_paths):
                     logger.info(f"[DEBUG ONTOLOGY] Processing photo {i+1}/{len(photo_paths)}: {photo_path}")
                     
                     # Получаем хеш для этого фото, если передан
                     photo_hash = photo_hashes[i] if i < len(photo_hashes) else None
+                    path_n = norm_s3_path(photo_path)
+                    hash_n = norm_image_hash_hex(photo_hash) if photo_hash else ""
                     
                     # Проверяем, не существует ли уже такое фото (по хешу, если есть, иначе по пути)
                     is_duplicate = False
-                    if photo_hash and photo_hash in existing_photo_hashes:
-                        logger.warning(f"[WARNING ONTOLOGY] Photo with hash '{photo_hash}' already exists for this asana and source, skipping duplicate")
+                    if hash_n and hash_n in existing_photo_hashes:
+                        logger.warning(f"[WARNING ONTOLOGY] Photo with hash '{hash_n}' already exists for this asana and source, skipping duplicate")
                         is_duplicate = True
-                    elif photo_path in existing_photo_paths:
+                    elif path_n and path_n in existing_photo_paths:
                         # Для обратной совместимости: если хеша нет, проверяем по пути
-                        logger.warning(f"[WARNING ONTOLOGY] Photo with path '{photo_path}' already exists for this asana and source, skipping duplicate")
+                        logger.warning(f"[WARNING ONTOLOGY] Photo with path '{path_n}' already exists for this asana and source, skipping duplicate")
                         is_duplicate = True
                     
                     if is_duplicate:
@@ -367,6 +394,10 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                     g.add((photo_uri, ASANA.hasSource, source_uri))
                     g.add((asana_uri, ASANA.hasPhoto, photo_uri))
                     logger.info(f"[DEBUG ONTOLOGY] Added photo and source triples for photo {i+1}")
+                    if hash_n:
+                        existing_photo_hashes.add(hash_n)
+                    if path_n:
+                        existing_photo_paths.add(path_n)
             else:
                 logger.info(f"[DEBUG ONTOLOGY] No photos to add to existing asana")
             

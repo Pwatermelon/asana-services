@@ -168,32 +168,66 @@ def get_current_user_from_request(request: Request):
     
     raise HTTPException(status_code=401, detail="Could not validate credentials")
 
-def is_admin(request: Request, user: str = Depends(get_current_user_from_request)):
-    """Проверяет, что пользователь является администратором через server-module"""
+
+def import_status_user_from_jwt(request: Request) -> str:
+    """
+    Логин для GET /api/import/status — только проверка подписи JWT (тот же SECRET_KEY, что у server-module).
+    Без HTTP к server-module: на проде poll не упирается в лимиты/задержки /api/users/me.
+    Права «эксперт» здесь не перепроверяем: задачу мог создать только уже авторизованный POST; доступ к чужому task_id режется по owner в обработчике.
+    """
     token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Token not found")
-    
+    try:
+        payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    login = (payload.get("login") or "").strip()
+    if not login:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    return login
+
+
+def is_admin(request: Request):
+    """Проверяет, что пользователь является администратором через server-module (один запрос к /api/users/me)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Token not found")
+
     user_data = get_user_info_from_token_sync(token)
-    if user_data and user_data.get("is_admin"):
-        return user
-    
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    login = user_data.get("login")
+    if not login:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    if user_data.get("is_admin"):
+        return login
+
     raise HTTPException(status_code=403, detail="Недостаточно прав доступа. Требуется роль администратора.")
 
-def is_expert_or_admin(request: Request, user: str = Depends(get_current_user_from_request)):
-    """Проверяет, что пользователь является экспертом или администратором"""
+
+def is_expert_or_admin(request: Request):
+    """
+    Эксперт или админ через server-module.
+    Раньше шёл вложенный Depends(get_current_user_from_request) + повторный get_user_info_from_token_sync
+    — два HTTP на каждый poll статуса импорта; при лимите соединений к auth зависало после пары запросов.
+    """
     token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Token not found")
-    
+
     user_data = get_user_info_from_token_sync(token)
-    if user_data:
-        is_admin_flag = user_data.get("is_admin", False)
-        permission_study = user_data.get("permission_study", False)
-        # Маппинг: is_admin → admin, permission_study → expert
-        if is_admin_flag or permission_study:
-            return user
-    
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    login = user_data.get("login")
+    if not login:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    is_admin_flag = user_data.get("is_admin", False)
+    permission_study = user_data.get("permission_study", False)
+    if is_admin_flag or permission_study:
+        return login
+
     raise HTTPException(status_code=403, detail="Недостаточно прав доступа. Требуется роль эксперта или администратора.")
 
 # Функции регистрации, подтверждения email и сброса пароля теперь обрабатываются внешним сервисом

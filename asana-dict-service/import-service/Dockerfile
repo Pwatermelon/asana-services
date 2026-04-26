@@ -25,4 +25,5 @@ RUN touch ontology_updated.owl && chmod 666 ontology_updated.owl
 
 EXPOSE 8000
 
-CMD ["uvicorn", "import_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Два воркера: poll статуса не блокируется фоновым импортом в одном процессе (event loop + threadpool).
+CMD ["uvicorn", "import_service.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

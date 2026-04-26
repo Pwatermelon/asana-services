@@ -52,7 +52,7 @@ services:
   # Один общий файл онтологии на хосте: не запускайте параллельно тяжёлые импорты в OWL.
   # ============================================
   asana-backend:
-    image: plwatermelon/asana-backend:2.0.1-beta
+    image: plwatermelon/asana-backend:2.0.6-beta
     container_name: asana-backend
     ports:
       - "8000:8000"
@@ -68,6 +68,7 @@ services:
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
       - POSTGRES_HOST=${DB_HOST:-postgres}
       - POSTGRES_PORT=${DB_PORT:-5432}
       - POSTGRES_DB=${DB_NAME:-asana_db}
@@ -88,12 +89,20 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     networks:
       - asana-network
 
-  # Очередь/воркер тяжёлого импорта (тот же OWL, что у asana-backend)
+  # Очередь/воркер тяжёлого импорта (тот же OWL, что у asana-backend).
+  # При --scale asana-import>1 обязателен общий Redis (REDIS_URL) + healthcheck ниже — иначе статусы и lock OWL расходятся между репликами.
+  # Полоска прогресса на сайте: образ asana-backend-import + фронт с опросом status; в логах воркера строка «Redis для import tasks: OK».
   asana-import:
-    image: plwatermelon/asana-backend-import:2.0.1-beta
+    image: plwatermelon/asana-backend-import:2.0.6-beta
     restart: unless-stopped
     environment:
       - POSTGRES_HOST=${DB_HOST:-postgres}
@@ -115,18 +124,19 @@ services:
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://katalog-asan.online/images}
+      - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - /app/ontology_updated.owl:/app/ontology_updated.owl
     networks:
       - asana-network
 
   asana-frontend:
-    image: plwatermelon/asana-frontend:2.0.1-beta
+    image: plwatermelon/asana-frontend:2.0.6-beta
     container_name: asana-frontend
     ports:
       - "3000:3000"
@@ -185,8 +195,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -208,7 +218,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        until mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin} 2>/dev/null; do
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" 2>/dev/null; do
           echo 'Waiting for MinIO to be ready...'
           sleep 2
         done
@@ -216,8 +226,8 @@ services:
         mc anonymous set public local/images || true
         echo 'MinIO bucket policy configured successfully'
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
     networks:
       - asana-network
 

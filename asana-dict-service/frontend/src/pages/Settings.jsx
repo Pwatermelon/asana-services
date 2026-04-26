@@ -5,6 +5,28 @@ import { sourcesAPI } from '../api/sources';
 import SearchableSelect from '../components/SearchableSelect';
 import '../styles/Settings.css';
 
+/** Сводка по модерации и «тихим» пропускам — не путать с числом новых записей в OWL. */
+function formatImportExtraStats(result) {
+  if (!result || typeof result !== 'object') return '';
+  const rows = typeof result.rows_processed === 'number' ? result.rows_processed : null;
+  const mi = result.moderation_inserted ?? 0;
+  const mm = result.moderation_merged ?? 0;
+  const ms = result.moderation_skipped ?? 0;
+  const me = result.moderation_save_errors ?? 0;
+  const sk = result.skipped_identical_in_catalog ?? 0;
+  const parts = [];
+  if (rows != null && rows > 0) parts.push(`строк обработано: ${rows}`);
+  const mods = [];
+  if (mi) mods.push(`новых в модерации: ${mi}`);
+  if (mm) mods.push(`дополнение к карточке модерации: ${mm}`);
+  if (ms) mods.push(`повтор импорта (модерация без изменений): ${ms}`);
+  if (me) mods.push(`сбой записи в модерацию: ${me}`);
+  if (mods.length) parts.push(`модерация — ${mods.join(', ')}`);
+  if (sk) parts.push(`без изменений в каталоге (уже есть те же данные): ${sk}`);
+  if (!parts.length) return '';
+  return ` ${parts.join('. ')}.`;
+}
+
 const Settings = () => {
   const { isAdmin, isExpertOrAdmin } = useAuth();
   const [uploading, setUploading] = useState(false);
@@ -190,10 +212,13 @@ const Settings = () => {
         // Если нет task_id, значит старый синхронный формат
         applyImportResultToState(result);
         const errorText = result.errors_count > 0 ? ` (${result.errors_count} ошибок)` : '';
+        const extra = formatImportExtraStats(result);
         if (importMode === 'asanas') {
-          setSuccess(`Успешно импортировано ${result.imported} асан${errorText}`);
+          const base = `Успешно импортировано ${result.imported} асан${errorText}`;
+          setSuccess(extra ? `${base}.${extra}` : base);
         } else {
-          setSuccess(`Успешно импортировано ${result.imported_asanas} асан и ${result.imported_sources} источников${errorText}`);
+          const base = `Успешно импортировано ${result.imported_asanas} асан и ${result.imported_sources} источников${errorText}`;
+          setSuccess(extra ? `${base}.${extra}` : base);
         }
         setImporting(false);
         setSelectedFile(null);
@@ -255,25 +280,74 @@ const Settings = () => {
   };
 
   const pollImportStatus = async (taskId) => {
-    const maxAttempts = 600; // 10 минут максимум (600 * 1 секунда)
-    let attempts = 0;
-    
+    const maxWaitMs = 30 * 60 * 1000; // до 30 минут ожидания
+    const pollMs = 200; // быстрый прод успевает пройти 10–99% между опросами; 1 с давало «4% → 100%»
+    const startedAt = Date.now();
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    /** Повтор при 404/502/503/504: другая реплика, краткий сбой Redis или шлюза. */
+    const getImportStatusWithRetry = async (id) => {
+      const maxRetries = 6;
+      let lastErr;
+      for (let r = 0; r < maxRetries; r++) {
+        try {
+          return await settingsAPI.getImportStatus(id);
+        } catch (err) {
+          lastErr = err;
+          const st = err.response?.status;
+          const msg = typeof err.message === 'string' ? err.message : '';
+          const isTimeout =
+            err.code === 'ECONNABORTED' ||
+            err.code === 'ETIMEDOUT' ||
+            msg.toLowerCase().includes('timeout');
+          const noResponse = !err.response && err.request;
+          const retryable =
+            st === 404 ||
+            st === 502 ||
+            st === 503 ||
+            st === 504 ||
+            isTimeout ||
+            noResponse;
+          if (!retryable || r === maxRetries - 1) throw err;
+          await sleep(600 * (r + 1));
+        }
+      }
+      throw lastErr;
+    };
+
+    const formatStatusPollError = (error) => {
+      const st = error.response?.status;
+      const detail = error.response?.data?.detail;
+      if (typeof detail === 'string' && detail.trim()) {
+        return st ? `${detail} (HTTP ${st})` : detail;
+      }
+      if (error.message) return error.message;
+      return 'Ошибка при проверке статуса импорта';
+    };
+
     const checkStatus = async () => {
       try {
-        const status = await settingsAPI.getImportStatus(taskId);
-        setImportProgress(status.progress || 0);
+        const status = await getImportStatusWithRetry(taskId);
+        const rawP = status.progress;
+        const p = typeof rawP === 'number' ? rawP : parseFloat(rawP);
+        setImportProgress(Number.isFinite(p) ? p : 0);
         setImportStatus(status.status);
         
         if (status.status === 'completed') {
           setImporting(false);
+          setImportProgress(100);
           const result = status.result || {};
           applyImportResultToState(result);
+          const extra = formatImportExtraStats(result);
           if (importMode === 'asanas') {
             const errorText = result.errors_count > 0 ? ` (${result.errors_count} ошибок)` : '';
-            setSuccess(`Успешно импортировано ${result.imported || 0} асан${errorText}`);
+            const base = `Успешно импортировано ${result.imported || 0} асан${errorText}`;
+            setSuccess(extra ? `${base}.${extra}` : base);
           } else {
             const errorText = result.errors_count > 0 ? ` (${result.errors_count} ошибок)` : '';
-            setSuccess(`Успешно импортировано ${result.imported_asanas || 0} асан и ${result.imported_sources || 0} источников${errorText}`);
+            const base = `Успешно импортировано ${result.imported_asanas || 0} асан и ${result.imported_sources || 0} источников${errorText}`;
+            setSuccess(extra ? `${base}.${extra}` : base);
           }
           setSelectedFile(null);
           const fileInput = document.getElementById('import-file');
@@ -284,9 +358,8 @@ const Settings = () => {
           setError(status.error || 'Ошибка при импорте');
           setImportTaskId(null);
         } else if (status.status === 'processing' || status.status === 'pending') {
-          attempts++;
-          if (attempts < maxAttempts) {
-            setTimeout(checkStatus, 1000); // Проверяем каждую секунду
+          if (Date.now() - startedAt < maxWaitMs) {
+            setTimeout(checkStatus, pollMs);
           } else {
             setImporting(false);
             setError('Превышено время ожидания импорта');
@@ -295,7 +368,7 @@ const Settings = () => {
         }
       } catch (error) {
         setImporting(false);
-        setError('Ошибка при проверке статуса импорта');
+        setError(formatStatusPollError(error));
         setImportTaskId(null);
       }
     };
