@@ -22,6 +22,8 @@ from app.ontology import (
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
     get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object,
     update_asana_name,
+    collect_photo_hash_dedup_pairs_for_source,
+    rotate_photo_in_asana,
 )
 from app.moderation_photo import (
     enrich_moderation_import_data,
@@ -578,35 +580,29 @@ async def post_asana(
             raise HTTPException(status_code=400, detail="При добавлении нового источника поля автора, названия и года обязательны")
 
         # Проверяем, существует ли уже асана с таким названием и источником
-        from app.ontology import find_existing_asana, get_graph, ASANA
+        from app.ontology import find_existing_asana, get_graph, ASANA, norm_image_hash_hex
         from rdflib import URIRef
         existing_asana_id = find_existing_asana(name_id, source_id)
         
-        # Если асана уже существует, получаем существующие хеши ДО загрузки фото в S3
-        existing_photo_hashes = set()
+        # Если асана уже существует, получаем пары (MD5, dedup) ДО загрузки фото в S3
+        existing_photo_pairs: List[tuple] = []
         if existing_asana_id:
             g = get_graph()
             asana_uri = URIRef(existing_asana_id)
             source_uri = URIRef(source_id)
-            
-            # Получаем все фото этой асаны с этим источником
-            existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
-            for existing_photo_uri in existing_photos:
-                existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
-                if existing_photo_source == source_uri:
-                    # Приоритет: проверяем хеш, если есть
-                    existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
-                    if existing_hash:
-                        existing_photo_hashes.add(str(existing_hash))
+            existing_photo_pairs = collect_photo_hash_dedup_pairs_for_source(g, asana_uri, source_uri)
         
         # Обработка фото - вычисляем хеши ДО загрузки в S3, загружаем только новые
         photo_s3_paths = []
         photo_hashes = []
+        photo_dedup_fps: List[Optional[str]] = []
         all_photos_were_duplicates = False
         if photos:
             logger.info(f"[DEBUG MAIN] Processing {len(photos)} photo(s)")
             from app.s3_utils import upload_image_to_s3, compute_image_hash
-            processed_hashes = []  # Все хеши, включая дубликаты
+            from app.photo_dedup import compute_photo_dedup_fingerprint, photo_matches_any_existing, norm_dedup_fp
+
+            processed_pairs: List[tuple] = []  # (md5_norm, dedup_norm) каждого входящего фото
             for idx, photo in enumerate(photos):
                 try:
                     photo_content = await photo.read()
@@ -614,12 +610,15 @@ async def post_asana(
                     
                     # Вычисляем хеш ДО загрузки в S3
                     photo_hash = compute_image_hash(photo_content)
+                    photo_dedup = compute_photo_dedup_fingerprint(photo_content)
+                    ph_n = norm_image_hash_hex(photo_hash)
+                    dd_n = norm_dedup_fp(photo_dedup)
                     logger.info(f"[DEBUG MAIN] Photo {idx+1}: computed hash={photo_hash}")
-                    processed_hashes.append(photo_hash)
+                    processed_pairs.append((ph_n, dd_n))
                     
-                    # Проверяем, не является ли это дубликатом
-                    if existing_asana_id and photo_hash in existing_photo_hashes:
-                        logger.info(f"[INFO MAIN] Photo {idx+1} is duplicate (hash exists), skipping upload to S3")
+                    # Проверяем, не является ли это дубликатом (учёт поворота 0/90/180/270)
+                    if existing_asana_id and photo_matches_any_existing(ph_n, dd_n, existing_photo_pairs):
+                        logger.info(f"[INFO MAIN] Photo {idx+1} is duplicate (dedup/MD5), skipping upload to S3")
                         continue  # Пропускаем загрузку дубликата
                     
                     # Загружаем в S3 только если фото новое
@@ -627,6 +626,7 @@ async def post_asana(
                     logger.info(f"[DEBUG MAIN] Photo {idx+1}: uploaded to S3, path={photo_s3_path}, hash={photo_hash}")
                     photo_s3_paths.append(photo_s3_path)
                     photo_hashes.append(photo_hash)
+                    photo_dedup_fps.append(photo_dedup if photo_dedup else None)
                     logger.info(f"[DEBUG MAIN] Photo {idx+1} added to list. Total paths: {len(photo_s3_paths)}")
                 except Exception as e:
                     logger.error(f"[ERROR MAIN] Error processing photo {idx+1}: {e}", exc_info=True)
@@ -634,7 +634,9 @@ async def post_asana(
                     logger.warning(f"[WARNING MAIN] Skipping photo {idx+1} due to error - will add asana without this photo")
             
             # Проверяем, все ли фото были дубликатами
-            if existing_asana_id and processed_hashes and all(h in existing_photo_hashes for h in processed_hashes):
+            if existing_asana_id and processed_pairs and all(
+                photo_matches_any_existing(a, b, existing_photo_pairs) for a, b in processed_pairs
+            ):
                 all_photos_were_duplicates = True
         else:
             logger.info(f"[DEBUG MAIN] No photos provided in request")
@@ -645,7 +647,13 @@ async def post_asana(
             if photo_hashes:
                 # Есть новые фото, добавляем их к существующей асане
                 logger.info(f"[INFO MAIN] Adding {len(photo_hashes)} new photo(s) to existing asana")
-                asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths, photo_hashes=photo_hashes)
+                asana_id = add_asana(
+                    name_id=name_id,
+                    source_id=source_id,
+                    photo_paths=photo_s3_paths,
+                    photo_hashes=photo_hashes,
+                    photo_dedup_fingerprints=photo_dedup_fps,
+                )
                 return {"message": f"Added {len(photo_hashes)} new photo(s) to existing asana", "id": asana_id, "added_photos": len(photo_hashes)}
             else:
                 # Все фото были дубликатами или фото нет в запросе
@@ -666,7 +674,13 @@ async def post_asana(
             )
         logger.info(f"[DEBUG MAIN] Adding asana to ontology with {len(photo_s3_paths)} photo path(s)")
         logger.info(f"[DEBUG MAIN] Photo paths to add: {photo_s3_paths}")
-        asana_id = add_asana(name_id=name_id, source_id=source_id, photo_paths=photo_s3_paths, photo_hashes=photo_hashes)
+        asana_id = add_asana(
+            name_id=name_id,
+            source_id=source_id,
+            photo_paths=photo_s3_paths,
+            photo_hashes=photo_hashes,
+            photo_dedup_fingerprints=photo_dedup_fps,
+        )
         logger.info(f"[DEBUG MAIN] Successfully created asana with ID: {asana_id} with {len(photo_s3_paths)} photo(s)")
         
         return {"message": "Asana added successfully", "id": asana_id}
@@ -738,6 +752,43 @@ async def replace_asana_photo_endpoint(
     except Exception as e:
         logger.error(f"Error replacing photo: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/asana/{asana_id}/photo/{photo_id}/rotate")
+async def rotate_asana_photo_endpoint(
+    asana_id: str,
+    photo_id: str,
+    degrees: int = Form(90),
+    user: str = Depends(is_expert_or_admin),
+):
+    """
+    Поворот фото на 90°, 180° или 270° по часовой стрелке с перезаписью того же объекта в S3 (UUID в пути не меняется).
+    """
+    if degrees not in (90, 180, 270):
+        raise HTTPException(status_code=400, detail="degrees must be 90, 180 or 270")
+    try:
+        if not asana_id.startswith("http://"):
+            if not asana_id.startswith("asana_"):
+                asana_id = f"asana_{asana_id}"
+            asana_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{asana_id}"
+
+        if not photo_id.startswith("http://"):
+            if not photo_id.startswith("photo_"):
+                photo_id = f"photo_{photo_id}"
+            photo_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{photo_id}"
+
+        ok = rotate_photo_in_asana(asana_id, photo_id, degrees)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Photo not found or does not belong to this asana")
+        return {"message": "Фото повёрнуто и сохранено", "degrees": degrees}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error rotating photo: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.delete("/api/asana/{asana_id}/photo/{photo_id}")
 async def delete_asana_photo_endpoint(
@@ -1080,31 +1131,32 @@ async def add_asana_from_moderation(
             ASANA,
             find_existing_asana,
             get_graph,
+            collect_photo_hash_dedup_pairs_for_source,
             norm_image_hash_hex,
             norm_s3_path,
             rdf_property_value_str,
         )
         from rdflib import URIRef
+        from app.photo_dedup import (
+            compute_photo_dedup_fingerprint,
+            photo_matches_any_existing,
+            norm_dedup_fp,
+        )
+
         existing_asana_id = find_existing_asana(name_id, source_id)
         
-        # Если асана уже существует, получаем существующие хеши ДО загрузки фото в S3
-        existing_photo_hashes = set()
+        # Если асана уже существует, получаем пары (MD5, dedup) и пути S3
+        existing_photo_pairs: List[tuple] = []
         existing_photo_paths = set()
         if existing_asana_id:
             g = get_graph()
             asana_uri = URIRef(existing_asana_id)
             source_uri = URIRef(source_id)
-            
-            # Получаем все фото этой асаны с этим источником
+            existing_photo_pairs = collect_photo_hash_dedup_pairs_for_source(g, asana_uri, source_uri)
             existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
             for existing_photo_uri in existing_photos:
                 existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
                 if existing_photo_source == source_uri:
-                    existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
-                    if existing_hash:
-                        existing_photo_hashes.add(
-                            norm_image_hash_hex(rdf_property_value_str(existing_hash))
-                        )
                     existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                     if existing_s3_path:
                         existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
@@ -1112,6 +1164,7 @@ async def add_asana_from_moderation(
         # Обработка фото — списки путей S3 (несколько после Excel staging)
         photo_paths: List[str] = []
         photo_hashes_list: List[Any] = []
+        photo_dedup_list: List[Optional[str]] = []
         keep_photo = keep_photo_from_request.lower() == "true"
 
         if photo:
@@ -1120,14 +1173,17 @@ async def add_asana_from_moderation(
 
                 photo_content = await photo.read()
                 ph = compute_image_hash(photo_content)
+                pd = compute_photo_dedup_fingerprint(photo_content)
                 ph_n = norm_image_hash_hex(ph)
+                pd_n = norm_dedup_fp(pd)
                 logger.info("Photo computed hash: %s", ph)
-                if existing_asana_id and ph_n in existing_photo_hashes:
-                    logger.info("[INFO MAIN] Photo is duplicate (hash exists), skipping upload to S3")
+                if existing_asana_id and photo_matches_any_existing(ph_n, pd_n, existing_photo_pairs):
+                    logger.info("[INFO MAIN] Photo is duplicate (dedup/MD5), skipping upload to S3")
                 else:
                     pth, _ = upload_image_to_s3(photo_content, prefix="asans")
                     photo_paths = [pth]
                     photo_hashes_list = [ph]
+                    photo_dedup_list = [pd if pd else None]
                     logger.info("Photo uploaded to S3: %s, hash: %s", pth, ph)
             except Exception as e:
                 logger.error("Error processing photo: %s", e, exc_info=True)
@@ -1142,50 +1198,63 @@ async def add_asana_from_moderation(
                     staged = import_data.get("_staged_import_photos") or []
                     tmp_paths: List[str] = []
                     tmp_hashes: List[Any] = []
+                    tmp_dedups: List[Optional[str]] = []
                     if isinstance(staged, list):
                         for e in staged:
                             if isinstance(e, dict) and e.get("s3_path"):
                                 tmp_paths.append(norm_s3_path(e["s3_path"]))
                                 h = e.get("hash")
                                 tmp_hashes.append(norm_image_hash_hex(h) if h else None)
+                                dfp = e.get("dedup_fp")
+                                tmp_dedups.append(str(dfp).strip() if dfp else None)
                     if tmp_paths:
                         if existing_asana_id:
                             seen_m_path: set[str] = set()
-                            seen_m_hash: set[str] = set()
+                            seen_m_pair: List[tuple] = []
                             for i, p in enumerate(tmp_paths):
                                 hs = tmp_hashes[i] if i < len(tmp_hashes) else None
+                                ds = tmp_dedups[i] if i < len(tmp_dedups) else None
                                 p_n = norm_s3_path(p)
                                 h_n = norm_image_hash_hex(hs) if hs else ""
+                                d_n = norm_dedup_fp(ds) if ds else ""
                                 if not p_n or not h_n:
                                     continue
                                 if p_n in existing_photo_paths or p_n in seen_m_path:
                                     continue
-                                if h_n in existing_photo_hashes or h_n in seen_m_hash:
+                                if photo_matches_any_existing(h_n, d_n, existing_photo_pairs):
+                                    continue
+                                if any(photo_matches_any_existing(h_n, d_n, [sp]) for sp in seen_m_pair):
                                     continue
                                 seen_m_path.add(p_n)
-                                seen_m_hash.add(h_n)
+                                seen_m_pair.append((h_n, d_n))
                                 photo_paths.append(p_n)
-                                photo_hashes_list.append(h_n)
+                                photo_hashes_list.append(hs)
+                                photo_dedup_list.append(ds)
                         else:
                             photo_paths = tmp_paths
                             photo_hashes_list = tmp_hashes
+                            photo_dedup_list = tmp_dedups
                     else:
                         img_bytes = image_bytes_from_import_dict(import_data)
                         if img_bytes:
                             from app.s3_utils import compute_image_hash, upload_image_to_s3
 
                             ph = compute_image_hash(img_bytes)
+                            pd = compute_photo_dedup_fingerprint(img_bytes)
                             logger.info(
                                 "[INFO MAIN] Photo from import bytes, hash=%s, size=%s",
                                 ph,
                                 len(img_bytes),
                             )
-                            if existing_asana_id and norm_image_hash_hex(ph) in existing_photo_hashes:
-                                logger.info("[INFO MAIN] Import image duplicate by hash, skipping S3 upload")
+                            ph_n = norm_image_hash_hex(ph)
+                            pd_n = norm_dedup_fp(pd)
+                            if existing_asana_id and photo_matches_any_existing(ph_n, pd_n, existing_photo_pairs):
+                                logger.info("[INFO MAIN] Import image duplicate by dedup/MD5, skipping S3 upload")
                             else:
                                 pth, h2 = upload_image_to_s3(img_bytes, prefix="asans")
                                 photo_paths = [pth]
                                 photo_hashes_list = [h2 or ph]
+                                photo_dedup_list = [pd if pd else None]
                                 logger.info("[INFO MAIN] Uploaded moderation import image to S3: %s", pth)
                         else:
                             logger.warning(
@@ -1199,10 +1268,13 @@ async def add_asana_from_moderation(
             if photo_paths:
                 if len(photo_paths) == 1:
                     ph0 = photo_hashes_list[0] if photo_hashes_list else None
+                    pd0 = photo_dedup_list[0] if photo_dedup_list else None
                     p0 = photo_paths[0]
-                    if ph0 and norm_image_hash_hex(ph0) in existing_photo_hashes:
+                    ph0_n = norm_image_hash_hex(ph0) if ph0 else ""
+                    pd0_n = norm_dedup_fp(pd0) if pd0 else ""
+                    if ph0 and photo_matches_any_existing(ph0_n, pd0_n, existing_photo_pairs):
                         logger.info(
-                            "[INFO MAIN] Asana from moderation already exists with identical photo (by hash), skipping"
+                            "[INFO MAIN] Asana from moderation already exists with identical photo (dedup/MD5), skipping"
                         )
                         item.resolved = True
                         item.resolved_by = user
@@ -1237,6 +1309,7 @@ async def add_asana_from_moderation(
                         source_id=source_id,
                         photo_paths=photo_paths,
                         photo_hashes=photo_hashes_list if photo_hashes_list else None,
+                        photo_dedup_fingerprints=photo_dedup_list if photo_dedup_list else None,
                     )
                     item.resolved = True
                     item.resolved_by = user
@@ -1249,7 +1322,7 @@ async def add_asana_from_moderation(
                     logger.error("Error adding photo to existing asana: %s", e, exc_info=True)
                     db.rollback()
                     raise HTTPException(status_code=400, detail=f"Ошибка при добавлении асаны: {str(e)}")
-            if existing_photo_hashes or existing_photo_paths:
+            if existing_photo_pairs or existing_photo_paths:
                 logger.info("[INFO MAIN] Asana from moderation already exists with photos, skipping")
                 item.resolved = True
                 item.resolved_by = user
@@ -1281,6 +1354,7 @@ async def add_asana_from_moderation(
                 source_id=source_id,
                 photo_paths=photo_paths,
                 photo_hashes=photo_hashes_list if photo_hashes_list else None,
+                photo_dedup_fingerprints=photo_dedup_list if photo_dedup_list else None,
             )
             # Успешно создано - отмечаем как решенную
             item.resolved = True

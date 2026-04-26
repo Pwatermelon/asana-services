@@ -1,7 +1,7 @@
 from rdflib import Graph, Namespace, URIRef, Literal, RDF
 from app import config
 from app.s3_utils import get_s3_url
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -35,11 +35,33 @@ def norm_image_hash_hex(h: Any) -> str:
         return ""
     return str(h).strip().lower()
 
+
+def collect_photo_hash_dedup_pairs_for_source(g: Graph, asana_uri: URIRef, source_uri: URIRef) -> List[Tuple[str, str]]:
+    """Пары (md5_hex_norm, dedup_fp_norm) для фото асаны с данным источником."""
+    from app.photo_dedup import norm_dedup_fp
+
+    pairs: List[tuple] = []
+    for existing_photo_uri in g.objects(asana_uri, ASANA.hasPhoto):
+        if g.value(existing_photo_uri, ASANA.hasSource) != source_uri:
+            continue
+        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
+        existing_dedup = g.value(existing_photo_uri, ASANA.photoDedupFingerprint)
+        pairs.append(
+            (
+                norm_image_hash_hex(rdf_property_value_str(existing_hash)),
+                norm_dedup_fp(rdf_property_value_str(existing_dedup)),
+            )
+        )
+    return pairs
+
+
 ASANA = Namespace("http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#")
 # Добавляем новое свойство для S3 пути к фото
 ASANA.s3PhotoPath = URIRef(f"{ASANA}s3PhotoPath")
 # Добавляем свойство для хеша изображения (для сравнения дубликатов)
 ASANA.photoHash = URIRef(f"{ASANA}photoHash")
+# Отпечаток для дубликатов с учётом поворота 0/90/180/270° (SHA-256 от набора pHash)
+ASANA.photoDedupFingerprint = URIRef(f"{ASANA}photoDedupFingerprint")
 # Определяем base64Photo явно, чтобы контролировать его использование (только для чтения старых данных)
 ASANA.base64Photo = URIRef(f"{ASANA}base64Photo")
 # Свойство для указания идентичных/аналогичных асан
@@ -89,10 +111,17 @@ def get_graph():
     Иначе — загрузка из ontology_updated.owl и первичное заполнение зеркала.
     """
     try:
-        from app.main import SessionLocal
+        import app.main as main_mod
         from app.models import CatalogMirrorItem
         from app.catalog_ontology import build_graph_from_mirror, snapshot_graph_to_mirror
 
+        # Скрипты (migrate_photo_dedup_fingerprints, cron) вызывают get_graph() до lifespan FastAPI —
+        # init_database() создаёт фабрику в app.main.SessionLocal. Нельзя делать
+        # `from app.main import SessionLocal` до init: имя привязалось бы к старому None.
+        main_mod.init_database()
+        SessionLocal = main_mod.SessionLocal
+        if SessionLocal is None:
+            raise RuntimeError("SessionLocal is None after init_database()")
         session = SessionLocal()
         try:
             n = session.query(CatalogMirrorItem).count()
@@ -108,7 +137,7 @@ def get_graph():
         logger.info(f"Loading RDF graph from {config.OWL_FILE_PATH} (bootstrap mirror)")
         g = Graph()
         g.parse(config.OWL_FILE_PATH, format="xml")
-        session = SessionLocal()
+        session = main_mod.SessionLocal()
         try:
             snapshot_graph_to_mirror(session, g)
             session.commit()
@@ -151,6 +180,7 @@ def load_asanas_from_graph(g: Graph):
             s3_path = g.value(photo, ASANA.s3PhotoPath)
             base64_photo = g.value(photo, ASANA.base64Photo)
             ph_hash = g.value(photo, ASANA.photoHash)
+            ph_dedup = g.value(photo, ASANA.photoDedupFingerprint)
             
             photo_data = {
                 "id": str(photo),
@@ -158,6 +188,7 @@ def load_asanas_from_graph(g: Graph):
                 "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
                 "source": str(source_obj) if source_obj else None,
                 "photo_hash": str(ph_hash) if ph_hash else None,
+                "photo_dedup_fingerprint": str(ph_dedup) if ph_dedup else None,
             }
             if photo_data["image"]:
                 photos_with_sources.append(photo_data)
@@ -240,7 +271,13 @@ def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
         return None
 
 
-def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo_hashes: List[str] = None):
+def add_asana(
+    name_id: str,
+    source_id: str,
+    photo_paths: List[str] = None,
+    photo_hashes: List[str] = None,
+    photo_dedup_fingerprints: List[str] = None,
+):
     """
     Добавляет асану в онтологию или добавляет фото к существующей асане.
     
@@ -255,10 +292,13 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                      Если передан один путь (строка), преобразуется в список для обратной совместимости
         photo_hashes: Список MD5 хешей изображений (опционально, для сравнения дубликатов)
                      Должен соответствовать по индексу photo_paths
+        photo_dedup_fingerprints: Отпечатки для дубликатов с учётом поворота 0/90/180/270° (по индексу photo_paths)
     
     Returns:
         ID асаны (существующей или новой)
     """
+    from app.photo_dedup import norm_dedup_fp, photo_matches_any_existing
+
     try:
         # Поддержка обратной совместимости: если передан один путь (строка), преобразуем в список
         if isinstance(photo_paths, str):
@@ -271,11 +311,17 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
             photo_hashes = []
         elif isinstance(photo_hashes, str):
             photo_hashes = [photo_hashes]
+
+        if photo_dedup_fingerprints is None:
+            photo_dedup_fingerprints = []
+        elif isinstance(photo_dedup_fingerprints, str):
+            photo_dedup_fingerprints = [photo_dedup_fingerprints]
         
         # Пропускаем пустые пути и проверяем, что это НЕ base64
         logger.info(f"[DEBUG ONTOLOGY] Validating {len(photo_paths)} photo paths")
         valid_paths = []
         valid_hashes = []
+        valid_dedups: List[Optional[str]] = []
         for idx, p in enumerate(photo_paths):
             logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1}: type={type(p)}, value={p[:100] if isinstance(p, str) else str(p)[:100]}")
             if not p:
@@ -296,10 +342,15 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                 valid_hashes.append(photo_hashes[idx])
             else:
                 valid_hashes.append(None)
+            if idx < len(photo_dedup_fingerprints) and photo_dedup_fingerprints[idx]:
+                valid_dedups.append(str(photo_dedup_fingerprints[idx]).strip())
+            else:
+                valid_dedups.append(None)
             logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1} validated successfully: {p}")
         
         photo_paths = valid_paths
         photo_hashes = valid_hashes
+        photo_dedup_fingerprints = valid_dedups
         logger.info(f"[DEBUG ONTOLOGY] After validation: {len(photo_paths)} valid photo paths, {len([h for h in photo_hashes if h])} hashes")
         
         logger.info("Starting to add/update asana")
@@ -321,16 +372,11 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
             if photo_paths:
                 # Получаем список уже существующих фото с этим источником для проверки дубликатов
                 existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
-                existing_photo_hashes = set()
+                existing_pairs = collect_photo_hash_dedup_pairs_for_source(g, asana_uri, source_uri)
                 existing_photo_paths = set()  # Для обратной совместимости
                 for existing_photo_uri in existing_photos:
                     existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
                     if existing_photo_source == source_uri:
-                        # Приоритет: проверяем хеш, если есть
-                        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
-                        if existing_hash:
-                            existing_photo_hashes.add(norm_image_hash_hex(rdf_property_value_str(existing_hash)))
-                        # Для обратной совместимости также сохраняем пути
                         existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                         if existing_s3_path:
                             existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
@@ -340,13 +386,21 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                     
                     # Получаем хеш для этого фото, если передан
                     photo_hash = photo_hashes[i] if i < len(photo_hashes) else None
+                    photo_dedup_raw = (
+                        photo_dedup_fingerprints[i]
+                        if i < len(photo_dedup_fingerprints) and photo_dedup_fingerprints[i]
+                        else None
+                    )
                     path_n = norm_s3_path(photo_path)
                     hash_n = norm_image_hash_hex(photo_hash) if photo_hash else ""
+                    dedup_n = norm_dedup_fp(photo_dedup_raw)
                     
-                    # Проверяем, не существует ли уже такое фото (по хешу, если есть, иначе по пути)
+                    # Проверяем, не существует ли уже такое фото (dedup с поворотами / MD5 / путь)
                     is_duplicate = False
-                    if hash_n and hash_n in existing_photo_hashes:
-                        logger.warning(f"[WARNING ONTOLOGY] Photo with hash '{hash_n}' already exists for this asana and source, skipping duplicate")
+                    if photo_matches_any_existing(hash_n, dedup_n, existing_pairs):
+                        logger.warning(
+                            "[WARNING ONTOLOGY] Photo duplicate (dedup fingerprint or MD5) for this asana and source, skipping"
+                        )
                         is_duplicate = True
                     elif path_n and path_n in existing_photo_paths:
                         # Для обратной совместимости: если хеша нет, проверяем по пути
@@ -386,6 +440,9 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                             logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}, hash: {photo_hash}")
                         else:
                             logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path} (no hash provided)")
+                        if photo_dedup_raw:
+                            g.add((photo_uri, ASANA.photoDedupFingerprint, Literal(photo_dedup_raw)))
+                            logger.info(f"[DEBUG ONTOLOGY] Added photoDedupFingerprint for photo {i+1}")
                     else:
                         logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {photo_path[:100]}...")
                         logger.error(f"[ERROR ONTOLOGY] Expected format: images/asans/uuid.jpg")
@@ -394,8 +451,7 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                     g.add((photo_uri, ASANA.hasSource, source_uri))
                     g.add((asana_uri, ASANA.hasPhoto, photo_uri))
                     logger.info(f"[DEBUG ONTOLOGY] Added photo and source triples for photo {i+1}")
-                    if hash_n:
-                        existing_photo_hashes.add(hash_n)
+                    existing_pairs.append((hash_n, dedup_n))
                     if path_n:
                         existing_photo_paths.add(path_n)
             else:
@@ -434,6 +490,11 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                     
                     # Получаем хеш для этого фото, если передан
                     photo_hash = photo_hashes[i] if i < len(photo_hashes) else None
+                    photo_dedup_raw = (
+                        photo_dedup_fingerprints[i]
+                        if i < len(photo_dedup_fingerprints) and photo_dedup_fingerprints[i]
+                        else None
+                    )
                     
                     photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
                     logger.info(f"[DEBUG ONTOLOGY] Created photo URI: {photo_uri}")
@@ -465,6 +526,8 @@ def add_asana(name_id: str, source_id: str, photo_paths: List[str] = None, photo
                             logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path}, hash: {photo_hash}")
                         else:
                             logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_path} (no hash provided)")
+                        if photo_dedup_raw:
+                            g.add((photo_uri, ASANA.photoDedupFingerprint, Literal(photo_dedup_raw)))
                     else:
                         logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {photo_path[:100]}...")
                         logger.error(f"[ERROR ONTOLOGY] Expected format: images/asans/uuid.jpg")
@@ -859,8 +922,11 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
             asana_uri = candidates[0]
         # Загружаем в S3 вместо сохранения base64
         from app.s3_utils import upload_image_to_s3
+        from app.photo_dedup import compute_photo_dedup_fingerprint
+
         logger.warning(f"[WARNING] add_photo_to_asana uses base64 - uploading to S3 instead!")
         photo_s3_path, photo_hash = upload_image_to_s3(photo_bytes, prefix="asans")
+        photo_dedup = compute_photo_dedup_fingerprint(photo_bytes)
         logger.info(f"[DEBUG] Uploaded photo to S3: {photo_s3_path}, hash: {photo_hash}")
         
         photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
@@ -878,6 +944,8 @@ def add_photo_to_asana(asana_id: str, photo_bytes: bytes, source_id: str = None)
             logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path}, hash: {photo_hash}")
         else:
             logger.info(f"[DEBUG ONTOLOGY] Added S3 photo path: {photo_s3_path} (no hash)")
+        if photo_dedup:
+            g.add((photo_uri, ASANA.photoDedupFingerprint, Literal(photo_dedup)))
         
         # Если указан источник, добавляем его
         if source_id:
@@ -1110,7 +1178,10 @@ def replace_photo_in_asana(asana_id: str, photo_id: str, new_photo_bytes: bytes)
         
         # Заменяем файл в S3 (тот же путь, новое содержимое)
         from app.s3_utils import replace_file_in_s3
+        from app.photo_dedup import compute_photo_dedup_fingerprint
+
         new_s3_path, new_hash = replace_file_in_s3(s3_path_str, new_photo_bytes)
+        new_dedup = compute_photo_dedup_fingerprint(new_photo_bytes)
         
         # Обновляем хеш в онтологии
         # Удаляем старый хеш
@@ -1120,6 +1191,12 @@ def replace_photo_in_asana(asana_id: str, photo_id: str, new_photo_bytes: bytes)
         
         # Добавляем новый хеш
         g.add((photo_uri, ASANA.photoHash, Literal(new_hash)))
+
+        old_dedup = g.value(photo_uri, ASANA.photoDedupFingerprint)
+        if old_dedup:
+            g.remove((photo_uri, ASANA.photoDedupFingerprint, old_dedup))
+        if new_dedup:
+            g.add((photo_uri, ASANA.photoDedupFingerprint, Literal(new_dedup)))
         
         # Сохраняем онтологию
         _persist_ontology_graph(g)
@@ -1130,6 +1207,32 @@ def replace_photo_in_asana(asana_id: str, photo_id: str, new_photo_bytes: bytes)
     except Exception as e:
         logger.error(f"Error replacing photo: {str(e)}", exc_info=True)
         raise
+
+
+def rotate_photo_in_asana(asana_id: str, photo_id: str, degrees: int) -> bool:
+    """
+    Поворачивает фото на 90/180/270° по часовой стрелке, перезаписывает тот же объект в S3 (UUID в пути не меняется).
+    """
+    if degrees not in (90, 180, 270):
+        raise ValueError("degrees must be 90, 180 or 270")
+    g = get_graph()
+    asana_uri = URIRef(asana_id)
+    photo_uri = URIRef(photo_id)
+    if (asana_uri, ASANA.hasPhoto, photo_uri) not in g:
+        logger.warning("rotate_photo_in_asana: photo %s not on asana %s", photo_id, asana_id)
+        return False
+    s3_path = g.value(photo_uri, ASANA.s3PhotoPath)
+    if not s3_path:
+        logger.warning("rotate_photo_in_asana: no S3 path for %s", photo_id)
+        return False
+    from app.s3_utils import get_s3_object_bytes
+    from app.photo_dedup import rotate_image_bytes
+
+    raw = get_s3_object_bytes(str(s3_path))
+    if not raw or len(raw) < 40:
+        raise ValueError("Не удалось прочитать изображение из S3 для поворота")
+    new_bytes = rotate_image_bytes(raw, degrees)
+    return replace_photo_in_asana(asana_id, photo_id, new_bytes)
 
 
 def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:

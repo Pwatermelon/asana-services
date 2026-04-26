@@ -21,11 +21,17 @@ from app.ontology import (
     add_asana,
     add_asana_name,
     add_source,
+    collect_photo_hash_dedup_pairs_for_source,
     find_existing_source,
     load_asana_names,
     norm_image_hash_hex,
     norm_s3_path,
     rdf_property_value_str,
+)
+from app.photo_dedup import (
+    compute_photo_dedup_fingerprint,
+    norm_dedup_fp,
+    photo_matches_any_existing,
 )
 from app.s3_utils import compute_image_hash, upload_image_to_s3
 from sqlalchemy import create_engine
@@ -297,8 +303,12 @@ def materialize_embedded_photos_to_staging_payload(
             continue
         try:
             h = compute_image_hash(data_url)
+            dfp = compute_photo_dedup_fingerprint(data_url)
             path, h2 = upload_image_to_s3(data_url, prefix=S3_IMPORT_STAGING_PREFIX)
-            staged.append({"s3_path": path, "hash": str(h2 or h)})
+            row = {"s3_path": path, "hash": str(h2 or h)}
+            if dfp:
+                row["dedup_fp"] = dfp
+            staged.append(row)
         except Exception as e:
             logger.warning("Staging: не удалось загрузить фото в S3: %s", e)
     # Не удаляем встроенные фото, если в S3 ничего не залились — иначе на apply остаётся пустой payload и add_asana падает.
@@ -559,15 +569,20 @@ def _dedupe_moderation_staged_photos_in_place(d: Dict[str, Any]) -> None:
         return
     out: List[Dict[str, str]] = []
     seen_hash: set[str] = set()
+    seen_dedup: set[str] = set()
     seen_path: set[str] = set()
     for e in raw:
         if not isinstance(e, dict):
             continue
         p_raw = e.get("s3_path")
         h_raw = e.get("hash")
+        d_raw = e.get("dedup_fp")
         p_n = norm_s3_path(p_raw)
         h_n = norm_image_hash_hex(h_raw) if h_raw else ""
+        d_n = norm_dedup_fp(d_raw) if d_raw else ""
         if not p_n and not h_n:
+            continue
+        if d_n and d_n in seen_dedup:
             continue
         if h_n and h_n in seen_hash:
             continue
@@ -575,11 +590,16 @@ def _dedupe_moderation_staged_photos_in_place(d: Dict[str, Any]) -> None:
             continue
         if h_n:
             seen_hash.add(h_n)
+        if d_n:
+            seen_dedup.add(d_n)
         if p_n:
             seen_path.add(p_n)
         p_store = (str(p_raw).strip() if p_raw is not None else "") or p_n
         h_store = (str(h_raw).strip() if h_raw is not None else "") or h_n
-        out.append({"s3_path": p_store, "hash": h_store})
+        row: Dict[str, str] = {"s3_path": p_store, "hash": h_store}
+        if d_raw and str(d_raw).strip():
+            row["dedup_fp"] = str(d_raw).strip()
+        out.append(row)
     d["_staged_import_photos"] = out
 
 
@@ -597,9 +617,12 @@ def _import_photo_fingerprint(data: Optional[Dict[str, Any]]) -> str:
         for e in staged:
             if isinstance(e, dict):
                 h = norm_image_hash_hex(e.get("hash"))
+                d = norm_dedup_fp(e.get("dedup_fp"))
                 p = norm_s3_path(e.get("s3_path"))
-                if h:
-                    hashes.append(h)
+                if d:
+                    hashes.append("d:" + d)
+                elif h:
+                    hashes.append("h:" + h)
                 elif p:
                     paths_only.append(p)
         if hashes:
@@ -956,16 +979,11 @@ def run_asanas_indexed_rows(
                 
                 # Получаем все фото этой асаны с этим источником
                 existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
-                existing_photo_hashes = set()
-                existing_photo_paths = set()  # Для обратной совместимости
+                existing_photo_pairs = collect_photo_hash_dedup_pairs_for_source(g, asana_uri, source_uri)
+                existing_photo_paths = set()
                 for existing_photo_uri in existing_photos:
                     existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
                     if existing_photo_source == source_uri:
-                        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
-                        if existing_hash:
-                            existing_photo_hashes.add(
-                                norm_image_hash_hex(rdf_property_value_str(existing_hash))
-                            )
                         existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                         if existing_s3_path:
                             existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
@@ -973,6 +991,7 @@ def run_asanas_indexed_rows(
                 # Обрабатываем фото из импорта (после staging — уже в S3, без base64 в JSON)
                 photo_s3_paths = []
                 photo_hashes = []
+                photo_dedups: List[Optional[str]] = []
                 photos_list = normalized.get("photos") or []
                 if normalized.get("photo") and not photos_list:
                     photos_list = [normalized.get("photo")]
@@ -982,14 +1001,16 @@ def run_asanas_indexed_rows(
                     staged_entries = []
                 if staged_entries:
                     pending_paths: set[str] = set()
-                    pending_hashes: set[str] = set()
+                    pending_pairs: List[tuple] = []
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
                         path = e.get("s3_path")
                         h_raw = e.get("hash")
+                        d_raw = e.get("dedup_fp")
                         path_n = norm_s3_path(path)
                         h = norm_image_hash_hex(h_raw) if h_raw else ""
+                        d_n = norm_dedup_fp(d_raw) if d_raw else ""
                         if not path_n or not h:
                             continue
                         if path_n in existing_photo_paths or path_n in pending_paths:
@@ -997,17 +1018,20 @@ def run_asanas_indexed_rows(
                                 f"Строка {idx}: фото уже есть у асаны '{name_ru}' (путь S3), пропускаем"
                             )
                             continue
-                        if h in existing_photo_hashes or h in pending_hashes:
+                        if photo_matches_any_existing(h, d_n, existing_photo_pairs):
                             logger.info(
-                                f"Строка {idx}: фото уже существует для асаны '{name_ru}' (по хешу), пропускаем"
+                                f"Строка {idx}: фото уже существует для асаны '{name_ru}' (dedup/MD5), пропускаем"
                             )
                             continue
+                        if any(photo_matches_any_existing(h, d_n, [pp]) for pp in pending_pairs):
+                            continue
                         pending_paths.add(path_n)
-                        pending_hashes.add(h)
+                        pending_pairs.append((h, d_n))
                         photo_s3_paths.append(path_n)
-                        photo_hashes.append(h)
+                        photo_hashes.append(str(h_raw).strip() if h_raw else h)
+                        photo_dedups.append(str(d_raw).strip() if d_raw else None)
                 else:
-                    pending_row_hashes: set[str] = set()
+                    pending_row_pairs: List[tuple] = []
                     for photo_base64 in photos_list:
                         if not photo_base64:
                             continue
@@ -1042,14 +1066,19 @@ def run_asanas_indexed_rows(
                             # Вычисляем хеш ДО загрузки в S3
                             photo_hash = compute_image_hash(photo_base64_str)
                             ph_n = norm_image_hash_hex(photo_hash)
+                            pd = compute_photo_dedup_fingerprint(photo_base64_str)
+                            pd_n = norm_dedup_fp(pd)
                             
-                            if ph_n in existing_photo_hashes or ph_n in pending_row_hashes:
-                                logger.info(f"Строка {idx}: фото уже существует для асаны '{name_ru}' (по хешу), пропускаем загрузку в S3")
+                            if photo_matches_any_existing(ph_n, pd_n, existing_photo_pairs):
+                                logger.info(f"Строка {idx}: фото уже существует для асаны '{name_ru}' (dedup/MD5), пропускаем загрузку в S3")
                                 continue
-                            pending_row_hashes.add(ph_n)
+                            if any(photo_matches_any_existing(ph_n, pd_n, [pp]) for pp in pending_row_pairs):
+                                continue
+                            pending_row_pairs.append((ph_n, pd_n))
                             photo_s3_path, _ = upload_image_to_s3(photo_base64_str, prefix="asans")
                             photo_s3_paths.append(photo_s3_path)
                             photo_hashes.append(photo_hash)
+                            photo_dedups.append(pd if pd else None)
                         except Exception as e:
                             error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                             logger.warning(error_msg)
@@ -1058,7 +1087,13 @@ def run_asanas_indexed_rows(
                 # Проверяем, есть ли новые фото для добавления
                 if photo_s3_paths:
                     # Есть новые фото, добавляем их к существующей асане
-                    add_asana(name_id, source_id, photo_s3_paths, photo_hashes)
+                    add_asana(
+                        name_id,
+                        source_id,
+                        photo_s3_paths,
+                        photo_hashes,
+                        photo_dedup_fingerprints=photo_dedups,
+                    )
                     logger.info(f"Строка {idx}: добавлено новое фото к существующей асане '{name_ru}'")
                 elif staged_entries or photos_list:
                     # Все фото были дубликатами - идентичная запись, пропускаем
@@ -1078,6 +1113,7 @@ def run_asanas_indexed_rows(
                 # Асана не существует, обрабатываем фото и создаем новую
                 photo_s3_paths = []
                 photo_hashes = []
+                photo_dedups = []
                 photos_list = normalized.get("photos") or []
                 if normalized.get("photo") and not photos_list:
                     photos_list = [normalized.get("photo")]
@@ -1087,22 +1123,28 @@ def run_asanas_indexed_rows(
                     staged_entries = []
                 if staged_entries:
                     seen_p: set[str] = set()
-                    seen_h: set[str] = set()
+                    seen_pair: List[tuple] = []
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
                         path_n = norm_s3_path(e.get("s3_path"))
-                        h = norm_image_hash_hex(e.get("hash"))
+                        h_raw = e.get("hash")
+                        d_raw = e.get("dedup_fp")
+                        h = norm_image_hash_hex(h_raw) if h_raw else ""
+                        d_n = norm_dedup_fp(d_raw) if d_raw else ""
                         if not path_n or not h:
                             continue
-                        if path_n in seen_p or h in seen_h:
+                        if path_n in seen_p:
+                            continue
+                        if any(photo_matches_any_existing(h, d_n, [pp]) for pp in seen_pair):
                             continue
                         seen_p.add(path_n)
-                        seen_h.add(h)
+                        seen_pair.append((h, d_n))
                         photo_s3_paths.append(path_n)
-                        photo_hashes.append(h)
+                        photo_hashes.append(str(h_raw).strip() if h_raw else h)
+                        photo_dedups.append(str(d_raw).strip() if d_raw else None)
                 else:
-                    pending_new_hashes: set[str] = set()
+                    pending_new_pairs: List[tuple] = []
                     for photo_base64 in photos_list:
                         if not photo_base64:
                             continue
@@ -1137,18 +1179,27 @@ def run_asanas_indexed_rows(
                             # Загружаем в S3 (возвращает кортеж (путь, хеш))
                             photo_s3_path, photo_hash = upload_image_to_s3(photo_base64_str, prefix="asans")
                             ph_n = norm_image_hash_hex(photo_hash)
-                            if ph_n in pending_new_hashes:
+                            pd = compute_photo_dedup_fingerprint(photo_base64_str)
+                            pd_n = norm_dedup_fp(pd)
+                            if any(photo_matches_any_existing(ph_n, pd_n, [pp]) for pp in pending_new_pairs):
                                 continue
-                            pending_new_hashes.add(ph_n)
+                            pending_new_pairs.append((ph_n, pd_n))
                             photo_s3_paths.append(photo_s3_path)
                             photo_hashes.append(photo_hash)
+                            photo_dedups.append(pd if pd else None)
                         except Exception as e:
                             error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                             logger.warning(error_msg)
                             continue
                 
                 # Создаем новую асану
-                add_asana(name_id, source_id, photo_s3_paths, photo_hashes)
+                add_asana(
+                    name_id,
+                    source_id,
+                    photo_s3_paths,
+                    photo_hashes,
+                    photo_dedup_fingerprints=photo_dedups,
+                )
                 imported += 1
             
             # Обновляем прогресс
@@ -1387,16 +1438,11 @@ def run_full_indexed_rows(
                 
                 # Получаем все фото этой асаны с этим источником
                 existing_photos = list(g.objects(asana_uri, ASANA.hasPhoto))
-                existing_photo_hashes = set()
-                existing_photo_paths = set()  # Для обратной совместимости
+                existing_photo_pairs = collect_photo_hash_dedup_pairs_for_source(g, asana_uri, source_uri)
+                existing_photo_paths = set()
                 for existing_photo_uri in existing_photos:
                     existing_photo_source = g.value(existing_photo_uri, ASANA.hasSource)
                     if existing_photo_source == source_uri:
-                        existing_hash = g.value(existing_photo_uri, ASANA.photoHash)
-                        if existing_hash:
-                            existing_photo_hashes.add(
-                                norm_image_hash_hex(rdf_property_value_str(existing_hash))
-                            )
                         existing_s3_path = g.value(existing_photo_uri, ASANA.s3PhotoPath)
                         if existing_s3_path:
                             existing_photo_paths.add(norm_s3_path(rdf_property_value_str(existing_s3_path)))
@@ -1410,36 +1456,50 @@ def run_full_indexed_rows(
                 if staged_entries:
                     new_paths: List[str] = []
                     new_hashes: List[str] = []
+                    new_dedups: List[Optional[str]] = []
                     pending_paths_f: set[str] = set()
-                    pending_hashes_f: set[str] = set()
+                    pending_pairs_f: List[tuple] = []
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
                         path_n = norm_s3_path(e.get("s3_path"))
-                        h = norm_image_hash_hex(e.get("hash"))
+                        h_raw = e.get("hash")
+                        d_raw = e.get("dedup_fp")
+                        h = norm_image_hash_hex(h_raw) if h_raw else ""
+                        d_n = norm_dedup_fp(d_raw) if d_raw else ""
                         if not path_n or not h:
                             continue
                         if path_n in existing_photo_paths or path_n in pending_paths_f:
                             continue
-                        if h in existing_photo_hashes or h in pending_hashes_f:
+                        if photo_matches_any_existing(h, d_n, existing_photo_pairs):
+                            continue
+                        if any(photo_matches_any_existing(h, d_n, [pp]) for pp in pending_pairs_f):
                             continue
                         pending_paths_f.add(path_n)
-                        pending_hashes_f.add(h)
+                        pending_pairs_f.append((h, d_n))
                         new_paths.append(path_n)
-                        new_hashes.append(h)
+                        new_hashes.append(str(h_raw).strip() if h_raw else h)
+                        new_dedups.append(str(d_raw).strip() if d_raw else None)
                     if not new_paths:
                         logger.info(
-                            f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (по хешу), пропускаем загрузку в S3"
+                            f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (dedup/MD5), пропускаем загрузку в S3"
                         )
                         skipped_identical_in_catalog += 1
                         if progress_callback:
                             progress_callback(idx - 1, total_rows)
                         continue
-                    add_asana(name_id, current_source_id, new_paths, new_hashes)
+                    add_asana(
+                        name_id,
+                        current_source_id,
+                        new_paths,
+                        new_hashes,
+                        photo_dedup_fingerprints=new_dedups,
+                    )
                     logger.info(f"Строка {idx}: добавлено новое фото к существующей асане '{name_ru}'")
                 elif photo_base64:
                     photo_s3_path = None
                     photo_hash = None
+                    photo_dedup_one: Optional[str] = None
                     try:
                         if isinstance(photo_base64, bytes):
                             photo_base64 = base64.b64encode(photo_base64).decode("utf-8")
@@ -1463,15 +1523,18 @@ def run_full_indexed_rows(
                             photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
                         photo_hash = compute_image_hash(photo_base64_str)
                         ph_n = norm_image_hash_hex(photo_hash)
-                        if ph_n and ph_n in existing_photo_hashes:
+                        pd = compute_photo_dedup_fingerprint(photo_base64_str)
+                        pd_n = norm_dedup_fp(pd)
+                        if ph_n and photo_matches_any_existing(ph_n, pd_n, existing_photo_pairs):
                             logger.info(
-                                f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (по хешу), пропускаем загрузку в S3"
+                                f"Строка {idx}: асана '{name_ru}' с источником уже существует с идентичным фото (dedup/MD5), пропускаем загрузку в S3"
                             )
                             skipped_identical_in_catalog += 1
                             if progress_callback:
                                 progress_callback(idx - 1, total_rows)
                             continue
                         photo_s3_path, _ = upload_image_to_s3(photo_base64_str, prefix="asans")
+                        photo_dedup_one = pd if pd else None
                     except Exception as e:
                         error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                         logger.error(error_msg)
@@ -1491,7 +1554,13 @@ def run_full_indexed_rows(
                         photo_hash = None
                     photo_paths = [photo_s3_path] if photo_s3_path else []
                     photo_hashes_list = [photo_hash] if photo_hash else []
-                    add_asana(name_id, current_source_id, photo_paths, photo_hashes_list)
+                    add_asana(
+                        name_id,
+                        current_source_id,
+                        photo_paths,
+                        photo_hashes_list,
+                        photo_dedup_fingerprints=[photo_dedup_one],
+                    )
                     logger.info(f"Строка {idx}: добавлено новое фото к существующей асане '{name_ru}'")
                 else:
                     if existing_photo_paths:
@@ -1513,31 +1582,38 @@ def run_full_indexed_rows(
                 # Асана не существует, обрабатываем фото и создаем новую
                 photo_s3_paths: List[str] = []
                 photo_hashes_list: List[str] = []
+                photo_dedups_list: List[Optional[str]] = []
                 staged_entries = normalized.get("_staged_import_photos") or []
                 if not isinstance(staged_entries, list):
                     staged_entries = []
                 if staged_entries:
                     seen_pf: set[str] = set()
-                    seen_hf: set[str] = set()
+                    seen_pair_f: List[tuple] = []
                     for e in staged_entries:
                         if not isinstance(e, dict):
                             continue
                         path_n = norm_s3_path(e.get("s3_path"))
-                        h = norm_image_hash_hex(e.get("hash"))
+                        h_raw = e.get("hash")
+                        d_raw = e.get("dedup_fp")
+                        h = norm_image_hash_hex(h_raw) if h_raw else ""
+                        d_n = norm_dedup_fp(d_raw) if d_raw else ""
                         if not path_n or not h:
                             continue
-                        if path_n in seen_pf or h in seen_hf:
+                        if path_n in seen_pf:
+                            continue
+                        if any(photo_matches_any_existing(h, d_n, [pp]) for pp in seen_pair_f):
                             continue
                         seen_pf.add(path_n)
-                        seen_hf.add(h)
+                        seen_pair_f.append((h, d_n))
                         photo_s3_paths.append(path_n)
-                        photo_hashes_list.append(h)
+                        photo_hashes_list.append(str(h_raw).strip() if h_raw else h)
+                        photo_dedups_list.append(str(d_raw).strip() if d_raw else None)
                 else:
                     embed_list = list(normalized.get("photos") or [])
                     if normalized.get("photo") and not embed_list:
                         embed_list = [normalized.get("photo")]
                     embed_list = [p for p in embed_list if p]
-                    pending_embed_full: set[str] = set()
+                    pending_embed_pairs: List[tuple] = []
                     for photo_base64 in embed_list:
                         if not photo_base64:
                             continue
@@ -1564,11 +1640,14 @@ def run_full_indexed_rows(
                                 photo_base64_str = f"data:{mime_type};base64,{photo_base64_str}"
                             photo_s3_path, photo_hash = upload_image_to_s3(photo_base64_str, prefix="asans")
                             ph_n = norm_image_hash_hex(photo_hash)
-                            if ph_n in pending_embed_full:
+                            pd = compute_photo_dedup_fingerprint(photo_base64_str)
+                            pd_n = norm_dedup_fp(pd)
+                            if any(photo_matches_any_existing(ph_n, pd_n, [pp]) for pp in pending_embed_pairs):
                                 continue
-                            pending_embed_full.add(ph_n)
+                            pending_embed_pairs.append((ph_n, pd_n))
                             photo_s3_paths.append(photo_s3_path)
                             photo_hashes_list.append(photo_hash)
+                            photo_dedups_list.append(pd if pd else None)
                         except Exception as e:
                             error_msg = f"Строка {idx}: ошибка загрузки фото в S3: {str(e)}"
                             logger.error(error_msg)
@@ -1584,7 +1663,13 @@ def run_full_indexed_rows(
                             _note_moderation_save_result(mod_res_stats, mod_res)
                             if mod_res == "inserted":
                                 errors.append(error_msg)
-                asana_id = add_asana(name_id, current_source_id, photo_s3_paths, photo_hashes_list)
+                asana_id = add_asana(
+                    name_id,
+                    current_source_id,
+                    photo_s3_paths,
+                    photo_hashes_list,
+                    photo_dedup_fingerprints=photo_dedups_list,
+                )
                 imported_asanas += 1
             
             # Обновляем прогресс

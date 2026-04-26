@@ -21,5 +21,8 @@ COPY . .
 RUN touch ontology_updated.owl && \
     chmod 666 ontology_updated.owl
 
+RUN chmod +x docker-entrypoint.sh
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
 # Запускаем через uvicorn напрямую
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
