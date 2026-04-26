@@ -1,6 +1,8 @@
 # Продовый стек: объединяет ваш текущий compose с актуальной схемой репозитория
 # (отдельный сервис импорта + Redis, маршруты в nginx.prod.conf на asana-import).
 #
+# Теги образов dict-service: DICT_SERVICE_VERSION в /app/.env (CI при деплое выставляет).
+#
 # В .env на сервере должны быть в т.ч.:
 #   SMTP_HOST, URL_NETWORK_SERVER (compose подставляет их в server-module)
 #
@@ -52,7 +54,7 @@ services:
   # Один общий файл онтологии на хосте: не запускайте параллельно тяжёлые импорты в OWL.
   # ============================================
   asana-backend:
-    image: plwatermelon/asana-backend:2.0.6-beta
+    image: plwatermelon/asana-backend:${DICT_SERVICE_VERSION:-2.1.5-beta}
     container_name: asana-backend
     ports:
       - "8000:8000"
@@ -102,7 +104,7 @@ services:
   # При --scale asana-import>1 обязателен общий Redis (REDIS_URL) + healthcheck ниже — иначе статусы и lock OWL расходятся между репликами.
   # Полоска прогресса на сайте: образ asana-backend-import + фронт с опросом status; в логах воркера строка «Redis для import tasks: OK».
   asana-import:
-    image: plwatermelon/asana-backend-import:2.0.6-beta
+    image: plwatermelon/asana-backend-import:${DICT_SERVICE_VERSION:-2.1.5-beta}
     restart: unless-stopped
     environment:
       - POSTGRES_HOST=${DB_HOST:-postgres}
@@ -136,7 +138,7 @@ services:
       - asana-network
 
   asana-frontend:
-    image: plwatermelon/asana-frontend:2.0.6-beta
+    image: plwatermelon/asana-frontend:${DICT_SERVICE_VERSION:-2.1.5-beta}
     container_name: asana-frontend
     ports:
       - "3000:3000"
