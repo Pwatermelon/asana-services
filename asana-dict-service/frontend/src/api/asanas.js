@@ -1,5 +1,17 @@
 import apiClient from './client';
 
+/** Axios по умолчанию ставит application/json — для FormData нужно убрать Content-Type, иначе boundary не подставится. */
+const formDataConfig = {
+  transformRequest: [
+    (data, headers) => {
+      if (data instanceof FormData) {
+        delete headers['Content-Type'];
+      }
+      return data;
+    },
+  ],
+};
+
 export const asanasAPI = {
   getAll: async () => {
     const response = await apiClient.get('/api/asanas');
@@ -57,11 +69,7 @@ export const asanasAPI = {
   },
 
   add: async (formData) => {
-    const response = await apiClient.post('/api/asana', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.post('/api/asana', formData, formDataConfig);
     return response.data;
   },
 
@@ -78,11 +86,7 @@ export const asanasAPI = {
     formData.append('source_id', sourceId);
     
     const shortId = asanaId.split('#').pop().replace('asana_', '');
-    const response = await apiClient.post(`/api/asana/${shortId}/add-photo`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.post(`/api/asana/${shortId}/add-photo`, formData, formDataConfig);
     return response.data;
   },
 
@@ -137,11 +141,36 @@ export const asanasAPI = {
     }
     shortPhotoId = shortPhotoId.replace('photo_', '');
     
-    const response = await apiClient.put(`/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.put(
+      `/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}`,
+      formData,
+      formDataConfig
+    );
+    return response.data;
+  },
+
+  /** degrees: 90 | 180 | 270 — по часовой стрелке (см. бэкенд). */
+  rotatePhoto: async (asanaId, photoId, degrees) => {
+    const formData = new FormData();
+    formData.append('degrees', String(degrees));
+
+    let shortId = asanaId;
+    if (asanaId.includes('#')) {
+      shortId = asanaId.split('#').pop();
+    }
+    shortId = shortId.replace('asana_', '');
+
+    let shortPhotoId = photoId;
+    if (photoId.includes('#')) {
+      shortPhotoId = photoId.split('#').pop();
+    }
+    shortPhotoId = shortPhotoId.replace('photo_', '');
+
+    const response = await apiClient.post(
+      `/api/asana/${encodeURIComponent(shortId)}/photo/${encodeURIComponent(shortPhotoId)}/rotate`,
+      formData,
+      formDataConfig
+    );
     return response.data;
   },
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { sourcesAPI } from '../api/sources';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/SourcesList.css';
@@ -9,6 +9,7 @@ const SourcesList = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const { isExpertOrAdmin } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadSources();
@@ -17,7 +18,7 @@ const SourcesList = () => {
   const loadSources = async () => {
     try {
       const data = await sourcesAPI.getAll();
-      data.sort((a, b) => (a.author || '').localeCompare(b.author || ''));
+      data.sort((a, b) => (a.author || '').localeCompare(b.author || '', 'ru'));
       setSources(data);
     } catch (error) {
       console.error('Error loading sources:', error);
@@ -26,16 +27,30 @@ const SourcesList = () => {
     }
   };
 
-  const handleDelete = async (sourceId, sourceTitle) => {
-    if (!window.confirm(`Вы уверены, что хотите удалить источник "${sourceTitle}"?`)) {
+  const getSourceId = (source) => {
+    const raw = source.id.split('#').pop() || source.id;
+    return String(raw).replace(/^source_/, '');
+  };
+
+  const asanasPath = (source) => `/sources/${getSourceId(source)}/asanas`;
+
+  const rowTitle = (source) => {
+    const bits = [source.title, source.year != null && source.year !== '' ? String(source.year) : null, source.author]
+      .filter(Boolean)
+      .join(' · ');
+    return bits;
+  };
+
+  const handleDelete = async (e, source) => {
+    e.stopPropagation();
+    if (!window.confirm(`Удалить источник «${source.title}»?`)) {
       return;
     }
-
     try {
-      await sourcesAPI.delete(sourceId);
+      await sourcesAPI.delete(source.id);
       loadSources();
     } catch (error) {
-      alert('Ошибка при удалении источника');
+      alert(error.response?.data?.detail || 'Ошибка при удалении источника');
       console.error('Error deleting source:', error);
     }
   };
@@ -46,18 +61,12 @@ const SourcesList = () => {
       loadSources();
       return;
     }
-
     try {
       const results = await sourcesAPI.search(searchQuery);
       setSources(results);
     } catch (error) {
       console.error('Error searching:', error);
     }
-  };
-
-  const getSourceId = (source) => {
-    const id = source.id.split('#').pop();
-    return id.replace('source_', '');
   };
 
   if (loading) {
@@ -68,18 +77,15 @@ const SourcesList = () => {
     <div className="container">
       <div className="page-header">
         <h1 className="page-title">Источники</h1>
-        <p className="page-description">
-          Список источников информации об асанах.
-        </p>
 
-        <div className="search-form-container">
+        <div className="search-form-container sources-search-wrap">
           <form onSubmit={handleSearch} className="search-form">
             <div className="search-input-container">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск источников..."
+                placeholder="Поиск источников…"
                 className="search-input"
               />
               <button type="submit" className="search-button">
@@ -90,51 +96,61 @@ const SourcesList = () => {
         </div>
       </div>
 
-      <div className="sources-grid">
+      <div className="sources-lines">
         {sources.map((source) => (
-          <div key={source.id} className="source-card">
-            <div className="source-header">
-              <h3 className="source-title">{source.title}</h3>
-              <div className="source-author">{source.author}</div>
+          <div key={source.id} className="source-line">
+            <div
+              className="source-line-click"
+              role="button"
+              tabIndex={0}
+              title={rowTitle(source)}
+              onClick={() => navigate(asanasPath(source))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  navigate(asanasPath(source));
+                }
+              }}
+            >
+              <span className="source-line-title">{source.title || '—'}</span>
+              <span className="source-line-sep" aria-hidden>
+                ·
+              </span>
+              <span className="source-line-year">
+                {source.year != null && source.year !== '' ? source.year : '—'}
+              </span>
+              <span className="source-line-sep" aria-hidden>
+                ·
+              </span>
+              <span className="source-line-author">{source.author || '—'}</span>
+              {source.publisher ? (
+                <>
+                  <span className="source-line-sep source-line-sep--soft" aria-hidden>
+                    ·
+                  </span>
+                  <span className="source-line-extra">{source.publisher}</span>
+                </>
+              ) : null}
             </div>
-            <div className="source-content">
-              {source.year && (
-                <div className="source-info">
-                  <strong>Год:</strong> {source.year}
-                </div>
-              )}
-              {source.publisher && (
-                <div className="source-info">
-                  <strong>Издательство:</strong> {source.publisher}
-                </div>
-              )}
-              {source.pages && (
-                <div className="source-info">
-                  <strong>Страниц:</strong> {source.pages}
-                </div>
-              )}
-              {source.annotation && (
-                <div className="source-info">
-                  <strong>Аннотация:</strong> {source.annotation}
-                </div>
-              )}
-            </div>
-            <div className="source-actions">
-              <Link
-                to={`/sources/${getSourceId(source)}/asanas`}
-                className="btn-view"
-              >
-                Просмотр асан
-              </Link>
-              {isExpertOrAdmin && (
+
+            {isExpertOrAdmin && (
+              <div className="source-line-actions" onClick={(e) => e.stopPropagation()}>
+                <Link
+                  to={`/sources/${getSourceId(source)}/edit`}
+                  className="btn-source-line btn-source-line--edit"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Изменить
+                </Link>
                 <button
-                  className="btn-delete"
-                  onClick={() => handleDelete(source.id, source.title)}
+                  type="button"
+                  className="btn-source-line btn-source-line--del"
+                  onClick={(e) => handleDelete(e, source)}
                 >
                   Удалить
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -143,4 +159,3 @@ const SourcesList = () => {
 };
 
 export default SourcesList;
-

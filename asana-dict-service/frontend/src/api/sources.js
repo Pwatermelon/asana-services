@@ -27,6 +27,12 @@ export const sourcesAPI = {
     return response.data;
   },
 
+  update: async (sourceId, sourceData) => {
+    const sid = encodeURIComponent(String(sourceId || ''));
+    const response = await apiClient.put(`/api/sources/${sid}`, sourceData);
+    return response.data;
+  },
+
   delete: async (sourceId) => {
     const response = await apiClient.delete('/api/delete-source', {
       params: { uri: sourceId },

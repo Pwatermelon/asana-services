@@ -126,6 +126,15 @@ const Navbar = () => {
         >
           Каталог
         </Link>
+        {isExpertOrAdmin && (
+          <Link
+            to="/names"
+            className={`${linkClass} ${isActive('/names') ? 'active' : ''}`}
+            onClick={isMobile ? closeMobileMenu : undefined}
+          >
+            Названия
+          </Link>
+        )}
         <Link
           to="/sources"
           className={`${linkClass} ${isActive('/sources') ? 'active' : ''}`}
@@ -186,6 +195,7 @@ const Navbar = () => {
   };
 
   return (
+    <>
     <nav className="navbar">
       <div className="navbar-content">
         <Link to="/" className="navbar-brand">
@@ -264,13 +274,13 @@ const Navbar = () => {
                       <span className="role-value">{getRoleLabel()}</span>
                     </div>
                   )}
-                  {isExpertOrAdmin && (
+                  {isAdmin && (
                     <Link
                       to="/admin"
                       className="user-dropdown-link"
                       onClick={() => setIsDropdownOpen(false)}
                     >
-                      {isAdmin ? 'Админ-панель' : 'Названия асан'}
+                      Админ-панель
                     </Link>
                   )}
                   <button type="button" className="user-dropdown-logout" onClick={handleLogout}>
@@ -294,72 +304,73 @@ const Navbar = () => {
           </button>
         </div>
       </div>
+    </nav>
 
-      {isMobileMenuOpen && (
-        <>
-          <div
-            className="navbar-mobile-backdrop"
-            aria-hidden
-            onClick={closeMobileMenu}
-          />
-          <div
-            id="navbar-mobile-panel"
-            className="navbar-mobile-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Меню навигации"
-          >
-            <div className="navbar-mobile-panel-inner">
-              <div className="navbar-mobile-scroll">
-                {isExpertOrAdmin && (
-                  <div className="navbar-mobile-section">
-                    <div className="navbar-mobile-section-title">Создать</div>
-                    <Link
-                      to="/asana/add"
-                      className="navbar-mobile-link navbar-mobile-link--sub"
-                      onClick={closeMobileMenu}
-                    >
-                      Новая асана
-                    </Link>
-                    <Link
-                      to="/sources/add"
-                      className="navbar-mobile-link navbar-mobile-link--sub"
-                      onClick={closeMobileMenu}
-                    >
-                      Новый источник
-                    </Link>
-                  </div>
-                )}
+    {isMobileMenuOpen && (
+      <>
+        <div
+          className="navbar-mobile-backdrop"
+          aria-hidden
+          onClick={closeMobileMenu}
+        />
+        <div
+          id="navbar-mobile-panel"
+          className="navbar-mobile-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Меню навигации"
+        >
+          <div className="navbar-mobile-panel-inner">
+            <div className="navbar-mobile-scroll">
+              {isExpertOrAdmin && (
                 <div className="navbar-mobile-section">
-                  <div className="navbar-mobile-section-title">Разделы</div>
-                  {renderNavLinks('mobile')}
-                </div>
-                {isAuthenticated && isExpertOrAdmin && (
-                  <div className="navbar-mobile-section">
-                    <Link
-                      to="/admin"
-                      className={`navbar-mobile-link ${isActive('/admin') ? 'active' : ''}`}
-                      onClick={closeMobileMenu}
-                    >
-                      {isAdmin ? 'Админ-панель' : 'Названия асан'}
-                    </Link>
-                  </div>
-                )}
-                {isAuthenticated && (
-                  <button
-                    type="button"
-                    className="navbar-mobile-logout"
-                    onClick={handleLogout}
+                  <div className="navbar-mobile-section-title">Создать</div>
+                  <Link
+                    to="/asana/add"
+                    className="navbar-mobile-link navbar-mobile-link--sub"
+                    onClick={closeMobileMenu}
                   >
-                    Выйти
-                  </button>
-                )}
+                    Новая асана
+                  </Link>
+                  <Link
+                    to="/sources/add"
+                    className="navbar-mobile-link navbar-mobile-link--sub"
+                    onClick={closeMobileMenu}
+                  >
+                    Новый источник
+                  </Link>
+                </div>
+              )}
+              <div className="navbar-mobile-section">
+                <div className="navbar-mobile-section-title">Разделы</div>
+                {renderNavLinks('mobile')}
               </div>
+              {isAuthenticated && isAdmin && (
+                <div className="navbar-mobile-section">
+                  <Link
+                    to="/admin"
+                    className={`navbar-mobile-link ${isActive('/admin') ? 'active' : ''}`}
+                    onClick={closeMobileMenu}
+                  >
+                    Админ-панель
+                  </Link>
+                </div>
+              )}
+              {isAuthenticated && (
+                <button
+                  type="button"
+                  className="navbar-mobile-logout"
+                  onClick={handleLogout}
+                >
+                  Выйти
+                </button>
+              )}
             </div>
           </div>
-        </>
-      )}
-    </nav>
+        </div>
+      </>
+    )}
+    </>
   );
 };
 

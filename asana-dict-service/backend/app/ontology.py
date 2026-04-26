@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 import os
 import base64
+import re
 
 logger = logging.getLogger("asana_service.ontology")
 
@@ -34,6 +35,27 @@ def norm_image_hash_hex(h: Any) -> str:
     if h is None:
         return ""
     return str(h).strip().lower()
+
+
+def _photo_dedup_from_s3_if_missing(photo_path: str, current: Optional[str]) -> Optional[str]:
+    """Если dedup не передали (или пустой), пробуем MinIO + compute (импорт без отпечатка в payload)."""
+    if current and str(current).strip():
+        return str(current).strip()
+    p = str(photo_path or "").strip()
+    if not p.startswith("images/") or "/" not in p:
+        return None
+    try:
+        from app.s3_utils import get_s3_object_bytes
+        from app.photo_dedup import compute_photo_dedup_fingerprint
+
+        raw = get_s3_object_bytes(p)
+        if not raw or len(raw) < 40:
+            return None
+        fp = compute_photo_dedup_fingerprint(raw)
+        return fp.strip() if fp else None
+    except Exception as e:
+        logger.warning("ontology: dedup from S3 failed for %s: %s", p[:120], e)
+        return None
 
 
 def collect_photo_hash_dedup_pairs_for_source(g: Graph, asana_uri: URIRef, source_uri: URIRef) -> List[Tuple[str, str]]:
@@ -215,7 +237,10 @@ def load_asanas_from_graph(g: Graph):
         photos = [p["image"] for p in photos_with_sources if p["image"]]
         
         logger.debug(f"Photos count: {len(photos)}, Sources count: {len(sources_list)}")
-        same_as_ids = [str(o) for o in g.objects(asana, ASANA.isSameAsObject)]
+        # Исходящие и входящие isSameAsObject — в зеркале нужны оба, чтобы граф из БД совпадал с запросами /similar
+        _out = [str(o) for o in g.objects(asana, ASANA.isSameAsObject)]
+        _inc = [str(s) for s in g.subjects(ASANA.isSameAsObject, asana)]
+        same_as_ids = list(dict.fromkeys(_out + _inc))
         asana_data = {
             "id": str(asana),
             "name": name_data,
@@ -391,6 +416,7 @@ def add_asana(
                         if i < len(photo_dedup_fingerprints) and photo_dedup_fingerprints[i]
                         else None
                     )
+                    photo_dedup_raw = _photo_dedup_from_s3_if_missing(photo_path, photo_dedup_raw)
                     path_n = norm_s3_path(photo_path)
                     hash_n = norm_image_hash_hex(photo_hash) if photo_hash else ""
                     dedup_n = norm_dedup_fp(photo_dedup_raw)
@@ -495,6 +521,7 @@ def add_asana(
                         if i < len(photo_dedup_fingerprints) and photo_dedup_fingerprints[i]
                         else None
                     )
+                    photo_dedup_raw = _photo_dedup_from_s3_if_missing(photo_path, photo_dedup_raw)
                     
                     photo_uri = URIRef(f"{ASANA}photo_{uuid.uuid4()}")
                     logger.info(f"[DEBUG ONTOLOGY] Created photo URI: {photo_uri}")
@@ -833,6 +860,62 @@ def delete_any_by_uri(uri: str) -> bool:
 def delete_source_from_ontology(source_id: str) -> bool:
     return delete_any_by_uri(source_id)
 
+
+def _resolve_source_uri(g: Graph, source_id: str) -> Optional[URIRef]:
+    """URI AsanaSource по полному URI или суффиксу (source_UUID)."""
+    try:
+        obj = URIRef(source_id)
+        if (obj, RDF.type, ASANA.AsanaSource) in g:
+            return obj
+    except Exception:
+        pass
+    suffix = (source_id or "").split("_")[-1]
+    for s in g.subjects(RDF.type, ASANA.AsanaSource):
+        if str(s).endswith(suffix):
+            return URIRef(s)
+    return None
+
+
+def update_source_in_ontology(source_id: str, source_data: Dict[str, Any]) -> None:
+    """Обновляет поля существующего источника. URI не меняется."""
+    g = get_graph()
+    su = _resolve_source_uri(g, source_id)
+    if not su:
+        raise ValueError("Источник не найден")
+
+    title = (source_data.get("title") or "").strip()
+    author = (source_data.get("author") or "").strip()
+    if not title or not author:
+        raise ValueError("Название и автор обязательны")
+    year = source_data.get("year")
+    if year is None or str(year).strip() == "":
+        raise ValueError("Год обязателен")
+    year_int = int(year)
+
+    g.remove((su, ASANA.sourseTitle, None))
+    g.add((su, ASANA.sourseTitle, Literal(title)))
+    g.remove((su, ASANA.sourceAuthor, None))
+    g.add((su, ASANA.sourceAuthor, Literal(author)))
+    g.remove((su, ASANA.sourceYear, None))
+    g.add((su, ASANA.sourceYear, Literal(year_int)))
+
+    for pred in (ASANA.sourcePublisher, ASANA.sourcePages, ASANA.sourceAnnotation):
+        g.remove((su, pred, None))
+
+    pub = source_data.get("publisher")
+    if pub and str(pub).strip():
+        g.add((su, ASANA.sourcePublisher, Literal(str(pub).strip())))
+
+    pages = source_data.get("pages")
+    if pages is not None and str(pages).strip() != "":
+        g.add((su, ASANA.sourcePages, Literal(int(pages))))
+
+    ann = source_data.get("annotation")
+    if ann and str(ann).strip():
+        g.add((su, ASANA.sourceAnnotation, Literal(str(ann).strip())))
+
+    _persist_ontology_graph(g)
+
 def delete_asana_name_from_ontology(name_id: str) -> bool:
     g = get_graph()
     name_uri = _resolve_asana_name_uri(g, name_id)
@@ -1051,96 +1134,140 @@ def get_asanas_by_source(source_id: str):
     asanas.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
     return asanas
 
-# Поиск асан по названию (с поддержкой нечеткого поиска)
-def search_asanas_by_name(query: str, fuzzy_threshold: float = 0.7):
-    logger.info(f"Searching asanas with query: {query}")
-    try:
-        from rapidfuzz import fuzz
-        
-        asanas = load_asanas()
-        results = []
-        
-        # Приводим запрос к нижнему регистру для регистронезависимого поиска
-        query_lower = query.lower()
-        
-        for asana in asanas:
-            name_ru = asana["name"]["name_ru"].lower()
-            
-            # Точное совпадение
-            if query_lower in name_ru:
-                asana["match_score"] = 1.0
-                results.append(asana)
-                continue
-                
-            # Нечеткое совпадение
-            ratio = fuzz.ratio(query_lower, name_ru) / 100.0
-            partial_ratio = fuzz.partial_ratio(query_lower, name_ru) / 100.0
-            
-            # Используем максимальный из показателей схожести
-            match_score = max(ratio, partial_ratio)
-            
-            if match_score >= fuzzy_threshold:
-                asana["match_score"] = match_score
-                results.append(asana)
-        
-        # Сортируем результаты по релевантности
-        results.sort(key=lambda a: a["match_score"], reverse=True)
-        
-        logger.info(f"Found {len(results)} asanas matching query: {query}")
-        return results
-    except ImportError:
-        # Если библиотека rapidfuzz не установлена, используем обычный поиск
-        logger.warning("rapidfuzz not installed, using simple search")
-        asanas = load_asanas()
-        query_lower = query.lower()
-        results = [asana for asana in asanas if query_lower in asana["name"]["name_ru"].lower()]
-        logger.info(f"Found {len(results)} asanas matching query: {query}")
-        return results
+_NAME_SPLIT_RE = re.compile(r"[\s\-–—,.;:;]+", re.UNICODE)
 
-def delete_photo_from_asana(asana_id: str, photo_id: str) -> bool:
+
+def _asana_name_tokens(name_ru: str) -> List[str]:
+    s = (name_ru or "").strip().lower()
+    return [t for t in _NAME_SPLIT_RE.split(s) if t]
+
+
+def _catalog_query_tokens(query: str) -> List[str]:
+    s = (query or "").strip().lower()
+    return [t for t in _NAME_SPLIT_RE.split(s) if t]
+
+
+_PREFIX_OK_MIN = 2
+
+
+def _catalog_token_matches_name_word(qt: str, name_tokens: List[str]) -> bool:
+    """Слово из названия равно токену или (если токен ≥2 символов) начинается с токена."""
+    if not qt:
+        return False
+    if any(nw == qt for nw in name_tokens):
+        return True
+    if len(qt) < _PREFIX_OK_MIN:
+        return False
+    return any(nw.startswith(qt) for nw in name_tokens)
+
+
+def _catalog_query_matches_name(name_ru: str, query: str) -> bool:
+    """Каждый токен запроса «привязывается» к какому-то слову в названии (см. _catalog_token_matches_name_word)."""
+    q_tokens = _catalog_query_tokens(query)
+    if not q_tokens:
+        return False
+    name_tokens = _asana_name_tokens(name_ru)
+    if not name_tokens:
+        return False
+    return all(_catalog_token_matches_name_word(qt, name_tokens) for qt in q_tokens)
+
+
+def _catalog_all_tokens_exact_words(name_ru: str, query: str) -> bool:
+    q_tokens = _catalog_query_tokens(query)
+    name_tokens = _asana_name_tokens(name_ru)
+    if not q_tokens or not name_tokens:
+        return False
+    return all(any(nw == qt for nw in name_tokens) for qt in q_tokens)
+
+
+def _catalog_rank_key(name_ru: str, query: str) -> Tuple[int, int, int, str]:
+    """Меньше = раньше: полная строка; все токены точными словами; меньше слов в названии; алфавит."""
+    n = (name_ru or "").strip()
+    q = (query or "").strip()
+    nl = n.lower()
+    words = _asana_name_tokens(n)
+    full = 0 if nl == q.lower() else 1
+    all_exact = 0 if _catalog_all_tokens_exact_words(n, q) else 1
+    return (full, all_exact, len(words), nl)
+
+
+def search_asanas_by_name(query: str, fuzzy_threshold: float = 0.7):
+    """
+    Поиск асан по русскому названию.
+
+    Каждый токен запроса должен совпасть с каким-то словом в названии: либо целиком, либо (если
+    токен не короче 2 символов) слово в названии может начинаться с токена — чтобы «мукх» находило
+    «мукха», в духе подсказок в каталоге. Одиночный символ — только полное совпадение слова.
+
+    Сортировка: полная строка; затем варианты, где все токены — целые слова; меньше слов в названии;
+    алфавит.
+
+    Параметр fuzzy_threshold оставлен для совместимости вызовов, не используется.
+    """
+    logger.info("Searching asanas (word / prefix): %r", query)
+    asanas = load_asanas()
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for asana in asanas:
+        name_ru = asana.get("name", {}).get("name_ru") or ""
+        if not _catalog_query_matches_name(name_ru, q):
+            continue
+        row = dict(asana)
+        row.pop("match_score", None)
+        results.append(row)
+
+    results.sort(key=lambda a: _catalog_rank_key(a.get("name", {}).get("name_ru") or "", q))
+    logger.info("Found %s asanas matching query: %r", len(results), query)
+    return results
+
+def delete_photo_from_asana(asana_id: str, photo_id: str) -> Dict[str, Any]:
     """
     Удаляет фото асаны из онтологии и S3.
-    
-    Args:
-        asana_id: ID асаны
-        photo_id: ID фото (URI фото в онтологии)
-    
+
+    Если после удаления у асаны не остаётся ни одного hasPhoto, удаляется сама асана:
+    иначе find_existing_asana (поиск по фото с источником) её не находит, и из того же
+    источника нельзя снова добавить фото к «пустой» записи.
+
     Returns:
-        True если успешно удалено, False если фото не найдено
+        {"success": False} — фото не найдено или не принадлежит асане
+        {"success": True, "asana_deleted": False} — удалено фото, у асаны ещё есть фото
+        {"success": True, "asana_deleted": True} — удалено последнее фото, запись асаны удалена
     """
     try:
         g = get_graph()
         asana_uri = URIRef(asana_id)
         photo_uri = URIRef(photo_id)
-        
-        # Проверяем, что фото принадлежит асане
+
         if (asana_uri, ASANA.hasPhoto, photo_uri) not in g:
             logger.warning(f"Photo {photo_id} does not belong to asana {asana_id}")
-            return False
-        
-        # Получаем S3 путь перед удалением
+            return {"success": False, "asana_deleted": False}
+
         s3_path = g.value(photo_uri, ASANA.s3PhotoPath)
-        
-        # Удаляем файл из S3, если есть путь
         if s3_path:
             from app.s3_utils import delete_file_from_s3
             delete_file_from_s3(str(s3_path))
             logger.info(f"Deleted photo file from S3: {s3_path}")
-        
-        # Удаляем все триплеты, связанные с фото
-        # Удаляем связь асаны с фото
+
         g.remove((asana_uri, ASANA.hasPhoto, photo_uri))
-        
-        # Удаляем все свойства фото
         g.remove((photo_uri, None, None))
         g.remove((None, None, photo_uri))
-        
-        # Сохраняем онтологию
+
+        remaining = list(g.objects(asana_uri, ASANA.hasPhoto))
+        if not remaining:
+            logger.info(
+                "Last photo removed from asana %s — deleting Asana resource (no photos left)",
+                asana_id,
+            )
+            delete_asana_from_ontology(str(asana_uri))
+            return {"success": True, "asana_deleted": True}
+
         _persist_ontology_graph(g)
-        
         logger.info(f"Successfully deleted photo {photo_id} from asana {asana_id}")
-        return True
-        
+        return {"success": True, "asana_deleted": False}
+
     except Exception as e:
         logger.error(f"Error deleting photo: {str(e)}", exc_info=True)
         raise

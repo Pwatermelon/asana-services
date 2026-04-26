@@ -1,8 +1,81 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  catalogNameSuggestions,
+  dedupeAsanasByDisplayNameRu,
+  filterAsanasByCatalogQuery,
+  normalizeCatalogNameKey,
+} from '../utils/catalogSearch';
+import { CompactAsanaRow } from '../components/CompactAsanaRow';
 import '../styles/AsanasList.css';
+
+/** Поиск по каталогу: подсказки из загруженных асан, поиск по целым словам. */
+function CatalogSearchBar({ asanas, searchQuery, setSearchQuery, onRunSearch }) {
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const suggestions = useMemo(
+    () => catalogNameSuggestions(asanas, searchQuery, 14),
+    [asanas, searchQuery]
+  );
+  const showList =
+    suggestOpen && searchQuery.trim().length >= 1 && suggestions.length > 0;
+
+  return (
+    <div className="search-form-container">
+      <form
+        className="search-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onRunSearch();
+        }}
+      >
+        <div
+          className={`search-input-container${showList ? ' search-input-container--suggest' : ''}`}
+        >
+          <input
+            type="search"
+            enterKeyHint="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setSuggestOpen(true)}
+            onBlur={() => {
+              window.setTimeout(() => setSuggestOpen(false), 200);
+            }}
+            placeholder="Поиск…"
+            className="search-input"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button type="submit" className="search-button">
+            Найти
+          </button>
+          {showList && (
+            <ul className="catalog-search-suggestions" role="listbox" aria-label="Подсказки по названию">
+              {suggestions.map((name) => (
+                <li key={name} role="none">
+                  <button
+                    type="button"
+                    className="catalog-search-suggestion-btn"
+                    role="option"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setSearchQuery(name);
+                      setSuggestOpen(false);
+                      onRunSearch(name);
+                    }}
+                  >
+                    {name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
 
 const AsanasList = () => {
   const [asanas, setAsanas] = useState([]);
@@ -56,7 +129,8 @@ const AsanasList = () => {
     
     const merged = new Map();
     asanas.forEach((asana) => {
-      const nameKey = asana.name?.name_ru?.toLowerCase().trim() || '';
+      const nameKey = normalizeCatalogNameKey(asana.name?.name_ru || '');
+      if (!nameKey) return;
       if (!merged.has(nameKey)) {
         // Берем первую асану как основу, но сохраняем все ID для загрузки на странице деталей
         merged.set(nameKey, {
@@ -89,20 +163,19 @@ const AsanasList = () => {
     return byLetter;
   }, [asanas, isExpertOrAdmin]);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) {
-      setSearchResults(null);
-      return;
-    }
-
-    try {
-      const results = await asanasAPI.search(searchQuery, true);
-      setSearchResults(results);
-    } catch (error) {
-      console.error('Error searching:', error);
-    }
-  };
+  const runCatalogSearch = useCallback(
+    (explicitQuery) => {
+      const raw = explicitQuery !== undefined && explicitQuery !== null ? String(explicitQuery) : searchQuery;
+      const q = raw.trim();
+      if (!q) {
+        setSearchResults(null);
+        return;
+      }
+      const matched = filterAsanasByCatalogQuery(asanas, q);
+      setSearchResults(isExpertOrAdmin ? matched : dedupeAsanasByDisplayNameRu(matched));
+    },
+    [asanas, searchQuery, isExpertOrAdmin]
+  );
 
   const handleDelete = async (asanaId, asanaName) => {
     if (!window.confirm(`Вы уверены, что хотите удалить асану "${asanaName}"?`)) {
@@ -119,11 +192,6 @@ const AsanasList = () => {
     }
   };
 
-  const getAsanaId = (asana) => {
-    const id = asana.id.split('#').pop();
-    return id;
-  };
-
   if (loading) {
     return <div className="container">Загрузка...</div>;
   }
@@ -134,26 +202,13 @@ const AsanasList = () => {
       <div className="container">
         <div className="page-header">
           <h1 className="page-title">Каталог асан</h1>
-          <p className="page-description">
-            Полный каталог асан с описаниями, фотографиями и источниками.
-          </p>
 
-          <div className="search-form-container">
-            <form onSubmit={handleSearch} className="search-form">
-              <div className="search-input-container">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Поиск асан..."
-                  className="search-input"
-                />
-                <button type="submit" className="search-button">
-                  Найти
-                </button>
-              </div>
-            </form>
-          </div>
+          <CatalogSearchBar
+            asanas={asanas}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            onRunSearch={runCatalogSearch}
+          />
         </div>
 
         <div className="alphabet-nav">
@@ -169,14 +224,9 @@ const AsanasList = () => {
           .map(([letter, letterAsanas]) => (
             <div key={letter} className="letter-section" id={`letter-${letter}`}>
               <h2 className="letter-heading">{letter}</h2>
-              <div className="asana-grid">
+              <div className="asana-lines">
                 {letterAsanas.map((asana) => (
-                  <AsanaCard
-                    key={asana.id}
-                    asana={asana}
-                    isExpertOrAdmin={false}
-                    onDelete={handleDelete}
-                  />
+                  <CompactAsanaRow key={asana.id} asana={asana} />
                 ))}
               </div>
             </div>
@@ -185,33 +235,17 @@ const AsanasList = () => {
     );
   }
 
-  // Для админов/экспертов или при поиске - оригинальный вид
-  const displayAsanas = searchResults || Object.values(groupedAsanas).flat();
-
   return (
     <div className="container">
       <div className="page-header">
         <h1 className="page-title">Каталог асан</h1>
-        <p className="page-description">
-          Полный каталог асан с описаниями, фотографиями и источниками.
-        </p>
 
-        <div className="search-form-container">
-          <form onSubmit={handleSearch} className="search-form">
-            <div className="search-input-container">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск асан..."
-                className="search-input"
-              />
-              <button type="submit" className="search-button">
-                Найти
-              </button>
-            </div>
-          </form>
-        </div>
+        <CatalogSearchBar
+          asanas={asanas}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          onRunSearch={runCatalogSearch}
+        />
       </div>
 
       {!searchResults && (
@@ -228,16 +262,24 @@ const AsanasList = () => {
         <div className="letter-section">
           <h2 className="letter-heading">Результаты поиска: {searchQuery}</h2>
           {searchResults.length > 0 ? (
-            <div className="asana-grid">
-              {searchResults.map((asana) => (
-                <AsanaCard
-                  key={asana.id}
-                  asana={asana}
-                  isExpertOrAdmin={isExpertOrAdmin}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
+            isExpertOrAdmin ? (
+              <div className="asana-grid">
+                {searchResults.map((asana) => (
+                  <AsanaCard
+                    key={asana.id}
+                    asana={asana}
+                    isExpertOrAdmin={isExpertOrAdmin}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="asana-lines">
+                {searchResults.map((asana) => (
+                  <CompactAsanaRow key={asana.id} asana={asana} />
+                ))}
+              </div>
+            )
           ) : (
             <div className="no-asanas">
               <p>Асаны не найдены</p>

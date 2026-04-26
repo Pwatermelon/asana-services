@@ -18,7 +18,7 @@ from app.auth import (
 )
 from app.ontology import (
     add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
-    delete_source_from_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology,
+    delete_source_from_ontology, update_source_in_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology,
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
     get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object,
     update_asana_name,
@@ -456,15 +456,9 @@ async def get_source_asanas(source_id: str):
 
 @app.get("/api/asanas/search", tags=["asana"])
 async def search_asanas(query: str, fuzzy: bool = True):
-    """Поиск асан по названию (доступно всем)"""
-    logger.info(f"Searching asanas with query: {query}, fuzzy: {fuzzy}")
-    if fuzzy:
-        asanas = search_asanas_by_name(query)
-    else:
-        # Простой поиск по подстроке
-        all_asanas = load_asanas()
-        asanas = [a for a in all_asanas if query.lower() in a["name"]["ru"].lower()]
-    
+    """Поиск асан по названию (доступно всем). Совпадение только целых слов; fuzzy в запросе игнорируется."""
+    logger.info(f"Searching asanas with query: {query} (whole-word)")
+    asanas = search_asanas_by_name(query)
     logger.info(f"Found {len(asanas)} asanas matching query: {query}")
     return asanas
 
@@ -810,12 +804,19 @@ async def delete_asana_photo_endpoint(
             photo_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{photo_id}"
         
         from app.ontology import delete_photo_from_asana
-        success = delete_photo_from_asana(asana_id, photo_id)
-        
-        if not success:
+
+        result = delete_photo_from_asana(asana_id, photo_id)
+        if not result.get("success"):
             raise HTTPException(status_code=404, detail="Photo not found or does not belong to this asana")
-        
-        return {"message": "Фото успешно удалено"}
+
+        asana_deleted = bool(result.get("asana_deleted"))
+        message = "Фото успешно удалено."
+        if asana_deleted:
+            message += (
+                " Запись асаны удалена (не осталось фото) — при необходимости создайте асану заново "
+                "из того же источника."
+            )
+        return {"message": message, "asana_deleted": asana_deleted}
     except HTTPException:
         raise
     except Exception as e:
@@ -845,6 +846,25 @@ async def post_source(source: SourceCreate, user: str = Depends(is_expert_or_adm
     except Exception as e:
         logger.error(f"Error adding source: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/sources/{source_id:path}")
+async def put_source(
+    source_id: str,
+    source: SourceCreate,
+    user: str = Depends(is_expert_or_admin),
+):
+    """Обновить источник (только эксперты и админы). source_id — полный URI или короткий id/source_UUID."""
+    logger.info("Updating source %s by user: %s", source_id, user)
+    try:
+        update_source_in_ontology(source_id, source.dict())
+        return {"message": "Источник обновлён"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Error updating source: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.delete("/api/delete-source")
 @app.delete("/api/delete-source/")

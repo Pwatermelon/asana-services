@@ -22,6 +22,7 @@ import Settings from './pages/Settings';
 import Moderation from './pages/Moderation';
 import Users from './pages/Users';
 import Admin from './pages/Admin';
+import AsanaNamesPage from './pages/AsanaNamesPage';
 import ScrollToTop from './components/ScrollToTop';
 
 // Защищенные маршруты
@@ -58,8 +59,6 @@ function App() {
               />
               
               <Route path="/sources" element={<SourcesList />} />
-              <Route path="/sources/:id/asanas" element={<SourceAsanas />} />
-              
               <Route
                 path="/sources/add"
                 element={
@@ -68,6 +67,15 @@ function App() {
                   </ExpertRoute>
                 }
               />
+              <Route
+                path="/sources/:id/edit"
+                element={
+                  <ExpertRoute>
+                    <AddSource />
+                  </ExpertRoute>
+                }
+              />
+              <Route path="/sources/:id/asanas" element={<SourceAsanas />} />
               
               <Route path="/about" element={<AboutProject />} />
               <Route
@@ -96,13 +104,22 @@ function App() {
                   </ExpertRoute>
                 }
               />
-              
+
+              <Route
+                path="/names"
+                element={
+                  <ExpertRoute>
+                    <AsanaNamesPage />
+                  </ExpertRoute>
+                }
+              />
+
               <Route
                 path="/admin"
                 element={
-                  <ExpertRoute>
+                  <AdminRoute>
                     <Admin />
-                  </ExpertRoute>
+                  </AdminRoute>
                 }
               />
               <Route

@@ -356,6 +356,152 @@ def has_source_data(row: Dict[str, Any]) -> bool:
     return any(row.get(field) for field in source_fields)
 
 
+# Импорт только «кандидатов в названия»: поле -> допустимые заголовки (после strip().lower). Порядок колонок любой.
+ASANA_NAMES_HEADER_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "name_ru": (
+        "название",
+        "name",
+        "name_ru",
+        "название асаны",
+        "название асаны (рус)",
+        "название на русском",
+    ),
+    "name_sanskrit": (
+        "санскрит",
+        "name_sanskrit",
+        "sanskrit",
+        "название на санскрите",
+    ),
+    "transliteration": (
+        "транслитерация",
+        "transliteration",
+        "translit",
+    ),
+    "definition": (
+        "определение",
+        "definition",
+    ),
+}
+
+
+def _excel_header_cell_norm(value: Any) -> str:
+    return (str(value).strip().lower() if value is not None else "")
+
+
+def _asana_names_field_for_header(norm: str) -> Optional[str]:
+    for field, aliases in ASANA_NAMES_HEADER_ALIASES.items():
+        if norm in aliases:
+            return field
+    return None
+
+
+def _asana_names_resolve_header_columns(ws) -> Dict[str, int]:
+    """Сопоставляет поле -> индекс колонки (1-based). Нужны все четыре поля из ASANA_NAMES_HEADER_ALIASES."""
+    max_col = int(ws.max_column or 0)
+    found: Dict[str, int] = {}
+    unknown: List[Tuple[int, str]] = []
+    for col_idx in range(1, max_col + 1):
+        raw = ws.cell(row=1, column=col_idx).value
+        if raw is None or not str(raw).strip():
+            continue
+        norm = _excel_header_cell_norm(raw)
+        field = _asana_names_field_for_header(norm)
+        if field is None:
+            unknown.append((col_idx, str(raw).strip()))
+            continue
+        if field in found:
+            a = get_column_letter(found[field])
+            b = get_column_letter(col_idx)
+            raise ValueError(f"Дублируется колонка для «{field}»: заголовки в {a}1 и {b}1.")
+        found[field] = col_idx
+    if unknown:
+        parts = [f"{get_column_letter(c)}«{t}»" for c, t in unknown[:10]]
+        tail = " …" if len(unknown) > 10 else ""
+        hint = "; ".join(f"{k}: {', '.join(v)}" for k, v in ASANA_NAMES_HEADER_ALIASES.items())
+        raise ValueError(
+            "Неизвестные заголовки (импорт только названий, без источников/фото): "
+            f"{', '.join(parts)}{tail}. Допустимые поля: {hint}"
+        )
+    required = tuple(ASANA_NAMES_HEADER_ALIASES.keys())
+    missing = [k for k in required if k not in found]
+    if missing:
+        labels = ", ".join(required)
+        raise ValueError(
+            f"В строке 1 должны быть заголовки для всех полей ({labels}), по одной колонке на поле. "
+            f"Не хватает колонок: {', '.join(missing)}. "
+            "Одной только колонки «название» / «name» недостаточно — нужны также санскрит, транслитерация и определение "
+            "(ячейки данных могут быть пустыми)."
+        )
+    return found
+
+
+def parse_excel_asana_names_strict(
+    file_path: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> List[Tuple[int, Dict[str, Any]]]:
+    """
+    Первая строка — заголовки; дальше данные. Порядок колонок любой.
+    Обязательны ровно четыре распознанных поля (русское название, санскрит, транслитерация, определение) —
+    см. ASANA_NAMES_HEADER_ALIASES; без полного набора колонок файл не принимается.
+    Чужие непустые заголовки (например «фото», «автор») — ошибка.
+
+    Возвращает пары (номер строки Excel, поля name_ru / name_sanskrit / transliteration / definition).
+    """
+    wb = load_workbook(file_path, data_only=True)
+    ws = wb.active
+    col_map = _asana_names_resolve_header_columns(ws)
+
+    sheet_last_row = int(ws.max_row or 1)
+    parse_total = max(1, sheet_last_row - 1)
+    if progress_callback:
+        try:
+            progress_callback(0, parse_total)
+        except Exception:
+            pass
+
+    rows: List[Tuple[int, Dict[str, Any]]] = []
+    _every = 25
+    for row_offset, row_idx in enumerate(range(2, sheet_last_row + 1), start=0):
+        name_ru = ws.cell(row=row_idx, column=col_map["name_ru"]).value
+        name_sanskrit = ws.cell(row=row_idx, column=col_map["name_sanskrit"]).value
+        transliteration = ws.cell(row=row_idx, column=col_map["transliteration"]).value
+        definition = ws.cell(row=row_idx, column=col_map["definition"]).value
+
+        if name_ru is None and name_sanskrit is None and transliteration is None and definition is None:
+            continue
+        if isinstance(name_ru, str) and not name_ru.strip():
+            if not any(
+                (v is not None and str(v).strip())
+                for v in (name_sanskrit, transliteration, definition)
+            ):
+                continue
+
+        rows.append(
+            (
+                row_idx,
+                {
+                    "name_ru": name_ru,
+                    "name_sanskrit": name_sanskrit,
+                    "transliteration": transliteration,
+                    "definition": definition,
+                },
+            )
+        )
+        if progress_callback and (len(rows) % _every == 0 or row_offset == 0):
+            try:
+                progress_callback(min(row_offset + 1, parse_total), parse_total)
+            except Exception:
+                pass
+
+    if progress_callback:
+        try:
+            progress_callback(parse_total, parse_total)
+        except Exception:
+            pass
+
+    return rows
+
+
 def parse_excel_file(
     file_path: str,
     progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -1787,10 +1933,11 @@ def run_asana_names_indexed_rows(
 
 def import_asana_names_from_excel(file_path: str, user: Optional[str] = None) -> Dict[str, Any]:
     """
-    Импортирует названия асан из Excel файла.
+    Импортирует названия асан из Excel: в строке 1 должны быть заголовки всех четырёх полей
+    (русское название, санскрит, транслитерация, определение — см. ASANA_NAMES_HEADER_ALIASES), порядок колонок любой.
+    Лишние заголовки и файл полного импорта асан отсекаются.
     """
-    rows = parse_excel_file(file_path)
-    indexed = [(idx, normalize_column_names(row)) for idx, row in enumerate(rows, start=2)]
+    indexed = parse_excel_asana_names_strict(file_path)
     return run_asana_names_indexed_rows(indexed, user=user)
 
 
@@ -1894,8 +2041,8 @@ def export_moderation_to_excel(items: List[Dict[str, Any]]) -> BytesIO:
 
 def export_asana_names_to_excel() -> BytesIO:
     """
-    Выгружает названия асан из онтологии в Excel в том же формате колонок,
-    что ожидает import_asana_names_from_excel (название, санскрит, транслитерация, определение).
+    Выгружает названия асан из онтологии в Excel (колонки по умолчанию: название, санскрит, …).
+    Импорт требует все четыре поля в заголовках (синонимы — ASANA_NAMES_HEADER_ALIASES), порядок колонок любой.
     """
     names = load_asana_names()
     wb = Workbook()

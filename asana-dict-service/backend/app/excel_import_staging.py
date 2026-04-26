@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.excel_import import (
     materialize_embedded_photos_to_staging_payload,
     normalize_column_names,
+    parse_excel_asana_names_strict,
     parse_excel_file,
     run_asana_names_indexed_rows,
     run_asanas_indexed_rows,
@@ -40,7 +41,12 @@ def ingest_excel_to_staging(
     """
     from app.main import SessionLocal
 
-    rows = parse_excel_file(file_path, progress_callback=parse_progress_callback)
+    if mode == "names":
+        name_rows = parse_excel_asana_names_strict(file_path, progress_callback=parse_progress_callback)
+        rows_for_count = name_rows
+    else:
+        name_rows = None
+        rows_for_count = parse_excel_file(file_path, progress_callback=parse_progress_callback)
     session = SessionLocal()
     try:
         batch = ImportBatch(
@@ -49,17 +55,21 @@ def ingest_excel_to_staging(
             source_id=source_id,
             source_mapping=source_mapping,
             status="staged",
-            total_rows=len(rows),
+            total_rows=len(rows_for_count),
             created_at=datetime.now().isoformat(),
         )
         session.add(batch)
         session.flush()
         batch_id = batch.id
-        total = len(rows)
+        total = len(rows_for_count)
         step = max(1, total // 25) if total else 1
-        for i, row in enumerate(rows):
-            idx = i + 2
-            normalized = normalize_column_names(row)
+        row_iter = name_rows if mode == "names" else rows_for_count
+        for i, item in enumerate(row_iter):
+            if mode == "names":
+                idx, normalized = item  # type: ignore[misc]
+            else:
+                idx = i + 2
+                normalized = normalize_column_names(item)
             if staging_progress_callback and total and (i % step == 0 or i == 0):
                 try:
                     staging_progress_callback(i, total, 0.0)
@@ -89,7 +99,7 @@ def ingest_excel_to_staging(
             if (i + 1) % _STAGING_COMMIT_EVERY == 0:
                 session.commit()
         session.commit()
-        logger.info("Staging: batch_id=%s mode=%s rows=%s", batch_id, mode, len(rows))
+        logger.info("Staging: batch_id=%s mode=%s rows=%s", batch_id, mode, total)
         return batch_id
     except Exception:
         session.rollback()

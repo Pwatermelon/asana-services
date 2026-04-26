@@ -197,6 +197,48 @@
   margin-bottom: 0.5em;
 }
 
+.search-input-container--suggest {
+  z-index: 30;
+}
+
+.catalog-search-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.35rem 0;
+  list-style: none;
+  max-height: min(50vh, 16rem);
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  -webkit-overflow-scrolling: touch;
+}
+
+.catalog-search-suggestion-btn {
+  display: block;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  text-align: left;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.catalog-search-suggestion-btn:hover,
+.catalog-search-suggestion-btn:focus-visible {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-color);
+  outline: none;
+}
+
 .search-input {
   flex: 1;
   padding: 0.875em 1.25em;
@@ -472,5 +514,55 @@
     padding-left: 0.75em;
     margin-left: 1em;
   }
+}
+
+/* Компактный список асан (гость / обычный пользователь), в духе списка источников */
+.asana-lines {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--card-background);
+  overflow: hidden;
+}
+
+.asana-line {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.75rem 0.35rem 1rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.asana-line:last-child {
+  border-bottom: none;
+}
+
+.asana-line-click {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  padding: 0.25rem 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+}
+
+.asana-line-click:hover,
+.asana-line-click:focus-visible {
+  color: var(--primary-color);
+  outline: none;
+}
+
+.asana-line-name-ru {
+  display: inline;
+  font-weight: 600;
+  word-break: break-word;
 }
 

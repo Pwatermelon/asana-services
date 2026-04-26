@@ -2,10 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { sourcesAPI } from '../api/sources';
+import { useAuth } from '../contexts/AuthContext';
+import { CompactAsanaRow } from '../components/CompactAsanaRow';
 import '../styles/AsanasList.css';
+import './SourceAsanas.css';
 
 const SourceAsanas = () => {
   const { id } = useParams();
+  const { isExpertOrAdmin } = useAuth();
   const [source, setSource] = useState(null);
   const [asanas, setAsanas] = useState([]);
   const [groupedAsanas, setGroupedAsanas] = useState({});
@@ -61,12 +65,6 @@ const SourceAsanas = () => {
     return <div className="container">Источник не найден</div>;
   }
 
-  const getAsanaId = (asana) => {
-    const id = asana.id.split('#').pop();
-    // Сохраняем asana_ для правильного поиска в AsanaDetail
-    return id; // Не удаляем asana_, оставляем как есть
-  };
-
   return (
     <div className="container">
       <div className="page-header">
@@ -75,8 +73,12 @@ const SourceAsanas = () => {
         </h1>
         <p className="page-description">
           Автор: {source.author}
-          {source.year && ` • ${source.year}`}
+          {source.year != null && source.year !== '' && ` • ${source.year}`}
+          {source.publisher && ` • ${source.publisher}`}
         </p>
+        {source.annotation ? (
+          <p className="page-description source-asanas-annotation">{source.annotation}</p>
+        ) : null}
       </div>
 
       <div className="alphabet-nav">
@@ -92,38 +94,46 @@ const SourceAsanas = () => {
         .map(([letter, letterAsanas]) => (
           <div key={letter} className="letter-section" id={`letter-${letter}`}>
             <h2 className="letter-heading">{letter}</h2>
-            <div className="asana-grid">
-              {letterAsanas.map((asana) => (
-                <div key={asana.id} className="asana-card">
-                  <div className="asana-image">
-                    {asana.photo ? (
-                      <img
-                        src={asana.photo.startsWith('http') || asana.photo.startsWith('data:') ? asana.photo : `data:image/jpeg;base64,${asana.photo}`}
-                        alt={asana.name?.name_ru}
-                      />
-                    ) : (
-                      <div className="no-image">Нет фото</div>
-                    )}
-                  </div>
-                  <div className="asana-content">
-                    <h3 className="asana-title">{asana.name?.name_ru}</h3>
-                    <div className="asana-details">
-                      {asana.name?.name_sanskrit && (
-                        <p className="sanskrit-name">{asana.name.name_sanskrit}</p>
-                      )}
+            {isExpertOrAdmin ? (
+              <div className="asana-grid">
+                {letterAsanas.map((asana) => {
+                  const rawId = asana.id.split('#').pop();
+                  return (
+                    <div key={asana.id} className="asana-card">
+                      <div className="asana-image">
+                        {asana.photo ? (
+                          <img
+                            src={asana.photo.startsWith('http') || asana.photo.startsWith('data:') ? asana.photo : `data:image/jpeg;base64,${asana.photo}`}
+                            alt={asana.name?.name_ru}
+                          />
+                        ) : (
+                          <div className="no-image">Нет фото</div>
+                        )}
+                      </div>
+                      <div className="asana-content">
+                        <h3 className="asana-title">{asana.name?.name_ru}</h3>
+                        <div className="asana-details">
+                          {asana.name?.name_sanskrit && (
+                            <p className="sanskrit-name">{asana.name.name_sanskrit}</p>
+                          )}
+                        </div>
+                        <div className="asana-actions">
+                          <Link to={`/asana/${rawId}-page`} className="btn-view">
+                            Подробнее
+                          </Link>
+                        </div>
+                      </div>
                     </div>
-                    <div className="asana-actions">
-                      <Link
-                        to={`/asana/${getAsanaId(asana)}-page`}
-                        className="btn-view"
-                      >
-                        Подробнее
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="asana-lines">
+                {letterAsanas.map((asana) => (
+                  <CompactAsanaRow key={asana.id} asana={asana} />
+                ))}
+              </div>
+            )}
           </div>
         ))}
     </div>

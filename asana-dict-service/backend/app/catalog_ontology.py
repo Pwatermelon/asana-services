@@ -113,6 +113,9 @@ def build_graph_from_mirror(session: "Session") -> Graph:
                 g.add((photo_uri, ASANA.base64Photo, Literal(str(ph["image"]))))
             if ph.get("photo_hash"):
                 g.add((photo_uri, ASANA.photoHash, Literal(str(ph["photo_hash"]))))
+            dfp = ph.get("photo_dedup_fingerprint")
+            if dfp:
+                g.add((photo_uri, ASANA.photoDedupFingerprint, Literal(str(dfp))))
             src = ph.get("source")
             if src:
                 g.add((photo_uri, ASANA.hasSource, URIRef(src)))

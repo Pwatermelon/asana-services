@@ -22,13 +22,43 @@
   font-weight: 500;
 }
 
+.admin-names-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 2 1 200px;
+  min-width: min(100%, 180px);
+  max-width: min(100%, 400px);
+}
+
+.admin-names-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45em 0.65em;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--card-background, var(--bg-secondary));
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.admin-names-search-input::placeholder {
+  color: var(--text-muted);
+}
+
 .admin-names-sort-wrap {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 200px;
-  max-width: 420px;
+  max-width: 280px;
+}
+
+.admin-names-empty-row {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 1.5rem 12px !important;
 }
 
 .admin-names-sort-label {

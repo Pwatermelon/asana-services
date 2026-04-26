@@ -166,10 +166,11 @@
   min-height: 2.35rem;
 }
 
+/* Вне <nav>: fixed привязан к viewport; z-index выше шапки и типичных модалок страницы */
 .navbar-mobile-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 2140;
+  z-index: 12000;
   background: rgba(15, 23, 42, 0.45);
   animation: navbarBackdropIn 0.2s ease;
 }
@@ -188,7 +189,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 2150;
+  z-index: 12010;
   width: min(20rem, 92vw);
   max-width: 100%;
   background: #ffffff;

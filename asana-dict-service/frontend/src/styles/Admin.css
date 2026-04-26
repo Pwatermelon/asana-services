@@ -5,9 +5,14 @@
 }
 
 .admin-title {
-  margin: 0 0 24px;
-  color: var(--text-primary);
-  font-size: 1.75rem;
+  margin: 0 0 0.5em;
+  font-size: 1.65em;
+  font-weight: 700;
+  line-height: 1.2;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .admin-page-lead {

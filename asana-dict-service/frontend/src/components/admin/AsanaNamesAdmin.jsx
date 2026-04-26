@@ -17,8 +17,9 @@ const AsanaNamesAdmin = () => {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  /** name_asc | name_desc | date_desc | date_asc */
+  /** name_asc | name_desc */
   const [sortBy, setSortBy] = useState('name_asc');
+  const [nameSearch, setNameSearch] = useState('');
 
   const loadNames = useCallback(async () => {
     try {
@@ -122,43 +123,24 @@ const AsanaNamesAdmin = () => {
 
   const displayedNames = useMemo(() => {
     const list = Array.isArray(names) ? [...names] : [];
+    const q = nameSearch.trim().toLowerCase();
+    const filtered = q
+      ? list.filter((row) => {
+          const blob = [row.name_ru, row.name_sanskrit, row.transliteration, row.definition]
+            .filter(Boolean)
+            .join('\n')
+            .toLowerCase();
+          return blob.includes(q);
+        })
+      : list;
     const collator = new Intl.Collator('ru', { sensitivity: 'base' });
-    const ts = (row) => {
-      if (!row.name_created_at) return null;
-      const n = Date.parse(row.name_created_at);
-      return Number.isFinite(n) ? n : null;
-    };
     if (sortBy === 'name_asc') {
-      list.sort((a, b) => collator.compare(a.name_ru || '', b.name_ru || ''));
-    } else if (sortBy === 'name_desc') {
-      list.sort((a, b) => collator.compare(b.name_ru || '', a.name_ru || ''));
-    } else if (sortBy === 'date_desc') {
-      list.sort((a, b) => {
-        const ta = ts(a);
-        const tb = ts(b);
-        if (ta === null && tb === null) return collator.compare(a.name_ru || '', b.name_ru || '');
-        if (ta === null) return 1;
-        if (tb === null) return -1;
-        return tb - ta;
-      });
-    } else if (sortBy === 'date_asc') {
-      list.sort((a, b) => {
-        const ta = ts(a);
-        const tb = ts(b);
-        if (ta === null && tb === null) return collator.compare(a.name_ru || '', b.name_ru || '');
-        if (ta === null) return 1;
-        if (tb === null) return -1;
-        return ta - tb;
-      });
+      filtered.sort((a, b) => collator.compare(a.name_ru || '', b.name_ru || ''));
+    } else {
+      filtered.sort((a, b) => collator.compare(b.name_ru || '', a.name_ru || ''));
     }
-    return list;
-  }, [names, sortBy]);
-
-  const formatCreatedAt = (iso) => {
-    if (!iso) return '—';
-    const d = new Date(iso);
-    return Number.isFinite(d.getTime()) ? d.toLocaleString('ru-RU') : '—';
-  };
+    return filtered;
+  }, [names, sortBy, nameSearch]);
 
   if (loading) {
     return <div className="loading">Загрузка названий...</div>;
@@ -169,10 +151,29 @@ const AsanaNamesAdmin = () => {
   return (
     <div className="users-page admin-nested">
       <div className="users-header users-header--with-action">
-        <span className="admin-toolbar-meta">Всего записей: {names.length}</span>
+        <span className="admin-toolbar-meta">
+          {nameSearch.trim()
+            ? `Найдено: ${displayedNames.length} из ${names.length}`
+            : `Всего записей: ${names.length}`}
+        </span>
+        <div className="admin-names-search-wrap">
+          <label htmlFor="asana-names-search" className="admin-names-sort-label">
+            Поиск
+          </label>
+          <input
+            id="asana-names-search"
+            type="search"
+            className="admin-names-search-input"
+            placeholder="Русский, санскрит, транслит, определение…"
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
         <div className="admin-names-sort-wrap">
           <label htmlFor="asana-names-sort" className="admin-names-sort-label">
-            Сортировка:
+            Сортировка
           </label>
           <select
             id="asana-names-sort"
@@ -182,20 +183,12 @@ const AsanaNamesAdmin = () => {
           >
             <option value="name_asc">По алфавиту (А → Я)</option>
             <option value="name_desc">По алфавиту (Я → А)</option>
-            <option value="date_desc">По дате добавления (новые сверху)</option>
-            <option value="date_asc">По дате добавления (старые сверху)</option>
           </select>
         </div>
         <button type="button" className="btn-primary" onClick={openCreate}>
           Добавить название
         </button>
       </div>
-      <p className="admin-hint">
-        Добавление, изменение и удаление доступны эксперту и администратору. Массовый импорт и
-        выгрузка в Excel — в разделе «Настройки». Удаление невозможно, пока название используется в
-        асанах. Для записей без даты в базе (старые данные) в колонке даты показывается «—»; такие
-        строки при сортировке по дате оказываются в конце списка.
-      </p>
 
       {error && (
         <div className="error-message admin-error-dismissible">
@@ -214,11 +207,19 @@ const AsanaNamesAdmin = () => {
               <th>Санскрит</th>
               <th>Транслитерация</th>
               <th>Определение</th>
-              <th>Дата добавления</th>
               <th>Действия</th>
             </tr>
           </thead>
           <tbody>
+            {displayedNames.length === 0 && (
+              <tr>
+                <td colSpan={5} className="admin-names-empty-row">
+                  {nameSearch.trim()
+                    ? 'Ничего не найдено — измените запрос поиска.'
+                    : 'Нет записей.'}
+                </td>
+              </tr>
+            )}
             {displayedNames.map((row) => (
               <tr key={row.id}>
                 <td>{row.name_ru}</td>
@@ -232,7 +233,6 @@ const AsanaNamesAdmin = () => {
                     ? `${row.definition.slice(0, 80)}${row.definition.length > 80 ? '…' : ''}`
                     : '—'}
                 </td>
-                <td className="cell-nowrap-muted">{formatCreatedAt(row.name_created_at)}</td>
                 <td>
                   <div className="table-action-group">
                     <button type="button" className="btn-edit" onClick={() => openEdit(row)}>

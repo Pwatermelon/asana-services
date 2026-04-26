@@ -1,21 +1,55 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { sourcesAPI } from '../api/sources';
 import '../styles/AddSource.css';
 
 const AddSource = () => {
-  const [formData, setFormData] = useState({
-    title: '',
-    author: '',
-    year: '',
-    publisher: '',
-    pages: '',
-    annotation: '',
-  });
+  const { id: editId } = useParams();
+  const isEdit = Boolean(editId);
+  const [formData, setFormData] = useState(emptyForm);
+  const [sourceUri, setSourceUri] = useState(null);
+  const [bootLoading, setBootLoading] = useState(isEdit);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isEdit) {
+      setBootLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await sourcesAPI.getById(editId);
+        if (cancelled) return;
+        if (!s) {
+          setError('Источник не найден');
+          setBootLoading(false);
+          return;
+        }
+        setSourceUri(s.id);
+        setFormData({
+          title: s.title || '',
+          author: s.author || '',
+          year: s.year != null && s.year !== '' ? String(s.year) : '',
+          publisher: s.publisher || '',
+          pages: s.pages != null && s.pages !== '' ? String(s.pages) : '',
+          annotation: s.annotation || '',
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e.response?.data?.detail || 'Не удалось загрузить источник');
+        }
+      } finally {
+        if (!cancelled) setBootLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, editId]);
 
   const handleChange = (e) => {
     setFormData({
@@ -29,32 +63,47 @@ const AddSource = () => {
     setError('');
     setLoading(true);
 
+    const sourceData = {
+      title: formData.title,
+      author: formData.author,
+      year: parseInt(formData.year, 10),
+      publisher: formData.publisher?.trim() || null,
+      pages: formData.pages ? parseInt(formData.pages, 10) : null,
+      annotation: formData.annotation?.trim() || null,
+    };
+
     try {
-      const sourceData = {
-        title: formData.title,
-        author: formData.author,
-        year: parseInt(formData.year),
-        publisher: formData.publisher || null,
-        pages: formData.pages ? parseInt(formData.pages) : null,
-        annotation: formData.annotation || null,
-      };
-      await sourcesAPI.add(sourceData);
+      if (isEdit) {
+        await sourcesAPI.update(sourceUri || editId, sourceData);
+      } else {
+        await sourcesAPI.add(sourceData);
+      }
       setSuccess(true);
       setTimeout(() => {
         navigate('/sources');
-      }, 2000);
-    } catch (error) {
-      setError(error.response?.data?.detail || 'Ошибка при добавлении источника');
+      }, 1200);
+    } catch (err) {
+      setError(err.response?.data?.detail || (isEdit ? 'Ошибка при сохранении' : 'Ошибка при добавлении'));
     } finally {
       setLoading(false);
     }
   };
 
+  if (bootLoading) {
+    return (
+      <div className="container">
+        <div className="form-container">Загрузка…</div>
+      </div>
+    );
+  }
+
   if (success) {
     return (
       <div className="container">
         <div className="form-container">
-          <div className="success-message">Источник успешно добавлен!</div>
+          <div className="success-message">
+            {isEdit ? 'Источник сохранён.' : 'Источник добавлен.'}
+          </div>
         </div>
       </div>
     );
@@ -63,10 +112,7 @@ const AddSource = () => {
   return (
     <div className="container">
       <div className="page-header">
-        <h1 className="page-title">Добавление нового источника</h1>
-        <p className="page-description">
-          Заполните форму для добавления источника в каталог
-        </p>
+        <h1 className="page-title">{isEdit ? 'Изменение источника' : 'Новый источник'}</h1>
       </div>
 
       <div className="form-container">
@@ -162,7 +208,15 @@ const AddSource = () => {
 
           <div className="form-actions">
             <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? 'Добавление...' : 'Добавить источник'}
+              {loading ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Добавить источник'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => navigate('/sources')}
+              disabled={loading}
+            >
+              Отмена
             </button>
           </div>
         </form>
@@ -172,4 +226,3 @@ const AddSource = () => {
 };
 
 export default AddSource;
-
