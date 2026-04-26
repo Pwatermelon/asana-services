@@ -147,9 +147,9 @@ jobs:
             printf '\nDICT_SERVICE_VERSION=%s\n' "${VERSION}" >> .env
           fi
           export DICT_SERVICE_VERSION="${VERSION}"
-          docker compose pull asana-backend asana-import asana-frontend
-          docker compose down
-          docker compose up -d --scale asana-import=3
+          sudo docker-compose pull asana-backend asana-import asana-frontend
+          sudo docker-compose down
+          sudo docker-compose up -d --scale asana-import=3
           sleep 2
-          docker compose exec -T nginx nginx -s reload 2>/dev/null || true
+          sudo docker-compose exec -T nginx nginx -s reload 2>/dev/null || true
           REMOTE_SCRIPT

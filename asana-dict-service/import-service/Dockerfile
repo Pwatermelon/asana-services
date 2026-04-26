@@ -1,4 +1,4 @@
-# Сборка из корня asana-dict-service: docker compose build asana-import
+# Сборка из корня asana-dict-service: docker-compose build asana-import
 # Копируется общий пакет app (онтология, excel, БД) + только код МС import_service.
 
 FROM python:3.11-slim
