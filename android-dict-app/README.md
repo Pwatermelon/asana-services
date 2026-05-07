@@ -15,6 +15,7 @@
 
 ## 📋 Требования
 
+
 - Android Studio Hedgehog или новее
 - JDK 17
 - Min SDK: 24 (Android 7.0)
