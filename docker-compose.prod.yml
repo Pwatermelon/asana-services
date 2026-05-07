@@ -247,6 +247,28 @@ services:
       - asana-network
 
   # ============================================
+  # Первичная выдача/переиспользование сертификата при деплое
+  # Запускается one-shot перед nginx.
+  # ============================================
+  certbot-init:
+    image: certbot/certbot
+    container_name: certbot-init
+    command: >
+      certonly --standalone
+      --non-interactive --agree-tos --no-eff-email
+      --keep-until-expiring
+      --email ${LETSENCRYPT_EMAIL}
+      -d catalog-asan.ru -d www.catalog-asan.ru
+    ports:
+      - "80:80"
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    restart: "no"
+    networks:
+      - asana-network
+
+  # ============================================
   # Nginx для проксирования с SSL
   # ============================================
   nginx:
@@ -260,12 +282,20 @@ services:
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
     depends_on:
-      - asana-frontend
-      - asana-backend
-      - asana-import
-      - redis
-      - server-module
-      - certbot
+      certbot-init:
+        condition: service_completed_successfully
+      asana-frontend:
+        condition: service_started
+      asana-backend:
+        condition: service_started
+      asana-import:
+        condition: service_started
+      redis:
+        condition: service_started
+      server-module:
+        condition: service_started
+      certbot:
+        condition: service_started
     networks:
       - asana-network
     restart: unless-stopped
