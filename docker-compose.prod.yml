@@ -60,7 +60,7 @@ services:
       - "8000:8000"
     restart: unless-stopped
     environment:
-      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://katalog-asan.online/images}
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - EXPERT_USERNAME=${EXPERT_USERNAME:-expert}
@@ -125,7 +125,7 @@ services:
       - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
-      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://katalog-asan.online/images}
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
       - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
     depends_on:
       postgres:

@@ -24,10 +24,10 @@
 
 1. **Настройка адреса сервера** в `app/build.gradle.kts`:
 ```kotlin
-buildConfigField("String", "API_BASE_URL", "\"https://katalog-asan.online\"")
+buildConfigField("String", "API_BASE_URL", "\"https://catalog-asan.ru\"")
 ```
 
-   - **Производственный сервер:** `https://katalog-asan.online` (уже настроено)
+   - **Производственный сервер:** `https://catalog-asan.ru` (уже настроено)
    - **Для локальной разработки:**
      - Эмулятор: `http://10.0.2.2:80` (10.0.2.2 - специальный IP для доступа к хосту из эмулятора)
      - Реальное устройство: `http://192.168.1.X:80` (IP вашего компьютера в локальной сети)

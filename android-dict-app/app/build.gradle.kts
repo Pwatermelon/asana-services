@@ -23,9 +23,9 @@ android {
         }
 
         // API Base URL
-        // Производственный сервер: https://katalog-asan.online
+        // Производственный сервер: https://catalog-asan.ru
         // Для локальной разработки используйте: http://10.0.2.2:80 (эмулятор) или http://ВАШ_IP:80 (реальное устройство)
-        buildConfigField("String", "API_BASE_URL", "\"https://katalog-asan.online\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://catalog-asan.ru\"")
     }
 
     buildTypes {
