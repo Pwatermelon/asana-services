@@ -73,26 +73,26 @@ body {
 
 .main-content {
   flex: 1;
-  /* Запас под двухстрочную шапку, если пункты переносятся (без горизонтального скролла) */
-  padding-top: 100px;
+  /* Минимальный зазор под фиксированный navbar (двухстрочный бренд + ссылки) */
+  padding-top: clamp(4rem, 4.15rem + 0.55vw, 4.65rem);
 }
 
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1rem 1.25rem 1.5rem;
+  padding: 0.25rem 1.25rem 1.25rem;
 }
 
 .page-header {
-  margin-bottom: 1rem;
-  padding-bottom: 0.75rem;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.4rem;
   border-bottom: 1px solid var(--border-light);
 }
 
 .page-title {
   font-size: 1.65em;
   font-weight: 700;
-  margin-bottom: 0.35em;
+  margin-bottom: 0.22em;
   color: var(--text-primary);
   background: var(--gradient-primary);
   -webkit-background-clip: text;
@@ -305,11 +305,11 @@ textarea::placeholder {
 
 @media (max-width: 768px) {
   .main-content {
-    padding-top: 78px;
+    padding-top: clamp(3.85rem, 4rem + 1.2vw, 4.45rem);
   }
 
   .container {
-    padding: 0.85rem 0.9rem 1.25rem;
+    padding: 0.2rem 0.9rem 1.05rem;
   }
 
   .page-title {

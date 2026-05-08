@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { asanasAPI } from '../api/asanas';
 import { useAuth } from '../contexts/AuthContext';
 import { normalizeCatalogNameKey } from '../utils/catalogSearch';
+import { asanaPagePath } from '../components/CompactAsanaRow';
 import '../styles/AsanaDetail.css';
 
 /** Единый ключ id асаны для сравнения (полный URI, #asana_uuid, asana_uuid). */
@@ -23,11 +24,22 @@ function combinedSameAsForOwner(ownerAsana, pageAsana, allAsanas, similarAsanasF
   const my = canonicalAsanaId(ownerAsana.id);
   const map = new Map();
 
+  const byCanon = new Map();
+  if (allAsanas?.length) {
+    for (const a of allAsanas) {
+      const k = canonicalAsanaId(a.id);
+      if (k) byCanon.set(k, a);
+    }
+  }
+
+  /** Всегда подмешивать полную запись из каталога, иначе /similar без sources даёт несколько одинаковых строк «Халасана». */
   const put = (obj) => {
     if (!obj?.id) return;
     const k = canonicalAsanaId(obj.id);
     if (!k || k === my) return;
-    if (!map.has(k)) map.set(k, obj);
+    const full = byCanon.get(k);
+    const merged = full ? { ...obj, ...full, id: full.id ?? obj.id } : obj;
+    if (!map.has(k)) map.set(k, merged);
   };
 
   const ownerIsPage =
@@ -37,11 +49,6 @@ function combinedSameAsForOwner(ownerAsana, pageAsana, allAsanas, similarAsanasF
   }
 
   if (allAsanas?.length) {
-    const byCanon = new Map();
-    for (const a of allAsanas) {
-      const k = canonicalAsanaId(a.id);
-      if (k) byCanon.set(k, a);
-    }
     const tryAddRaw = (raw) => {
       const k = canonicalAsanaId(raw);
       if (!k || k === my || map.has(k)) return;
@@ -54,7 +61,12 @@ function combinedSameAsForOwner(ownerAsana, pageAsana, allAsanas, similarAsanasF
       if (refs.some((ref) => canonicalAsanaId(ref) === my)) tryAddRaw(o.id);
     }
   }
-  return Array.from(map.values());
+
+  return Array.from(map.values()).map((obj) => {
+    const k = canonicalAsanaId(obj.id);
+    const full = k ? byCanon.get(k) : null;
+    return full ? { ...obj, ...full, id: full.id ?? obj.id } : obj;
+  });
 }
 
 /** Гость: только связи, у которых русское название отличается от названия группы (страница по имени). */
@@ -65,6 +77,88 @@ function filterGuestSameAsDifferentGroupName(links, groupNameKey) {
     const sk = normalizeCatalogNameKey(s.name?.name_ru || '');
     return gk === '' || sk !== gk;
   });
+}
+
+function captionFromSourceDoc(s) {
+  if (!s) return '';
+  return (
+    [s.author, s.title].filter(Boolean).join(' — ') +
+    (s.year != null && s.year !== '' ? ` (${s.year})` : '')
+  );
+}
+
+/** Первое непустое «автор — название (год)» среди источников записи или у фото. */
+function pickEditionCaptionFromRecord(sim) {
+  if (!sim) return '';
+  for (const s of sim.sources || []) {
+    const line = captionFromSourceDoc(s);
+    if (line) return line;
+  }
+  for (const photo of sim.photos || []) {
+    if (photo == null || typeof photo !== 'object') continue;
+    const embed = photo.source;
+    if (typeof embed !== 'object' || !embed) continue;
+    const fromPhoto = captionFromSourceDoc(embed);
+    if (fromPhoto) return fromPhoto;
+  }
+  return '';
+}
+
+function catalogIdFallbackLabel(sim) {
+  const raw =
+    typeof sim?.id === 'string' ? sim.id.split('#').pop() || String(sim.id) : '';
+  const short = raw.replace(/^asana_/i, '').replace(/^[^:]+:\s*\/?\/?#?\/?/i, '') || raw;
+  if (short && short !== 'undefined') return `Каталожная запись · ${short}`;
+  return 'источник не указан';
+}
+
+/** Вторая строка в списке «под другими названиями»: всегда различает записи даже при одном русском названии. */
+function catalogRecordSecondaryParts(sim) {
+  const edition = pickEditionCaptionFromRecord(sim);
+  const secondary = edition || catalogIdFallbackLabel(sim);
+  return { secondary, muted: !edition };
+}
+
+/** Одна строка: одно русское название — справа все различающиеся издания (несколько записей каталога с тем же имени). */
+function groupLightboxOtherNamesByDisplayRu(variants) {
+  if (!variants?.length) return [];
+  const map = new Map();
+  for (const sim of variants) {
+    const nk = normalizeCatalogNameKey(sim.name?.name_ru || '');
+    const key = nk || `__id_${canonicalAsanaId(sim.id)}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key,
+        nameRu: (sim.name?.name_ru || '').trim() || 'Асана',
+        items: [],
+      };
+      map.set(key, g);
+    }
+    g.items.push(sim);
+    const nm = (sim.name?.name_ru || '').trim();
+    if (nm && g.nameRu === 'Асана') g.nameRu = nm;
+  }
+  const out = [];
+  for (const g of map.values()) {
+    const seen = new Set();
+    const editionLines = [];
+    for (const sim of g.items) {
+      const parts = catalogRecordSecondaryParts(sim);
+      if (!seen.has(parts.secondary)) {
+        seen.add(parts.secondary);
+        editionLines.push({ secondary: parts.secondary, muted: parts.muted });
+      }
+    }
+    const rep = [...g.items].sort((a, b) =>
+      canonicalAsanaId(a.id).localeCompare(canonicalAsanaId(b.id))
+    )[0];
+    out.push({ ...g, editionLines, linkTarget: rep });
+  }
+  out.sort((a, b) =>
+    (a.nameRu || '').localeCompare(b.nameRu || '', 'ru', { sensitivity: 'base' })
+  );
+  return out;
 }
 
 const AsanaDetail = () => {
@@ -446,13 +540,20 @@ const AsanaDetail = () => {
     return photoData;
   };
 
-  /** HTTP(S) URL картинки с cache-bust: после поворота путь в S3 тот же — без bust браузер/CDN показывают старое. */
+  /** HTTP(S) URL картинки с cache-bust: путь в S3 тот же — нужен меняющийся query. Всегда добавляем photoGalleryVersion: после поворота счётчик растёт сразу, даже если в ответе API ещё старый photo_hash. */
   const galleryImageUrl = (photo) => {
     if (photo == null) return '';
+    const sep = (url) => (url.includes('?') ? '&' : '?');
+    const withBust = (url, hashPart) => {
+      const h = hashPart ? String(hashPart) : '';
+      const v = String(photoGalleryVersion);
+      const bust = h ? `v${v}_${h}` : `v${v}`;
+      return `${url}${sep(url)}_cb=${encodeURIComponent(bust)}`;
+    };
     if (typeof photo === 'string') {
       const u = getPhotoSrc(photo);
       if (!u || typeof u !== 'string' || u.startsWith('data:')) return u;
-      return `${u}${u.includes('?') ? '&' : '?'}_cb=${encodeURIComponent(String(photoGalleryVersion))}`;
+      return withBust(u, '');
     }
     const u =
       typeof photo === 'object' && photo.image ? getPhotoSrc(photo.image) : getPhotoSrc(photo);
@@ -461,8 +562,7 @@ const AsanaDetail = () => {
       (typeof photo === 'object' &&
         (photo.photo_hash || photo.photo_dedup_fingerprint || photo.photoHash)) ||
       '';
-    const bust = hashKey ? String(hashKey) : String(photoGalleryVersion);
-    return `${u}${u.includes('?') ? '&' : '?'}_cb=${encodeURIComponent(bust)}`;
+    return withBust(u, hashKey);
   };
 
   /** Записи с установленным sameAs относительно выбранной сущности (модалка «Соответствия»). */
@@ -729,6 +829,28 @@ const AsanaDetail = () => {
       .slice(0, 20);
   }, [allAsanas, asana, matchSearchQuery, matchSubjectAsanaId]);
 
+  /** Соседние группы каталога по русскому названию (как в списке асан): предыдущая / следующая по алфавиту. */
+  const catalogGroupNeighbors = React.useMemo(() => {
+    if (!allAsanas.length || !asana?.name?.name_ru) return { prevRep: null, nextRep: null };
+    const currentKey = normalizeCatalogNameKey(asana.name.name_ru);
+    if (!currentKey) return { prevRep: null, nextRep: null };
+    const byKey = new Map();
+    for (const a of allAsanas) {
+      const nk = normalizeCatalogNameKey(a.name?.name_ru || '');
+      if (!nk || byKey.has(nk)) continue;
+      byKey.set(nk, a);
+    }
+    const reps = [...byKey.values()].sort((x, y) =>
+      (x.name?.name_ru || '').localeCompare(y.name?.name_ru || '', 'ru', { sensitivity: 'base' })
+    );
+    const idx = reps.findIndex((r) => normalizeCatalogNameKey(r.name?.name_ru || '') === currentKey);
+    if (idx < 0) return { prevRep: null, nextRep: null };
+    return {
+      prevRep: idx > 0 ? reps[idx - 1] : null,
+      nextRep: idx < reps.length - 1 ? reps[idx + 1] : null,
+    };
+  }, [allAsanas, asana]);
+
   if (loading) {
     return <div className="container">Загрузка...</div>;
   }
@@ -757,6 +879,18 @@ const AsanaDetail = () => {
     );
     const firstAsana = asanasWithSameName[0] || asana;
     const lbSlide = userLightboxSlides[userLightboxIndex];
+    const lbSlideOwnerFull =
+      lbSlide &&
+      (allAsanas.find((a) => a.id === lbSlide.ownerId) ||
+        allAsanas.find(
+          (a) => canonicalAsanaId(a.id) === canonicalAsanaId(lbSlide.ownerId)
+        ));
+    const lightboxNameSubtitle =
+      lbSlideOwnerFull &&
+      normalizeCatalogNameKey(lbSlideOwnerFull.name?.name_ru || '') !==
+        normalizeCatalogNameKey(firstAsana?.name?.name_ru || '')
+        ? lbSlideOwnerFull.name?.name_ru
+        : null;
 
     const similarPreviewSrc = (similar) => {
       if (similar.photos?.length) {
@@ -851,7 +985,33 @@ const AsanaDetail = () => {
       <div className="container">
         <div className="asana-detail">
           <div className="asana-header">
-            <h1 className="asana-title">{firstAsana?.name?.name_ru}</h1>
+            <div className="asana-header-inner">
+              <div className="asana-catalog-step-slot asana-catalog-step-slot--prev">
+                {catalogGroupNeighbors.prevRep ? (
+                  <button
+                    type="button"
+                    className="asana-catalog-step-btn"
+                    aria-label={`Предыдущая асана: ${catalogGroupNeighbors.prevRep.name?.name_ru || ''}`}
+                    onClick={() => navigate(asanaPagePath(catalogGroupNeighbors.prevRep))}
+                  >
+                    ← Назад
+                  </button>
+                ) : null}
+              </div>
+              <h1 className="asana-title asana-title--header-center">{firstAsana?.name?.name_ru}</h1>
+              <div className="asana-catalog-step-slot asana-catalog-step-slot--next">
+                {catalogGroupNeighbors.nextRep ? (
+                  <button
+                    type="button"
+                    className="asana-catalog-step-btn"
+                    aria-label={`Следующая асана: ${catalogGroupNeighbors.nextRep.name?.name_ru || ''}`}
+                    onClick={() => navigate(asanaPagePath(catalogGroupNeighbors.nextRep))}
+                  >
+                    Вперёд →
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div className="asana-info">
@@ -933,7 +1093,20 @@ const AsanaDetail = () => {
               }}
             >
               <div className="user-photo-lightbox-topbar">
-                <div className="user-lightbox-more-wrap">
+                <div
+                  className="user-photo-lightbox-topbar-side user-photo-lightbox-topbar-side--left"
+                  aria-hidden="true"
+                />
+                <div className="user-photo-lightbox-topbar-center">
+                  <div className="user-photo-lightbox-catalog-title">
+                    {firstAsana?.name?.name_ru || 'Асана'}
+                  </div>
+                  {lightboxNameSubtitle ? (
+                    <div className="user-photo-lightbox-catalog-subtitle">{lightboxNameSubtitle}</div>
+                  ) : null}
+                </div>
+                <div className="user-photo-lightbox-topbar-side user-photo-lightbox-topbar-side--right">
+                  <div className="user-lightbox-more-wrap">
                   <button
                     type="button"
                     className="user-lightbox-more-btn"
@@ -1006,6 +1179,7 @@ const AsanaDetail = () => {
                 >
                   ×
                 </button>
+                </div>
               </div>
               <div className="user-photo-lightbox-stage">
                 {userLightboxSlides.length > 1 && (
@@ -1185,12 +1359,14 @@ const AsanaDetail = () => {
                       <div className="user-lightbox-source-linked">
                         {lightboxLinkedForSource.map((sim) => {
                           const prev = similarPreviewSrc(sim);
+                          const { secondary, muted } = catalogRecordSecondaryParts(sim);
+                          const subCls = muted
+                            ? 'user-lightbox-linked-card-source user-lightbox-linked-card-source--muted'
+                            : 'user-lightbox-linked-card-source';
                           return (
                             <Link
                               key={sim.id}
-                              to={`/asana/${getAsanaId(sim)}-page?focusOwner=${encodeURIComponent(
-                                canonicalAsanaId(sim.id)
-                              )}`}
+                              to={asanaPagePath(sim)}
                               className="user-lightbox-linked-card"
                               onClick={(e) => e.stopPropagation()}
                             >
@@ -1198,6 +1374,7 @@ const AsanaDetail = () => {
                                 {prev ? <img src={prev} alt="" /> : <span className="user-lightbox-linked-card-empty">—</span>}
                               </div>
                               <span className="user-lightbox-linked-card-name">{sim.name?.name_ru || 'Асана'}</span>
+                              <span className={subCls}>{secondary}</span>
                             </Link>
                           );
                         })}
@@ -1238,16 +1415,32 @@ const AsanaDetail = () => {
                 <div className="user-lightbox-other-sources-strip" onClick={(e) => e.stopPropagation()}>
                   <h4 className="user-lightbox-source-strip-title">Данная асана под другими названиями</h4>
                   <ul className="user-lightbox-other-sources-name-list">
-                    {lightboxOtherSourceVariants.map((sim) => (
-                      <li key={sim.id}>
+                    {groupLightboxOtherNamesByDisplayRu(lightboxOtherSourceVariants).map((g) => (
+                      <li key={g.key} className="user-lightbox-other-source-row">
                         <Link
-                          to={`/asana/${getAsanaId(sim)}-page?focusOwner=${encodeURIComponent(
-                            canonicalAsanaId(sim.id)
-                          )}`}
-                          className="user-lightbox-other-source-name-link"
+                          to={asanaPagePath(g.linkTarget)}
+                          className="user-lightbox-other-source-row-link"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {sim.name?.name_ru || 'Асана'}
+                          <div className="user-lightbox-other-source-row-inner">
+                            <div className="user-lightbox-other-source-name-cell">
+                              <span className="user-lightbox-other-source-row-title-text">{g.nameRu}</span>
+                            </div>
+                            <div className="user-lightbox-other-source-editions-col" aria-label="Издания">
+                              {g.editionLines.map((line, idx) => (
+                                <span
+                                  key={`${g.key}-ed-${idx}`}
+                                  className={
+                                    line.muted
+                                      ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted'
+                                      : 'user-lightbox-other-source-edition'
+                                  }
+                                >
+                                  {line.secondary}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                         </Link>
                       </li>
                     ))}
@@ -1457,21 +1650,14 @@ const AsanaDetail = () => {
                         {sim.name?.name_sanskrit && (
                           <div className="asana-sameas-links-sa">{sim.name.name_sanskrit}</div>
                         )}
-                        {sim.sources?.[0] && (
-                          <div className="asana-sameas-links-source">
-                            {sim.sources[0].author}
-                            {sim.sources[0].year != null && sim.sources[0].year !== ''
-                              ? ` (${sim.sources[0].year})`
-                              : ''}
-                          </div>
-                        )}
+                        <div className="asana-sameas-links-source">
+                          {catalogRecordSecondaryParts(sim).secondary}
+                        </div>
                       </div>
                       <div className="asana-sameas-links-item-actions">
                         <Link
                           className="btn-secondary asana-sameas-links-open"
-                          to={`/asana/${getAsanaId(sim)}-page?focusOwner=${encodeURIComponent(
-                            canonicalAsanaId(sim.id)
-                          )}`}
+                          to={asanaPagePath(sim)}
                           onClick={() => {
                             setShowSameAsLinksModal(false);
                             setSameAsLinksSubjectId(null);

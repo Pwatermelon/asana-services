@@ -2,19 +2,55 @@
   background: var(--card-background);
   border-radius: 12px;
   box-shadow: var(--shadow-sm);
-  margin: 0.75rem 0 1.25rem;
-  padding: 1.25em 1.5em;
+  margin: 0.2rem 0 1.25rem;
+  padding: 1rem 1.35em;
   border: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  gap: 1.15em;
+  gap: 0.65em;
 }
 
 .asana-header {
+  margin-bottom: 0.35em;
+  width: 100%;
+}
+
+.asana-header-inner {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 1em;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.asana-catalog-step-slot {
+  flex: 0 0 5.85rem;
+  display: flex;
+  align-items: center;
+}
+
+.asana-catalog-step-slot--prev {
+  justify-content: flex-start;
+}
+
+.asana-catalog-step-slot--next {
+  justify-content: flex-end;
+}
+
+.asana-catalog-step-btn {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 0.38rem 0.55rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.asana-catalog-step-btn:hover {
+  background: var(--background-alt);
+  border-color: var(--primary-color);
 }
 
 .asana-title {
@@ -29,6 +65,11 @@
   margin: 0;
 }
 
+.asana-title--header-center {
+  flex: 1 1 auto;
+  text-align: center;
+}
+
 .admin-actions {
   display: flex;
   gap: 1em;
@@ -38,12 +79,12 @@
 .asana-info {
   display: flex;
   flex-direction: column;
-  gap: 1em;
+  gap: 0.55em;
 }
 
 .detail-section {
-  margin-bottom: 1em;
-  padding-bottom: 1em;
+  margin-bottom: 0.65em;
+  padding-bottom: 0.65em;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -54,7 +95,8 @@
 .detail-title {
   font-size: 1.15em;
   font-weight: 700;
-  margin-bottom: 0.65em;
+  margin-top: 0.15em;
+  margin-bottom: 0.4em;
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -231,10 +273,20 @@
 }
 
 @media (max-width: 768px) {
-  .asana-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1em;
+  .asana-header-inner {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+    justify-content: center;
+  }
+
+  .asana-catalog-step-slot {
+    flex-basis: auto;
+  }
+
+  .asana-title--header-center {
+    order: -1;
+    flex: 1 0 100%;
+    text-align: center;
   }
 
   .photo-gallery {
@@ -243,9 +295,9 @@
   }
   
   .asana-detail {
-    padding: 1.5em;
-    margin: 1em 0;
-    gap: 1.5em;
+    padding: 1em 1.15em;
+    margin: 0.45rem 0 1rem;
+    gap: 0.85em;
     border-radius: 12px;
   }
   
@@ -254,13 +306,14 @@
   }
   
   .detail-section {
-    margin-bottom: 1.5em;
-    padding-bottom: 1.5em;
+    margin-bottom: 0.75em;
+    padding-bottom: 0.75em;
   }
   
   .detail-title {
     font-size: 1.25em;
-    margin-bottom: 1em;
+    margin-top: 0.1em;
+    margin-bottom: 0.45em;
   }
   
   .detail-item {
@@ -735,7 +788,8 @@
 }
 
 .user-gallery-block .detail-title {
-  margin-bottom: 0.5rem;
+  margin-top: 0;
+  margin-bottom: 0.4rem;
 }
 
 .user-gallery-empty {
@@ -766,6 +820,13 @@
   box-shadow: var(--shadow-md);
   background: var(--background-alt);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 200px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .user-photo-cell-btn:hover {
@@ -780,9 +841,11 @@
 
 .user-photo-cell-btn img {
   display: block;
-  width: 100%;
-  height: 180px;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 .user-photo-cell-caption {
@@ -921,7 +984,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: stretch;
   gap: 0.35rem;
   width: 100%;
   max-width: min(96vw, 1100px);
@@ -931,6 +994,47 @@
   margin-bottom: 0;
   /* Без отдельной заливки — иначе визуально «вторая» синяя полоса над фото */
   background: transparent;
+}
+
+.user-photo-lightbox-topbar-side {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.user-photo-lightbox-topbar-side--right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.user-photo-lightbox-topbar-center {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(78vw, 36rem);
+  text-align: center;
+  padding: 0 0.25rem;
+}
+
+.user-photo-lightbox-catalog-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: #f8fafc;
+  line-height: 1.3;
+  word-break: break-word;
+  text-align: center;
+}
+
+.user-photo-lightbox-catalog-subtitle {
+  margin-top: 0.2rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: rgba(226, 232, 240, 0.88);
+  line-height: 1.35;
+  word-break: break-word;
+  text-align: center;
 }
 
 .user-lightbox-more-wrap {
@@ -1111,7 +1215,7 @@
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: stretch;
-  gap: 0.2rem;
+  gap: 0.42rem;
   max-width: 100%;
   width: 100%;
 }
@@ -1121,26 +1225,91 @@
   width: 100%;
 }
 
-.user-lightbox-other-source-name-link {
+.user-lightbox-other-source-row {
+  width: 100%;
+}
+
+.user-lightbox-other-source-row-link {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  padding: 0.45rem 0.55rem;
-  border-radius: 8px;
-  color: #c7d2fe;
-  font-size: 0.95rem;
-  font-weight: 500;
   text-decoration: none;
-  text-align: left;
-  line-height: 1.35;
-  transition: background 0.15s ease, color 0.15s ease;
+  color: inherit;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.user-lightbox-other-source-name-link:hover {
+.user-lightbox-other-source-row-link:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: #eef2ff;
 }
 
+.user-lightbox-other-source-row-link:focus-visible {
+  outline: 2px solid rgba(199, 210, 254, 0.65);
+  outline-offset: 2px;
+}
+
+.user-lightbox-other-source-row-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem 0.85rem;
+  padding: 0.48rem 0.55rem;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.user-lightbox-other-source-name-cell {
+  flex: 1 1 auto;
+  min-width: min(10.5rem, 100%);
+  max-width: 100%;
+}
+
+.user-lightbox-other-source-row-title-text {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #e0e7ff;
+  line-height: 1.42;
+}
+
+.user-lightbox-other-source-row-link:hover .user-lightbox-other-source-row-title-text {
+  color: #f8fafc;
+}
+
+.user-lightbox-other-source-editions-col {
+  flex: 1 1 14rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+  text-align: right;
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .user-lightbox-other-source-row-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .user-lightbox-other-source-editions-col {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+
+.user-lightbox-other-source-edition {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(224, 231, 255, 0.95);
+  line-height: 1.42;
+}
+
+.user-lightbox-other-source-edition--muted {
+  color: rgba(199, 210, 254, 0.78);
+  font-style: normal;
+}
 
 .user-lightbox-other-sources-scroll {
   display: flex;
@@ -1519,12 +1688,17 @@
   overflow: hidden;
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(148, 163, 184, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .user-lightbox-linked-card-photo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
   display: block;
 }
 
@@ -1539,6 +1713,17 @@
 }
 
 .user-lightbox-linked-card-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.user-lightbox-linked-card-source {
+  font-size: 0.62rem;
+  color: rgba(226, 232, 240, 0.75);
+  line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -1574,6 +1759,15 @@
 }
 
 @media (max-width: 640px) {
+  .asana-catalog-step-slot {
+    flex-basis: 4.65rem;
+  }
+
+  .asana-catalog-step-btn {
+    font-size: 0.78rem;
+    padding: 0.35rem 0.4rem;
+  }
+
   .user-photo-lightbox-nav--prev {
     left: 0;
   }
