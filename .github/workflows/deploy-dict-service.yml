@@ -1,4 +1,4 @@
-# Сборка dict-service (backend, import, frontend), push в Docker Hub и деплой на хост.
+# Сборка dict-service (backend, import, frontend), образ ИИ (asana-network), push в Docker Hub и деплой на хост.
 #
 # Триггеры:
 #   1) push в main, если в сообщении коммита есть токен «ver <тег>» (например: «release ver 2.0.8-beta»).
@@ -113,6 +113,15 @@ jobs:
           push: true
           tags: plwatermelon/asana-frontend:${{ needs.resolve.outputs.version }}
 
+      - name: AI / network service (YOLO + scan-duplicates)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./asana-network-service
+          file: ./asana-network-service/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: plwatermelon/asana-network:${{ needs.resolve.outputs.version }}
+
   deploy:
     needs: [resolve, build-and-push]
     if: needs.resolve.outputs.deploy == 'true'
@@ -147,7 +156,7 @@ jobs:
             printf '\nDICT_SERVICE_VERSION=%s\n' "${VERSION}" >> .env
           fi
           export DICT_SERVICE_VERSION="${VERSION}"
-          sudo docker-compose pull asana-backend asana-import asana-frontend
+          sudo docker-compose pull asana-backend asana-import asana-frontend server-network
           sudo docker-compose down
           sudo docker-compose up -d --scale asana-import=3
           sleep 2

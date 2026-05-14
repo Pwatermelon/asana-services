@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { moderationAPI } from '../api/moderation';
+import { aiAPI } from '../api/ai';
 import '../styles/Navbar.css';
 
 const Navbar = () => {
@@ -12,6 +13,7 @@ const Navbar = () => {
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [moderationCount, setModerationCount] = useState(0);
+  const [aiPendingCount, setAiPendingCount] = useState(0);
   const dropdownRef = useRef(null);
   const addMenuRef = useRef(null);
 
@@ -44,6 +46,27 @@ const Navbar = () => {
       };
     }
     return undefined;
+  }, [isExpertOrAdmin]);
+
+  // Счётчик ИИ-модерации (количество предложений в статусе pending)
+  useEffect(() => {
+    if (!isExpertOrAdmin) return undefined;
+    const loadAiPendingCount = async () => {
+      try {
+        const data = await aiAPI.getPendingCount();
+        setAiPendingCount(data?.count || 0);
+      } catch (error) {
+        console.error('Error loading AI moderation count:', error);
+      }
+    };
+    loadAiPendingCount();
+    const interval = setInterval(loadAiPendingCount, 30000);
+    const onAiUpdated = () => loadAiPendingCount();
+    window.addEventListener('ai-moderation-updated', onAiUpdated);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('ai-moderation-updated', onAiUpdated);
+    };
   }, [isExpertOrAdmin]);
 
   useEffect(() => {
@@ -169,6 +192,30 @@ const Navbar = () => {
                 Требует модерации
                 {moderationCount > 0 && (
                   <span className="moderation-badge">{moderationCount}</span>
+                )}
+              </>
+            )}
+          </Link>
+        )}
+        {isExpertOrAdmin && (
+          <Link
+            to="/ai-moderation"
+            className={`${linkClass} ${isActive('/ai-moderation') ? 'active' : ''}`}
+            onClick={isMobile ? closeMobileMenu : undefined}
+            title="Модерация связей isSameAs, найденных нейросетью"
+          >
+            {isMobile ? (
+              <>
+                <span className="navbar-mobile-link-text">ИИ</span>
+                {aiPendingCount > 0 && (
+                  <span className="moderation-badge">{aiPendingCount}</span>
+                )}
+              </>
+            ) : (
+              <>
+                ИИ
+                {aiPendingCount > 0 && (
+                  <span className="moderation-badge">{aiPendingCount}</span>
                 )}
               </>
             )}

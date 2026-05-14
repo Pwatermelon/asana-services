@@ -14,8 +14,14 @@ from minio import Minio
 from minio.error import S3Error
 
 from app.config import (
-    HOST_MINIO, PORT_MINIO, USER_MINIO, PASSWORD_MINIO,
-    NAME_BUCKET_IMAGES_MINIO, MINIO_URL_PREFIX, logger
+    HOST_MINIO,
+    PORT_MINIO,
+    USER_MINIO,
+    PASSWORD_MINIO,
+    NAME_BUCKET_IMAGES_MINIO,
+    MINIO_URL_PREFIX,
+    S3_IMPORT_STAGING_PREFIX,
+    logger,
 )
 
 
@@ -346,6 +352,105 @@ def delete_file_from_s3(s3_path: str) -> bool:
     except Exception as e:
         logger.error(f"[DEBUG S3] Unexpected error deleting file from S3: {e}", exc_info=True)
         return False
+
+
+def promote_import_staging_s3_path_if_needed(
+    s3_path: str,
+    *,
+    fail_if_staging_missing: bool = True,
+) -> str:
+    """
+    Если в онтологии остался временный ключ Excel-импорта (images/import-staging/…),
+    копирует байты в images/asans/<uuid>.<ext> и удаляет объект в staging.
+
+    Зачем: staging может быть очищен или том MinIO пересоздан — тогда ссылки в OWL
+    дают 404 (ИИ-скан, дедуп, превью). Постоянный префикс asans/ — ожидаемое
+    хранилище карточек каталога.
+
+    Если путь не staging — возвращает исходную строку без изменений.
+    Если объекта в staging нет: при fail_if_staging_missing=True бросает ValueError,
+    иначе возвращает исходный путь (для миграций / ручного обхода).
+    """
+    p = (s3_path or "").strip().replace("\\", "/")
+    if not p:
+        return p
+    if not p.startswith(NAME_BUCKET_IMAGES_MINIO + "/"):
+        if p.startswith(NAME_BUCKET_IMAGES_MINIO):
+            p = f"{NAME_BUCKET_IMAGES_MINIO}/{p[len(NAME_BUCKET_IMAGES_MINIO):].lstrip('/')}"
+        else:
+            p = f"{NAME_BUCKET_IMAGES_MINIO}/{p.lstrip('/')}"
+
+    staging_root = f"{NAME_BUCKET_IMAGES_MINIO}/{S3_IMPORT_STAGING_PREFIX}/"
+    if not p.startswith(staging_root):
+        return p
+
+    parts = p.split("/", 1)
+    bucket_name = parts[0]
+    object_name = parts[1] if len(parts) > 1 else ""
+    if not object_name or not object_name.startswith(f"{S3_IMPORT_STAGING_PREFIX}/"):
+        return p
+
+    try:
+        minio_client = get_minio_client()
+        try:
+            stat = minio_client.stat_object(bucket_name, object_name)
+        except S3Error as e:
+            if getattr(e, "code", "") == "NoSuchKey":
+                msg = (
+                    f"S3-объект импорта не найден (возможно, staging очищен): "
+                    f"{bucket_name}/{object_name}"
+                )
+                logger.error("[DEBUG S3] promote_import_staging: %s", msg)
+                if fail_if_staging_missing:
+                    raise ValueError(msg) from e
+                return p
+            raise
+
+        resp = minio_client.get_object(bucket_name, object_name)
+        try:
+            raw = resp.read()
+        finally:
+            resp.close()
+            resp.release_conn()
+
+        if not raw or len(raw) < 8:
+            msg = f"S3-объект staging пустой или слишком короткий: {bucket_name}/{object_name}"
+            logger.error("[DEBUG S3] promote_import_staging: %s", msg)
+            if fail_if_staging_missing:
+                raise ValueError(msg)
+            return p
+
+        file_extension, content_type = detect_image_format(raw)
+        ext = f".{file_extension}" if file_extension else ""
+        new_object = f"asans/{uuid.uuid4()}{ext}"
+        minio_client.put_object(
+            bucket_name,
+            new_object,
+            BytesIO(raw),
+            length=len(raw),
+            content_type=content_type,
+        )
+        minio_client.remove_object(bucket_name, object_name)
+        new_path = f"{bucket_name}/{new_object}"
+        logger.info(
+            "[DEBUG S3] promote_import_staging: %s -> %s (etag=%s)",
+            p,
+            new_path,
+            getattr(stat, "etag", ""),
+        )
+        return new_path
+    except ValueError:
+        raise
+    except S3Error as e:
+        logger.error("[DEBUG S3] promote_import_staging S3Error: %s", e, exc_info=True)
+        if fail_if_staging_missing:
+            raise ValueError(f"Не удалось перенести фото из staging: {e}") from e
+        return p
+    except Exception as e:
+        logger.error("[DEBUG S3] promote_import_staging: %s", e, exc_info=True)
+        if fail_if_staging_missing:
+            raise ValueError(f"Не удалось перенести фото из staging: {e}") from e
+        return p
 
 
 def delete_all_objects_with_prefix(bucket_name: str, object_key_prefix: str) -> int:

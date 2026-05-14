@@ -10,6 +10,7 @@ import json
 import uuid
 import asyncio
 from datetime import datetime
+import httpx
 from starlette.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -24,6 +25,7 @@ from app.ontology import (
     update_asana_name,
     collect_photo_hash_dedup_pairs_for_source,
     rotate_photo_in_asana,
+    migrate_staging_s3_photo_paths_in_ontology,
 )
 from app.moderation_photo import (
     enrich_moderation_import_data,
@@ -33,7 +35,7 @@ from app.moderation_photo import (
 from app.config import logger, NAME_BUCKET_IMAGES_MINIO, S3_IMPORT_STAGING_PREFIX
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem
+from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem, AISimilarityProposal
 from sqlalchemy import create_engine, func, asc, desc
 from sqlalchemy.orm import sessionmaker
 from app import config
@@ -183,6 +185,7 @@ def init_database():
         from sqlalchemy import text
         from app.models import (
             AboutProject,
+            AISimilarityProposal,
             CatalogMirrorItem,
             CatalogSyncState,
             ExpertInstructions,
@@ -210,6 +213,7 @@ def init_database():
                             CatalogMirrorItem.__table__,
                             ImportBatch.__table__,
                             ImportStagingRow.__table__,
+                            AISimilarityProposal.__table__,
                         ],
                     )
                 finally:
@@ -222,22 +226,53 @@ def init_database():
             raise
 
 # Создаем записи о проекте и инструкции, если их нет
+def _load_seed_markdown(filename: str, fallback: str) -> str:
+    """
+    Ищет MD-сидер по нескольким путям-кандидатам:
+    - /app/seed_content/<filename> (volume в docker-compose);
+    - ../<original_name> относительно backend/ (локальный запуск без docker).
+    Если ничего не нашли — возвращает короткий fallback.
+    """
+    candidate_paths = [
+        os.path.join("/app/seed_content", filename),
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", filename
+        ),
+    ]
+    for path in candidate_paths:
+        try:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if content:
+                    logger.info("Loaded seed content from %s", path)
+                    return content
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to read seed content %s: %s", path, e)
+    return fallback
+
+
 def create_default_content():
-    """Создание контента по умолчанию"""
+    """Создание контента по умолчанию (только если запись отсутствует)."""
     db = SessionLocal()
-    
-    if not db.query(AboutProject).first():
-        about = AboutProject(content="О проекте каталога асан")
-        db.add(about)
-        logger.info("Created default about project content")
-    
-    if not db.query(ExpertInstructions).first():
-        instructions = ExpertInstructions(content="Инструкция для экспертов")
-        db.add(instructions)
-        logger.info("Created default expert instructions")
-    
-    db.commit()
-    db.close()
+    try:
+        if not db.query(AboutProject).first():
+            content = _load_seed_markdown(
+                "about_project.md", fallback="О проекте каталога асан"
+            )
+            db.add(AboutProject(content=content))
+            logger.info("Created default about project content")
+
+        if not db.query(ExpertInstructions).first():
+            content = _load_seed_markdown(
+                "expert_instructions.md", fallback="Инструкция для экспертов"
+            )
+            db.add(ExpertInstructions(content=content))
+            logger.info("Created default expert instructions")
+
+        db.commit()
+    finally:
+        db.close()
 
 def add_moderation_columns_if_needed():
     """Добавляет новые колонки в таблицу moderation_items, если их нет"""
@@ -327,6 +362,46 @@ def run_application_startup() -> None:
                 run_sync_with_new_session()
             except Exception as sync_err:
                 logger.warning("Синхронизация зеркала после очистки асан без фото: %s", sync_err)
+
+    # Перенос s3PhotoPath из import-staging в images/asans/ при старте (только asana-backend;
+    # у asana-import в compose OWL_MIGRATE_STAGING_PHOTOS_ON_START=false).
+    if os.getenv("OWL_MIGRATE_STAGING_PHOTOS_ON_START", "true").lower() in ("1", "true", "yes"):
+        db_mig = SessionLocal()
+        lease_mig = False
+        try:
+            from app.catalog_sync import acquire_owl_write_lease, release_owl_write_lease
+
+            acquire_owl_write_lease(db_mig)
+            lease_mig = True
+            stats = migrate_staging_s3_photo_paths_in_ontology()
+            promoted = int(stats.get("promoted_and_rewritten", 0) or 0)
+            orphan = int(stats.get("staging_paths_file_missing_in_s3", 0) or 0)
+            if promoted or orphan:
+                logger.info(
+                    "Стартовая миграция staging→asans: переписано путей=%s, staging в OWL без файла в S3=%s",
+                    promoted,
+                    orphan,
+                )
+            if promoted:
+                try:
+                    from app.catalog_sync import run_sync_with_new_session
+
+                    run_sync_with_new_session()
+                except Exception as sync_err:
+                    logger.warning("Синхронизация зеркала после миграции staging: %s", sync_err)
+        except Exception as mig_err:
+            logger.warning(
+                "Стартовая миграция staging→asans пропущена из-за ошибки: %s",
+                mig_err,
+                exc_info=True,
+            )
+        finally:
+            if lease_mig:
+                try:
+                    release_owl_write_lease(db_mig)
+                except Exception as rel_err:
+                    logger.warning("release_owl_write_lease после миграции staging: %s", rel_err)
+            db_mig.close()
 
     logger.info("Application startup completed successfully")
 
@@ -998,6 +1073,66 @@ async def update_expert_instructions(data: TextContent, user: str = Depends(is_a
     db.close()
     return {"message": "Expert instructions updated successfully"}
 
+
+@app.post("/api/about-project/reset-from-md")
+async def reset_about_project_from_md(user: str = Depends(is_admin)):
+    """Принудительно перезаписать «О проекте» актуальным содержимым MD-сидера."""
+    content = _load_seed_markdown("about_project.md", fallback="")
+    if not content:
+        raise HTTPException(status_code=404, detail="MD-файл сидера не найден")
+    db = SessionLocal()
+    try:
+        about = db.query(AboutProject).first()
+        if not about:
+            db.add(AboutProject(content=content))
+        else:
+            about.content = content
+        db.commit()
+    finally:
+        db.close()
+    logger.info("About project content reset from MD by %s", user)
+    return {"message": "About project обновлён из MD-сидера", "length": len(content)}
+
+
+@app.post("/api/expert-instructions/reset-from-md")
+async def reset_expert_instructions_from_md(user: str = Depends(is_admin)):
+    """Принудительно перезаписать «Инструкции» актуальным содержимым MD-сидера."""
+    content = _load_seed_markdown("expert_instructions.md", fallback="")
+    if not content:
+        raise HTTPException(status_code=404, detail="MD-файл сидера не найден")
+    db = SessionLocal()
+    try:
+        instructions = db.query(ExpertInstructions).first()
+        if not instructions:
+            db.add(ExpertInstructions(content=content))
+        else:
+            instructions.content = content
+        db.commit()
+    finally:
+        db.close()
+    logger.info("Expert instructions content reset from MD by %s", user)
+    return {"message": "Expert instructions обновлён из MD-сидера", "length": len(content)}
+
+
+@app.post("/api/ontology/migrate-staging-photos", tags=["ontology"])
+async def post_migrate_staging_photos(user: str = Depends(is_admin)):
+    """
+    Разово переносит в MinIO все фото с ключом import-staging в images/asans/…
+    и обновляет s3PhotoPath в онтологии. Нужно для старых данных, где в OWL
+    ошибочно остались временные пути после импорта Excel.
+
+    Записи, для которых файла в staging уже нет, не меняются — в ответе
+    staging_paths_file_missing_in_s3.
+    """
+    try:
+        stats = migrate_staging_s3_photo_paths_in_ontology()
+    except Exception as e:
+        logger.error("migrate_staging_photos: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("migrate_staging_photos by %s: %s", user, stats)
+    return stats
+
+
 # API для модерации
 @app.get("/api/moderation/items")
 async def get_moderation_items(
@@ -1464,6 +1599,295 @@ async def remove_asana_same_as(
     except Exception as e:
         logger.error(f"Error removing same as object: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# AI / модерация isSameAs от нейросети
+# Сервис asana-network-service сканирует фото каталога и предлагает связи
+# isSameAsObject между асанами с одинаковыми (с точностью до поворота) фото
+# или с одинаковым предсказанным классом yoga-82. Эксперт/админ подтверждает
+# или отклоняет каждое предложение.
+# ============================================
+
+class AIScanRequest(BaseModel):
+    use_yoga_class: bool = True
+    yoga_class_threshold: float = 0.55
+    skip_existing_links: bool = True
+
+
+def _serialize_proposal(item: AISimilarityProposal) -> Dict[str, Any]:
+    return {
+        "id": item.id,
+        "asana_a_id": item.asana_a_id,
+        "asana_b_id": item.asana_b_id,
+        "photo_a_id": item.photo_a_id,
+        "photo_b_id": item.photo_b_id,
+        "score": float(item.score or 0.0),
+        "reason": item.reason,
+        "detail": item.detail,
+        "status": item.status,
+        "created_at": item.created_at,
+        "reviewed_at": item.reviewed_at,
+        "reviewed_by": item.reviewed_by,
+    }
+
+
+def _enrich_proposal_with_asanas(
+    proposal: Dict[str, Any], asana_index: Dict[str, Dict[str, Any]]
+) -> Dict[str, Any]:
+    a = asana_index.get(proposal.get("asana_a_id") or "") or {}
+    b = asana_index.get(proposal.get("asana_b_id") or "") or {}
+
+    def _find_photo(asana: Dict[str, Any], photo_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not asana or not photo_id:
+            return None
+        for p in asana.get("photos") or []:
+            if p.get("id") == photo_id:
+                return p
+        return None
+
+    def _source_for_photo(
+        asana: Dict[str, Any], photo: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Возвращает источник, к которому привязано конкретное фото внутри асаны.
+        Это важно: при одном русском названии асаны разные источники ⇒ разные
+        записи в каталоге, и эксперту нужно видеть, из какой книги пришла каждая
+        сторона предложения isSameAs.
+        """
+        if not asana:
+            return None
+        sources = asana.get("sources") or []
+        src_uri = (photo or {}).get("source") if photo else None
+        if src_uri:
+            for s in sources:
+                if s.get("id") == src_uri:
+                    return {
+                        "id": s.get("id"),
+                        "title": s.get("title") or "",
+                        "author": s.get("author") or "",
+                        "year": s.get("year"),
+                    }
+            return {"id": src_uri, "title": "", "author": "", "year": None}
+        # Запасной вариант — первый источник асаны (если photo_id не нашёлся).
+        if sources:
+            s = sources[0]
+            return {
+                "id": s.get("id"),
+                "title": s.get("title") or "",
+                "author": s.get("author") or "",
+                "year": s.get("year"),
+            }
+        return None
+
+    def _short(asana: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": asana.get("id"),
+            "name_ru": (asana.get("name") or {}).get("name_ru") or "",
+            "name_sanskrit": (asana.get("name") or {}).get("name_sanskrit") or "",
+        }
+
+    photo_a = _find_photo(a, proposal.get("photo_a_id"))
+    photo_b = _find_photo(b, proposal.get("photo_b_id"))
+
+    def _photo_url(asana: Dict[str, Any], found_photo: Optional[Dict[str, Any]]) -> Optional[str]:
+        if found_photo and found_photo.get("image"):
+            return found_photo.get("image")
+        photos = (asana or {}).get("photos") or []
+        return photos[0].get("image") if photos else None
+
+    proposal["asana_a"] = _short(a) if a else {"id": proposal.get("asana_a_id")}
+    proposal["asana_b"] = _short(b) if b else {"id": proposal.get("asana_b_id")}
+    proposal["photo_a_url"] = _photo_url(a, photo_a)
+    proposal["photo_b_url"] = _photo_url(b, photo_b)
+    proposal["source_a"] = _source_for_photo(a, photo_a)
+    proposal["source_b"] = _source_for_photo(b, photo_b)
+    return proposal
+
+
+@app.post("/api/ai/scan", tags=["ai"])
+async def ai_scan(
+    payload: AIScanRequest = AIScanRequest(),
+    user: str = Depends(is_expert_or_admin),
+):
+    """
+    Запускает сканирование каталога нейросетью и кладёт найденные кандидаты
+    isSameAs в очередь модерации. Возвращает агрегированную статистику.
+    """
+    from app.ai_similarity import run_ai_scan_and_save
+
+    logger.info("AI scan: запуск пользователем %s", user)
+    db = SessionLocal()
+    try:
+        stats = run_ai_scan_and_save(
+            db,
+            use_yoga_class=payload.use_yoga_class,
+            yoga_class_threshold=payload.yoga_class_threshold,
+            skip_existing_links=payload.skip_existing_links,
+        )
+        return {"message": "Сканирование завершено", "stats": stats}
+    except httpx.HTTPError as e:
+        logger.error("AI scan: HTTP error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Нейросервис недоступен: {e}")
+    except Exception as e:
+        logger.error("AI scan: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Ошибка сканирования: {e}")
+    finally:
+        db.close()
+
+
+@app.get("/api/ai/proposals", tags=["ai"])
+async def get_ai_proposals(
+    resolved: bool = Query(False, description="false → pending, true → confirmed+rejected"),
+    sort: str = Query("created_at", pattern="^(created_at|score)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(500, ge=1, le=1000),
+    user: str = Depends(is_expert_or_admin),
+):
+    """
+    Список предложений ИИ для модерации.
+
+    - ``resolved=false`` (по умолчанию) — только ``pending``;
+    - ``resolved=true`` — обработанные (``confirmed`` и ``rejected``).
+
+    Сортировка: ``created_at`` (по умолчанию) или ``score``, направление —
+    ``asc``/``desc``. Дополнительно подмешиваем русские названия и URL фото
+    для отображения в интерфейсе.
+    """
+    db = SessionLocal()
+    try:
+        q = db.query(AISimilarityProposal)
+        if resolved:
+            q = q.filter(AISimilarityProposal.status.in_(["confirmed", "rejected"]))
+        else:
+            q = q.filter(AISimilarityProposal.status == "pending")
+
+        sort_col = (
+            AISimilarityProposal.score
+            if sort == "score"
+            else AISimilarityProposal.created_at
+        )
+        q = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+        q = q.limit(limit)
+        rows = [_serialize_proposal(r) for r in q.all()]
+    finally:
+        db.close()
+
+    try:
+        asana_index = {a["id"]: a for a in load_asanas()}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Не удалось загрузить каталог для обогащения предложений: %s", e)
+        asana_index = {}
+
+    enriched = [_enrich_proposal_with_asanas(r, asana_index) for r in rows]
+    return enriched
+
+
+@app.get("/api/ai/proposals/count", tags=["ai"])
+async def get_ai_proposals_count(user: str = Depends(is_expert_or_admin)):
+    """Количество предложений, ожидающих модерации (для бейджа в navbar)."""
+    db = SessionLocal()
+    try:
+        cnt = (
+            db.query(AISimilarityProposal)
+            .filter(AISimilarityProposal.status == "pending")
+            .count()
+        )
+        return {"count": int(cnt or 0)}
+    finally:
+        db.close()
+
+
+@app.patch("/api/ai/proposals/{proposal_id}/confirm", tags=["ai"])
+async def confirm_ai_proposal(
+    proposal_id: int = Path(..., ge=1),
+    user: str = Depends(is_expert_or_admin),
+):
+    """
+    Подтверждает предложение ИИ: создаёт связь isSameAsObject между двумя
+    асанами и помечает предложение как confirmed.
+    """
+    db = SessionLocal()
+    try:
+        item = db.query(AISimilarityProposal).filter(AISimilarityProposal.id == proposal_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Предложение не найдено")
+        if item.status != "pending":
+            raise HTTPException(
+                status_code=400, detail=f"Предложение уже обработано (status={item.status})"
+            )
+        ok = add_same_as_object(item.asana_a_id, item.asana_b_id)
+        if not ok:
+            raise HTTPException(
+                status_code=400,
+                detail="Не удалось установить связь (одна из асан могла быть удалена)",
+            )
+        item.status = "confirmed"
+        item.reviewed_at = datetime.utcnow().isoformat()
+        item.reviewed_by = user
+        db.commit()
+        return {"message": "Связь подтверждена", "proposal": _serialize_proposal(item)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("confirm_ai_proposal error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.patch("/api/ai/proposals/{proposal_id}/reject", tags=["ai"])
+async def reject_ai_proposal(
+    proposal_id: int = Path(..., ge=1),
+    user: str = Depends(is_expert_or_admin),
+):
+    """Отклоняет предложение ИИ — связь не создаётся, заявка снимается с модерации."""
+    db = SessionLocal()
+    try:
+        item = db.query(AISimilarityProposal).filter(AISimilarityProposal.id == proposal_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Предложение не найдено")
+        if item.status != "pending":
+            raise HTTPException(
+                status_code=400, detail=f"Предложение уже обработано (status={item.status})"
+            )
+        item.status = "rejected"
+        item.reviewed_at = datetime.utcnow().isoformat()
+        item.reviewed_by = user
+        db.commit()
+        return {"message": "Предложение отклонено", "proposal": _serialize_proposal(item)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("reject_ai_proposal error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.delete("/api/ai/proposals/all", tags=["ai"])
+async def clear_ai_proposals(
+    only_resolved: bool = Query(False),
+    user: str = Depends(is_expert_or_admin),
+):
+    """Удаляет предложения. По умолчанию очищает всё (как в обычной модерации)."""
+    db = SessionLocal()
+    try:
+        q = db.query(AISimilarityProposal)
+        if only_resolved:
+            q = q.filter(AISimilarityProposal.status.in_(["confirmed", "rejected"]))
+        deleted = q.delete(synchronize_session=False)
+        db.commit()
+        return {"deleted": int(deleted or 0)}
+    except Exception as e:
+        db.rollback()
+        logger.error("clear_ai_proposals error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 
 templates = Jinja2Templates(directory="frontend/app/templates")
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import Column, Integer, String, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Boolean, JSON, Float
 from sqlalchemy.ext.declarative import declarative_base
 from enum import Enum
 from typing import Optional
@@ -161,3 +161,31 @@ class ImportStagingRow(Base):
     batch_id = Column(Integer, nullable=False, index=True)
     row_number = Column(Integer, nullable=False)
     payload = Column(JSON, nullable=False)
+
+
+class AISimilarityProposal(Base):
+    """
+    Предложение от ИИ-модуля (asana-network-service) на установку связи
+    isSameAsObject между двумя асанами на основании совпадения фото или
+    совпадения предсказанного класса позы (yoga-82). Модерируется экспертом
+    или администратором: «Подтвердить» вызывает add_same_as_object,
+    «Отклонить» помечает предложение как обработанное.
+    """
+
+    __tablename__ = "ai_similarity_proposals"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    asana_a_id = Column(String(2048), nullable=False, index=True)
+    asana_b_id = Column(String(2048), nullable=False, index=True)
+    photo_a_id = Column(String(2048), nullable=True)
+    photo_b_id = Column(String(2048), nullable=True)
+    score = Column(Float, nullable=False, default=0.0)
+    reason = Column(String(64), nullable=False)  # phash_exact | yoga_class
+    detail = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")  # pending|confirmed|rejected
+    created_at = Column(String(64), nullable=False)
+    reviewed_at = Column(String(64), nullable=True)
+    reviewed_by = Column(String(256), nullable=True)
+    """SHA-256 от (asana_a, asana_b, reason). Защищает от повторной вставки одной и той же пары."""
+    pair_key = Column(String(64), nullable=False, unique=True, index=True)

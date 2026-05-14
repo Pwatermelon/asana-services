@@ -72,11 +72,22 @@ services:
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
       # Только предзагрузка Excel→staging в S3 (не путать с финальным prefix=asans при apply из ячеек)
       - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
+      # URL нейросетевого сервиса для модерации isSameAs (см. server-network ниже)
+      - NETWORK_SERVICE_URL=${NETWORK_SERVICE_URL:-http://server-network:8001}
+      - NETWORK_SERVICE_TIMEOUT=${NETWORK_SERVICE_TIMEOUT:-300}
+      - NETWORK_SERVICE_BATCH_SIZE=${NETWORK_SERVICE_BATCH_SIZE:-200}
     depends_on:
       postgres:
         condition: service_healthy
+      server-network:
+        condition: service_started
     volumes:
       - ./asana-dict-service/backend/ontology_updated.owl:/app/ontology_updated.owl
+      # MD-сидеры контента для страниц «О проекте» и «Инструкции для экспертов».
+      # При первом запуске (пустая БД) backend подложит их содержимое в БД;
+      # дальше админ редактирует тексты через UI, MD больше не подгружается.
+      - ./asana-dict-service/О_ПРОЕКТЕ.md:/app/seed_content/about_project.md:ro
+      - ./asana-dict-service/ИНСТРУКЦИЯ_ДЛЯ_ЭКСПЕРТОВ.md:/app/seed_content/expert_instructions.md:ro
     networks:
       - asana-network
 
@@ -114,6 +125,8 @@ services:
       - CATALOG_SYNC_BACKGROUND=false
       # Не чистить OWL при старте воркера импорта (очистка только на asana-backend)
       - OWL_PURGE_EMPTY_ASANAS_ON_START=false
+      # Миграция staging→asans только на backend (один писатель OWL)
+      - OWL_MIGRATE_STAGING_PHOTOS_ON_START=false
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
       - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
@@ -148,21 +161,33 @@ services:
     networks:
       - asana-network
 
-  # # ============================================
-  # # Сервис с нейронкой (asana-network-service)
-  # # ============================================
-  # server-network:
-  #   build: 
-  #     context: ./asana-network-service
-  #     dockerfile: Dockerfile
-  #   image: server-network
-  #   container_name: server-network
-  #   ports:
-  #     - "8002:8001"
-  #   restart: "always"
-  #   environment:
-  #     - HOST_SERVER=${HOST_NETWORK_SERVER}
-  #     - PORT_SERVER=${PORT_NETWORK_SERVER}
+  # ============================================
+  # Сервис с нейронкой (asana-network-service)
+  # Используется asana-backend для модерации isSameAs:
+  #   POST /ai/scan-duplicates → пакетный поиск похожих фото между разными асанами.
+  # ============================================
+  server-network:
+    platform: linux/amd64
+    build:
+      context: ./asana-network-service
+      dockerfile: Dockerfile
+    image: server-network
+    container_name: server-network
+    ports:
+      - "8002:8001"
+    restart: unless-stopped
+    environment:
+      - HOST_SERVER=${HOST_NETWORK_SERVER:-0.0.0.0}
+      - PORT_SERVER=${PORT_NETWORK_SERVER:-8001}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/network/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - asana-network
+
   
   # ============================================
   # База данных PostgreSQL (общая для всех сервисов)

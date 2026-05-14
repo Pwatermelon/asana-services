@@ -1,6 +1,6 @@
 from rdflib import Graph, Namespace, URIRef, Literal, RDF
 from app import config
-from app.s3_utils import get_s3_url
+from app.s3_utils import get_s3_url, promote_import_staging_s3_path_if_needed
 from typing import Optional, Dict, Any, List, Tuple
 import uuid
 import logging
@@ -99,6 +99,39 @@ def _persist_ontology_graph(g: Graph) -> None:
     from app.catalog_ontology import persist_ontology_graph
 
     persist_ontology_graph(g)
+
+
+def migrate_staging_s3_photo_paths_in_ontology() -> Dict[str, int]:
+    """
+    Проходит по всем triples s3PhotoPath: если путь в import-staging и файл
+    ещё есть в MinIO — копирует в images/asans/…, обновляет литерал в графе,
+    удаляет staging-объект. В OWL не остаётся ссылок на staging (кроме
+    «битых», когда файла в S3 уже нет — их нужно чинить вручную: замена фото).
+    """
+    from app.config import NAME_BUCKET_IMAGES_MINIO, S3_IMPORT_STAGING_PREFIX
+
+    staging_root = f"{NAME_BUCKET_IMAGES_MINIO}/{S3_IMPORT_STAGING_PREFIX}/"
+    g = get_graph()
+    changes: List[Tuple[Any, Any, str]] = []
+    orphan_staging = 0
+    for photo_uri, _pred, lit in g.triples((None, ASANA.s3PhotoPath, None)):
+        old = norm_s3_path(rdf_property_value_str(lit))
+        if not old.startswith(staging_root):
+            continue
+        new = promote_import_staging_s3_path_if_needed(old, fail_if_staging_missing=False)
+        if new != old:
+            changes.append((photo_uri, lit, new))
+        else:
+            orphan_staging += 1
+    for photo_uri, old_lit, new_path in changes:
+        g.remove((photo_uri, ASANA.s3PhotoPath, old_lit))
+        g.add((photo_uri, ASANA.s3PhotoPath, Literal(new_path)))
+    if changes:
+        _persist_ontology_graph(g)
+    return {
+        "promoted_and_rewritten": len(changes),
+        "staging_paths_file_missing_in_s3": orphan_staging,
+    }
 
 
 def ensure_ontology_file_exists():
@@ -361,7 +394,15 @@ def add_asana(
                 logger.error(f"[ERROR ONTOLOGY] Invalid photo path format: {p[:100]}... Expected 'images/...'")
                 logger.error(f"[ERROR ONTOLOGY] Full path: {p}")
                 raise ValueError(f"Invalid photo path format. Expected S3 path (images/...), got: {p[:100]}")
-            valid_paths.append(p)
+            # В OWL не сохраняем временный префикс import-staging — только постоянный images/asans/…
+            p_stored = promote_import_staging_s3_path_if_needed(p)
+            if p_stored != p:
+                logger.info(
+                    "[DEBUG ONTOLOGY] Photo path %d promoted staging → permanent: %s",
+                    idx + 1,
+                    p_stored,
+                )
+            valid_paths.append(p_stored)
             # Сохраняем соответствующий хеш, если есть
             if idx < len(photo_hashes):
                 valid_hashes.append(photo_hashes[idx])
@@ -371,7 +412,7 @@ def add_asana(
                 valid_dedups.append(str(photo_dedup_fingerprints[idx]).strip())
             else:
                 valid_dedups.append(None)
-            logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1} validated successfully: {p}")
+            logger.info(f"[DEBUG ONTOLOGY] Photo path {idx+1} validated successfully: {p_stored}")
         
         photo_paths = valid_paths
         photo_hashes = valid_hashes

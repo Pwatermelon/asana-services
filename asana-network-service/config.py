@@ -2,13 +2,13 @@ import os
 from functools import lru_cache
 from typing import Any
 
-from pydantic.v1 import BaseSettings
 from dotenv import find_dotenv
+from pydantic.v1 import BaseSettings
 
 
 class Settings(BaseSettings):
-    HOST_SERVER: str
-    PORT_SERVER: str
+    HOST_SERVER: str = "0.0.0.0"
+    PORT_SERVER: str = "8001"
 
     def __init__(self, **values: Any):
         super().__init__(**values)

@@ -5,6 +5,7 @@
 #
 # В .env на сервере должны быть в т.ч.:
 #   SMTP_HOST, URL_NETWORK_SERVER (compose подставляет их в server-module)
+#   NETWORK_SERVICE_URL (опционально; по умолчанию http://server-network:8001 внутри сети)
 #
 # Имена и теги образов ниже — ориентир; при необходимости замените сами.
 
@@ -80,9 +81,15 @@ services:
       - ALGORITHM=${ALGORITHM:-HS256}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      # ИИ-сервис (asana-network-service): скан дубликатов / классификация для модерации isSameAs
+      - NETWORK_SERVICE_URL=${NETWORK_SERVICE_URL:-http://server-network:8001}
+      - NETWORK_SERVICE_TIMEOUT=${NETWORK_SERVICE_TIMEOUT:-300}
+      - NETWORK_SERVICE_BATCH_SIZE=${NETWORK_SERVICE_BATCH_SIZE:-200}
     depends_on:
       postgres:
         condition: service_healthy
+      server-network:
+        condition: service_started
     volumes:
       - /app/ontology_updated.owl:/app/ontology_updated.owl
     networks:
@@ -120,6 +127,7 @@ services:
       # Фоновую синхронизацию OWL→БД запускает только asana-backend (один поток на кластер)
       - CATALOG_SYNC_BACKGROUND=false
       - OWL_PURGE_EMPTY_ASANAS_ON_START=false
+      - OWL_MIGRATE_STAGING_PHOTOS_ON_START=false
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
       - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
@@ -150,21 +158,24 @@ services:
     networks:
       - asana-network
 
-  # # ============================================
-  # # Сервис с нейронкой (asana-network-service)
-  # # ============================================
-  # server-network:
-  #   build:
-  #     context: ./asana-network-service
-  #     dockerfile: Dockerfile
-  #   image: server-network
-  #   container_name: server-network
-  #   ports:
-  #     - "8002:8001"
-  #   restart: "always"
-  #   environment:
-  #     - HOST_SERVER=${HOST_NETWORK_SERVER}
-  #     - PORT_SERVER=${PORT_NETWORK_SERVER}
+  # ============================================
+  # Сервис с нейронкой (asana-network-service) — образ из CI: plwatermelon/asana-network:$DICT_SERVICE_VERSION
+  # ============================================
+  server-network:
+    image: plwatermelon/asana-network:${DICT_SERVICE_VERSION:-2.1.5-beta}
+    container_name: server-network
+    restart: unless-stopped
+    environment:
+      - HOST_SERVER=0.0.0.0
+      - PORT_SERVER=8001
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/network/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - asana-network
 
   # ============================================
   # База данных PostgreSQL (общая для всех сервисов)

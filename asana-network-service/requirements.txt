@@ -5,4 +5,5 @@ pillow
 ultralytics
 uvicorn
 boto3
-torch
+imagehash
+requests

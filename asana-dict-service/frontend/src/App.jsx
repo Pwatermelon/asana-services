@@ -23,6 +23,7 @@ import Moderation from './pages/Moderation';
 import Users from './pages/Users';
 import Admin from './pages/Admin';
 import AsanaNamesPage from './pages/AsanaNamesPage';
+import AIModeration from './pages/AIModeration';
 import ScrollToTop from './components/ScrollToTop';
 
 // Защищенные маршруты
@@ -110,6 +111,15 @@ function App() {
                 element={
                   <ExpertRoute>
                     <AsanaNamesPage />
+                  </ExpertRoute>
+                }
+              />
+
+              <Route
+                path="/ai-moderation"
+                element={
+                  <ExpertRoute>
+                    <AIModeration />
                   </ExpertRoute>
                 }
               />
