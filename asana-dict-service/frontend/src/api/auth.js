@@ -42,16 +42,6 @@ export const authAPI = {
     }
   },
 
-  register: async (username, email, password) => {
-    // server-module использует login, mail, password
-    const response = await apiClient.post('/api/auth/registration', {
-      login: username,
-      mail: email,
-      password,
-    });
-    return response.data;
-  },
-
   confirmRegistration: async (token) => {
     // server-module использует GET /api/auth/verify/{token}
     const response = await apiClient.get(`/api/auth/verify/${token}`);
@@ -59,17 +49,43 @@ export const authAPI = {
   },
 
   resetPasswordRequest: async (login) => {
-    // server-module использует GET /api/auth/reset_password_request?login={login}
-    const response = await apiClient.get(`/api/auth/reset_password_request?login=${encodeURIComponent(login)}`);
+    const response = await apiClient.post('/api/auth/reset_password_request', { login });
     return response.data;
   },
 
-  resetPasswordConfirm: async (token, newPassword) => {
-    // server-module использует PATCH /api/auth/reset_password
+  verifyResetCode: async (login, code) => {
+    const response = await apiClient.post('/api/auth/reset_password_verify', { login, code });
+    return response.data;
+  },
+
+  resetPasswordConfirm: async (login, code, newPassword) => {
     const response = await apiClient.patch('/api/auth/reset_password', {
-      token,
+      login,
+      code,
       password: newPassword,
     });
+    return response.data;
+  },
+
+  changeMyPassword: async (currentPassword, newPassword) => {
+    const response = await apiClient.patch('/api/users/me/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return response.data;
+  },
+
+  updateMyAvatar: async (file) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    const response = await apiClient.patch('/api/users/me/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  deleteMyAvatar: async () => {
+    const response = await apiClient.delete('/api/users/me/avatar');
     return response.data;
   },
 

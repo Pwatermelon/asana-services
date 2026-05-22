@@ -13,10 +13,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Сначала ставим CPU-сборку torch — без CUDA-пакетов nvidia_* (на linux/amd64
-# дефолтный torch с PyPI тянет ~3 ГБ обвеса). CPU-сборка ставит torch ~200 МБ
-# и совместима с YOLO-cls inference, который и так бежит на CPU.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1
+# Ставим совместимую CPU-пару torch+torchvision, чтобы ultralytics не апгрейдил их
+# до последних GPU-сборок с nvidia_* пакетами (они и заполняют диск).
+RUN pip install --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.4.1 torchvision==0.19.1
 
 COPY requirements.txt .
 

@@ -17,5 +17,15 @@ class Token(BaseModel):
 
 
 class ResetPasswordDto(BaseModel):
+    login: str
+    code: str
     password: str
-    token: str
+
+
+class ResetPasswordRequestDto(BaseModel):
+    login: str
+
+
+class ResetPasswordVerifyDto(BaseModel):
+    login: str
+    code: str

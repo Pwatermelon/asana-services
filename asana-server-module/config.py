@@ -20,15 +20,19 @@ class Settings(BaseSettings):
     HOST_NETWORK_SERVER: str
 
     SMTP_SERVER: str
-    SMTP_PORT: str
+    SMTP_PORT: str = "587"
     SMTP_USER: str
     SMTP_PASSWORD: str
+    SMTP_FROM: str = ""
 
     HOST_MINIO: str
     PORT_MINIO: str
     USER_MINIO: str
     PASSWORD_MINIO: str
     NAME_BUCKET_IMAGES_MINIO: str
+    MINIO_URL_PREFIX: str = "http://localhost/images"
+
+    PASSWORD_RESET_OTP_TTL_MINUTES: str = "15"
 
     def __init__(self, **values: Any):
         super().__init__(**values)

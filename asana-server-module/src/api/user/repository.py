@@ -1,10 +1,6 @@
-from datetime import datetime
-from urllib.request import Request
-
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.auth.schemas import ResetPasswordDto
 from src.api.request_to_admin_status.schemas import RequestToAdminStatusEnum
 from src.api.user.schemas import UserRegistrationDto
 from src.database.models import User, RequestToAdminStatus
@@ -63,6 +59,26 @@ class UserRepository:
         )
         user = user.scalar_one_or_none()
         user.password = password
+        await session.commit()
+        await session.flush()
+        return user
+
+    async def patch_password_by_id(self, user_id: int, password: str, session: AsyncSession) -> User | None:
+        user = await session.execute(select(User).where(User.id == user_id))
+        user = user.scalar_one_or_none()
+        if user is None:
+            return None
+        user.password = password
+        await session.commit()
+        await session.flush()
+        return user
+
+    async def patch_avatar_by_id(self, user_id: int, avatar_url: str | None, session: AsyncSession) -> User | None:
+        user = await session.execute(select(User).where(User.id == user_id))
+        user = user.scalar_one_or_none()
+        if user is None:
+            return None
+        user.avatar_url = avatar_url
         await session.commit()
         await session.flush()
         return user

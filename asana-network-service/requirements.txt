@@ -7,3 +7,4 @@ uvicorn
 boto3
 imagehash
 requests
+prometheus-client==0.20.0

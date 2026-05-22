@@ -1,0 +1,133 @@
+.audit-events {
+  margin-top: 24px;
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.audit-events-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.audit-events-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.audit-events-controls input {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.audit-table-wrap {
+  overflow-x: auto;
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.audit-table th,
+.audit-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 8px;
+  text-align: left;
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+.audit-user-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-avatar,
+.audit-avatar-fallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.audit-avatar {
+  object-fit: cover;
+}
+
+.audit-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f766e;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.audit-empty {
+  text-align: center;
+  color: #6b7280;
+}
+
+.audit-cell-time {
+  white-space: nowrap;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.audit-action-title {
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+.audit-action-meta {
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.audit-details-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-details-list li {
+  font-size: 13px;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.audit-details-key {
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.audit-details-empty {
+  color: #9ca3af;
+}
+
+.audit-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.audit-status--ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.audit-status--err {
+  background: #fef2f2;
+  color: #b91c1c;
+}

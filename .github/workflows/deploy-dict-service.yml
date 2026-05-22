@@ -1,4 +1,4 @@
-# Сборка dict-service (backend, import, frontend), образ ИИ (asana-network), push в Docker Hub и деплой на хост.
+# Сборка dict-service (backend, import, frontend), ИИ (asana-network), backup-runner; push в Docker Hub и деплой на хост.
 #
 # Триггеры:
 #   1) push в main, если в сообщении коммита есть токен «ver <тег>» (например: «release ver 2.0.8-beta»).
@@ -7,6 +7,7 @@
 # Secrets (Settings → Secrets → Actions):
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
 #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (приватный ключ SSH)
+#   На сервере в /app/.env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — деплой шлёт алерт DeployCompleted в Alertmanager
 #
 # На сервере: каталог /app с файлом .env (БД, секреты). В .env добавится/обновится DICT_SERVICE_VERSION.
 # Копируются: docker-compose.prod.yml → /app/docker-compose.yml, nginx.prod.conf → /app/nginx.prod.conf
@@ -122,6 +123,14 @@ jobs:
           platforms: linux/amd64
           tags: plwatermelon/asana-network:${{ needs.resolve.outputs.version }}
 
+      - name: Backup runner (ежедневные бэкапы OWL/S3 → Google Drive)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backup-runner
+          file: ./backup-runner/Dockerfile
+          push: true
+          tags: plwatermelon/asana-backup-runner:${{ needs.resolve.outputs.version }}
+
   deploy:
     needs: [resolve, build-and-push]
     if: needs.resolve.outputs.deploy == 'true'
@@ -142,6 +151,7 @@ jobs:
         run: |
           cat docker-compose.prod.yml | ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'sudo tee /app/docker-compose.yml > /dev/null'
           cat nginx.prod.conf | ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'sudo tee /app/nginx.prod.conf > /dev/null'
+          tar -czf - monitoring backup-runner | ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'sudo tar -xzf - -C /app'
 
       # Версия подставляется движком Actions до запуска shell; heredoc в одинарных кавычках — без локального $ expansion.
       - name: Обновить DICT_SERVICE_VERSION в .env, pull, down, up (3× asana-import), sudo
@@ -156,9 +166,13 @@ jobs:
             printf '\nDICT_SERVICE_VERSION=%s\n' "${VERSION}" >> .env
           fi
           export DICT_SERVICE_VERSION="${VERSION}"
-          sudo docker-compose pull asana-backend asana-import asana-frontend server-network
+          sudo docker-compose pull
           sudo docker-compose down
           sudo docker-compose up -d --scale asana-import=3
-          sleep 2
+          sleep 5
           sudo docker-compose exec -T nginx nginx -s reload 2>/dev/null || true
+          # Одноразовый алерт в Alertmanager → Telegram (те же TELEGRAM_* из .env)
+          sudo docker-compose exec -T prometheus sh -c \
+            'wget -qO- --header="Content-Type: application/json" --post-data="[{\"labels\":{\"alertname\":\"DeployCompleted\",\"severity\":\"info\",\"version\":\"'"${VERSION}"'\"},\"annotations\":{\"summary\":\"Деплой завершён\",\"description\":\"Установлена версия '"${VERSION}"'\"}}]" http://alertmanager:9093/api/v2/alerts' \
+            2>/dev/null || true
           REMOTE_SCRIPT

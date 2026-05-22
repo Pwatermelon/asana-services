@@ -38,6 +38,8 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     permission_study = Column(Boolean, default=False)
     is_verify = Column(Boolean, default=False)
+    is_blocked = Column(Boolean, default=False, nullable=False)
+    avatar_url = Column(String(1024), nullable=True)
 
 class UserRegistration(BaseModel):
     username: str
@@ -189,3 +191,21 @@ class AISimilarityProposal(Base):
     reviewed_by = Column(String(256), nullable=True)
     """SHA-256 от (asana_a, asana_b, reason). Защищает от повторной вставки одной и той же пары."""
     pair_key = Column(String(64), nullable=False, unique=True, index=True)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(String(64), nullable=False, index=True)
+    login = Column(String(256), nullable=True, index=True)
+    avatar_url = Column(String(1024), nullable=True)
+    method = Column(String(16), nullable=False, index=True)
+    path = Column(String(1024), nullable=False)
+    status_code = Column(Integer, nullable=False, index=True)
+    action_code = Column(String(128), nullable=False, index=True)
+    entity_type = Column(String(64), nullable=True, index=True)
+    entity_id = Column(String(256), nullable=True)
+    ip = Column(String(128), nullable=True)
+    details = Column(String, nullable=True)

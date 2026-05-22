@@ -1,0 +1,201 @@
+groups:
+  - name: asana-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"asana-backend|asana-import|server-module|server-network|postgres-exporter|redis-exporter|node-exporter"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Сервис {{ $labels.job }} недоступен 5+ минут"
+          description: "Prometheus не получает метрики с {{ $labels.instance }} (job={{ $labels.job }}). Проверьте контейнер и логи."
+
+      - alert: CoreApiDown
+        expr: up{job=~"asana-backend|server-module"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Критичный API недоступен: {{ $labels.job }}"
+          description: "Основной API или auth-сервис не отвечает более 3 минут. Сайт для пользователей, скорее всего, не работает."
+
+  - name: asana-http-errors
+    rules:
+      - alert: Http5xxBurst
+        expr: sum by (job) (increase(http_requests_total{job=~"asana-backend|asana-import|server-module|server-network",status=~"5.."}[10m])) > 10
+        for: 1m
+        labels:
+          severity: critical
+          category: errors
+        annotations:
+          summary: "Всплеск 5xx на {{ $labels.job }}: >10 за 10 мин"
+          description: "За последние 10 минут зафиксировано более 10 ответов 5xx на сервисе {{ $labels.job }}. Проверьте логи и недавние деплои."
+
+      - alert: Http5xxBurstGlobal
+        expr: sum(increase(http_requests_total{job=~"asana-backend|asana-import|server-module|server-network",status=~"5.."}[10m])) > 25
+        for: 1m
+        labels:
+          severity: critical
+          category: errors
+        annotations:
+          summary: "Много 5xx по всему приложению (>25 за 10 мин)"
+          description: "Суммарно более 25 ошибок 5xx за 10 минут по всем API-сервисам."
+
+      - alert: HighHttp5xxRate
+        expr: |
+          (
+            sum by (job) (rate(http_requests_total{job=~"asana-backend|asana-import|server-module|server-network",status=~"5.."}[5m]))
+            /
+            clamp_min(sum by (job) (rate(http_requests_total{job=~"asana-backend|asana-import|server-module|server-network"}[5m])), 0.01)
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          category: errors
+        annotations:
+          summary: "Высокая доля 5xx на {{ $labels.job }} (>10%)"
+          description: "Более 10% запросов завершаются кодом 5xx в течение 10 минут."
+
+      - alert: HighHttp4xxRate
+        expr: |
+          (
+            sum by (job) (rate(http_requests_total{job=~"asana-backend|asana-import|server-module|server-network",status=~"4.."}[5m]))
+            /
+            clamp_min(sum by (job) (rate(http_requests_total{job=~"asana-backend|asana-import|server-module|server-network"}[5m])), 0.01)
+          ) > 0.25
+        for: 15m
+        labels:
+          severity: warning
+          category: errors
+        annotations:
+          summary: "Много 4xx на {{ $labels.job }} (>25%)"
+          description: "Возможны проблемы авторизации, валидации или массовые неверные запросы клиентов."
+
+  - name: asana-performance
+    rules:
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, job) (rate(http_request_duration_seconds_bucket{job=~"asana-backend|asana-import|server-module"}[5m]))
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Высокая задержка P95 на {{ $labels.job }} (>5с)"
+          description: "95-й перцентиль времени ответа API превышает 5 секунд более 10 минут."
+
+      - alert: ImportServiceHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="asana-import"}[5m]))
+          ) > 30
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Импорт-сервис отвечает очень медленно (P95 >30с)"
+          description: "Возможен зависший или тяжёлый импорт Excel/OWL."
+
+  - name: asana-infrastructure
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+          ) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "Мало свободной RAM на сервере (>90% занято)"
+          description: "Доступной памяти менее 10%. Риск OOM и падения контейнеров."
+
+      - alert: HighDiskUsage
+        expr: |
+          (
+            1 - (
+              node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              /
+              node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+            )
+          ) > 0.85
+        for: 15m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "Диск заполнен более чем на 85%"
+          description: "На корневом разделе мало свободного места. Проверьте Docker volumes и логи."
+
+      - alert: HighCpuLoad
+        expr: |
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "Высокая загрузка CPU (>90%)"
+          description: "Сервер длительное время под высокой нагрузкой процессора."
+
+  - name: asana-backup
+    rules:
+      - alert: BackupFailed
+        expr: backup_last_success == 0
+        for: 10m
+        labels:
+          severity: critical
+          category: backup
+        annotations:
+          summary: "Последний бэкап завершился с ошибкой"
+          description: "Метрика backup_last_success=0. Проверьте backup-runner и rclone/Google Drive."
+
+      - alert: BackupStale
+        expr: (time() - backup_last_success_timestamp) > 93600
+        for: 30m
+        labels:
+          severity: warning
+          category: backup
+        annotations:
+          summary: "Успешный бэкап не выполнялся >26 часов"
+          description: "Ожидался ежедневный бэкап. Проверьте cron backup-runner."
+
+      - alert: BackupGDriveFailed
+        expr: backup_upload_gdrive_success == 0 and backup_last_success == 1
+        for: 15m
+        labels:
+          severity: warning
+          category: backup
+        annotations:
+          summary: "Бэкап создан, но не загружен в Google Drive"
+          description: "Локальный архив есть, выгрузка в облако не удалась."
+
+  - name: asana-ai
+    rules:
+      - alert: AiServiceDown
+        expr: up{job="server-network"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          category: ai
+        annotations:
+          summary: "ИИ-сервис (server-network) недоступен"
+          description: "Модерация дубликатов и нейросетевые функции не работают."
+
+      - alert: AiHttp5xxBurst
+        expr: sum(increase(http_requests_total{job="server-network",status=~"5.."}[10m])) > 5
+        for: 1m
+        labels:
+          severity: warning
+          category: ai
+        annotations:
+          summary: "Ошибки 5xx в ИИ-сервисе (>5 за 10 мин)"
+          description: "Проверьте логи server-network и доступность модели."

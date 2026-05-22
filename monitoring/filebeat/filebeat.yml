@@ -1,0 +1,45 @@
+filebeat.inputs:
+  - type: filestream
+    id: docker-json-logs
+    enabled: true
+    paths:
+      - /var/lib/docker/containers/*/*-json.log
+    parsers:
+      - ndjson:
+          target: ""
+          overwrite_keys: true
+          add_error_key: true
+    processors:
+      - copy_fields:
+          fields:
+            - from: log
+              to: message
+          ignore_missing: true
+          fail_on_error: false
+      - drop_fields:
+          fields: ["log"]
+          ignore_missing: true
+      - dissect:
+          tokenizer: "/var/lib/docker/containers/%{container_id}/%{}"
+          field: "log.file.path"
+          target_prefix: ""
+          ignore_failure: true
+
+processors:
+  - add_fields:
+      target: service
+      fields:
+        project: asana-services
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "asana-logs-%{+yyyy.MM.dd}"
+
+setup.ilm.enabled: false
+setup.template.name: "asana-logs"
+setup.template.pattern: "asana-logs-*"
+setup.template.type: index
+setup.template.settings:
+  index.number_of_shards: 1
+
+logging.level: info

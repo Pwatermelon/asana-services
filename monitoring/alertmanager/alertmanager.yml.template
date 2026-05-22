@@ -1,0 +1,41 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  group_by: ["alertname", "severity", "job"]
+  group_wait: 20s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      repeat_interval: 2h
+    - match:
+        severity: warning
+      repeat_interval: 6h
+    - match:
+        alertname: DeployCompleted
+      repeat_interval: 8760h
+
+inhibit_rules:
+  - source_matchers:
+      - alertname = ServiceDown
+    target_matchers:
+      - alertname =~ "HighLatencyP95|HighHttp5xxRate|Http5xxBurst"
+    equal: ["job", "instance"]
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: '${TELEGRAM_BOT_TOKEN}'
+        chat_id: ${TELEGRAM_CHAT_ID}
+        parse_mode: HTML
+        message: |
+          <b>{{ .Status | toUpper }}</b> {{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }}
+          {{ range .Alerts }}
+          {{ if eq .Labels.severity "critical" }}🚨{{ else }}⚠️{{ end }} <b>{{ .Labels.alertname }}</b>
+          {{ if .Labels.job }}<i>{{ .Labels.job }}</i>{{ end }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}

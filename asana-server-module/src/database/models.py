@@ -18,6 +18,21 @@ class User(Base):
     permission_study: Mapped[bool] = mapped_column(Boolean)
 
     is_verify: Mapped[bool] = mapped_column(Boolean)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+
+class PasswordResetCode(Base):
+    __tablename__ = "password_reset_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger(), ForeignKey("users.id"), nullable=False, index=True)
+    code_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
+
+    user: Mapped["User"] = relationship("User", lazy="selectin", foreign_keys=[user_id])
 
 
 class YogaPose(Base):

@@ -404,6 +404,11 @@
   flex-shrink: 0;
 }
 
+.user-avatar-image {
+  object-fit: cover;
+  background: #ffffff;
+}
+
 .user-login {
   font-size: 1rem;
   font-weight: 500;

@@ -1,8 +1,8 @@
-import smtplib
-
 import loguru
 from itsdangerous import URLSafeTimedSerializer
+
 from config import get_settings
+from src.api.auth.utils.smtp_client import send_email
 
 settings = get_settings()
 serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
@@ -11,43 +11,28 @@ serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
 def generate_verification_token_mail(mail: str) -> str:
     return serializer.dumps(mail, salt="mail-confirmation")
 
+
 def verify_token_mail(token: str) -> str | None:
     try:
         return serializer.loads(token, salt="mail-confirmation", max_age=3600)
-    except:
+    except Exception:
         return None
 
-def send_verification_email(mail: str, token: str):
-    text = f"Для подтверждения регистрации перейдите по ссылке: https://catalog-asan.ru/auth/login/{token}"
-    message = """\
-    From: %s
-    To: %s
-    Subject: %s
 
-    %s
-    """ % (settings.SMTP_USER, mail, "Подтверждение регистрации", text)
-    loguru.logger.info("Начинаем соединение")
-    server = smtplib.SMTP_SSL(settings.SMTP_SERVER, settings.SMTP_PORT)
-    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-    server.set_debuglevel(1)
-    server.sendmail(settings.SMTP_USER, mail, message.encode("utf8"))
-    server.quit()
-
-def send_reset_password_request(mail: str, token: str):
-    text = f"Для восстановления пароля перейдите по ссылке: https://catalog-asan.ru/auth/reset-password/{token}"
-    message = """\
-    From: %s
-    To: %s
-    Subject: %s
-
-    %s
-    """ % (settings.SMTP_USER, mail, "Восстановление пароля", text)
-    loguru.logger.info("Начинаем соединение")
-    server = smtplib.SMTP_SSL(settings.SMTP_SERVER, settings.SMTP_PORT)
-    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-    server.set_debuglevel(1)
-    server.sendmail(settings.SMTP_USER, mail, message.encode("utf8"))
-    server.quit()
+def send_verification_email(mail: str, token: str) -> None:
+    text = (
+        f"Для подтверждения регистрации перейдите по ссылке: "
+        f"https://catalog-asan.ru/auth/login/{token}"
+    )
+    loguru.logger.info("Отправка письма подтверждения на %s", mail)
+    send_email(mail, "Подтверждение регистрации", text)
 
 
-
+def send_reset_password_request(mail: str, otp_code: str) -> None:
+    text = (
+        f"Код для восстановления пароля: {otp_code}\n\n"
+        "Код действует 15 минут. Если вы не запрашивали восстановление пароля, "
+        "просто проигнорируйте письмо."
+    )
+    loguru.logger.info("Отправка OTP восстановления пароля на %s", mail)
+    send_email(mail, "Восстановление пароля", text)

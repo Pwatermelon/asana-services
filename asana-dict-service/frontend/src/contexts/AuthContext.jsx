@@ -19,6 +19,13 @@ export const AuthProvider = ({ children }) => {
     checkAuth();
   }, []);
 
+  const buildUserState = (authData, userInfo, fallbackLogin = null) => ({
+    role: authData.role,
+    login: userInfo?.login || fallbackLogin || null,
+    mail: userInfo?.mail || null,
+    avatar_url: userInfo?.avatar_url || null,
+  });
+
   const checkAuth = async () => {
     try {
       const authData = await authAPI.checkAuth();
@@ -26,10 +33,7 @@ export const AuthProvider = ({ children }) => {
         // Получаем полную информацию о пользователе
         try {
           const response = await authAPI.getUserInfo();
-          setUser({ 
-            role: authData.role,
-            login: response.login || null
-          });
+          setUser(buildUserState(authData, response));
         } catch (error) {
           // Если не удалось получить логин, используем только роль
           setUser({ role: authData.role });
@@ -55,10 +59,7 @@ export const AuthProvider = ({ children }) => {
         // Получаем полную информацию о пользователе
         try {
           const userInfo = await authAPI.getUserInfo();
-          setUser({ 
-            role: authData.role,
-            login: userInfo.login || username
-          });
+          setUser(buildUserState(authData, userInfo, username));
         } catch (error) {
           setUser({ role: authData.role, login: username });
         }
@@ -82,11 +83,24 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    const authData = await authAPI.checkAuth();
+    if (!authData.isAuthenticated) {
+      setUser(null);
+      return null;
+    }
+    const userInfo = await authAPI.getUserInfo();
+    const next = buildUserState(authData, userInfo);
+    setUser(next);
+    return next;
+  };
+
   const value = {
     user,
     loading,
     login,
     logout,
+    refreshUser,
     isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',
     isExpert: user?.role === 'expert',

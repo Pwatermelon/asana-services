@@ -309,7 +309,11 @@ const Navbar = () => {
                   }
                 }}
               >
-                <div className="user-avatar">{getInitials(user?.login)}</div>
+                {user?.avatar_url ? (
+                  <img src={user.avatar_url} alt="Аватар" className="user-avatar user-avatar-image" />
+                ) : (
+                  <div className="user-avatar">{getInitials(user?.login)}</div>
+                )}
                 <span className="user-login">{user?.login || 'Пользователь'}</span>
                 <span className="dropdown-arrow">▼</span>
               </div>
@@ -321,6 +325,13 @@ const Navbar = () => {
                       <span className="role-value">{getRoleLabel()}</span>
                     </div>
                   )}
+                  <Link
+                    to="/profile"
+                    className="user-dropdown-link"
+                    onClick={() => setIsDropdownOpen(false)}
+                  >
+                    Профиль
+                  </Link>
                   {isAdmin && (
                     <Link
                       to="/admin"
@@ -392,15 +403,24 @@ const Navbar = () => {
                 <div className="navbar-mobile-section-title">Разделы</div>
                 {renderNavLinks('mobile')}
               </div>
-              {isAuthenticated && isAdmin && (
+              {isAuthenticated && (
                 <div className="navbar-mobile-section">
                   <Link
-                    to="/admin"
-                    className={`navbar-mobile-link ${isActive('/admin') ? 'active' : ''}`}
+                    to="/profile"
+                    className={`navbar-mobile-link ${isActive('/profile') ? 'active' : ''}`}
                     onClick={closeMobileMenu}
                   >
-                    Админ-панель
+                    Профиль
                   </Link>
+                  {isAdmin && (
+                    <Link
+                      to="/admin"
+                      className={`navbar-mobile-link ${isActive('/admin') ? 'active' : ''}`}
+                      onClick={closeMobileMenu}
+                    >
+                      Админ-панель
+                    </Link>
+                  )}
                 </div>
               )}
               {isAuthenticated && (

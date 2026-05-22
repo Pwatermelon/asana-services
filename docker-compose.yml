@@ -23,19 +23,26 @@ services:
       - PORT_SERVER=8000
       - SECRET_KEY=${SECRET_KEY}
       - HOST_NETWORK_SERVER=${URL_NETWORK_SERVER}
-      - SMTP_SERVER=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_SERVER=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
+      - SMTP_PORT=${SMTP_PORT:-465}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM=${SMTP_FROM:-${SMTP_USER}}
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
       # Совпадают с контейнером minio (MINIO_ROOT_*); при отсутствии — fallback на USER_MINIO из .env
       - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
+      - PASSWORD_RESET_OTP_TTL_MINUTES=${PASSWORD_RESET_OTP_TTL_MINUTES:-15}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - REDIS_URL=redis://redis:6379/0
+      - USER_ONLINE_WINDOW_SECONDS=${USER_ONLINE_WINDOW_SECONDS:-300}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -76,8 +83,12 @@ services:
       - NETWORK_SERVICE_URL=${NETWORK_SERVICE_URL:-http://server-network:8001}
       - NETWORK_SERVICE_TIMEOUT=${NETWORK_SERVICE_TIMEOUT:-300}
       - NETWORK_SERVICE_BATCH_SIZE=${NETWORK_SERVICE_BATCH_SIZE:-200}
+      - REDIS_URL=redis://redis:6379/0
+      - USER_ONLINE_WINDOW_SECONDS=${USER_ONLINE_WINDOW_SECONDS:-300}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       server-network:
         condition: service_started
@@ -276,9 +287,184 @@ services:
     networks:
       - asana-network
 
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - alertmanager
+    networks:
+      - asana-network
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml.template:/etc/alertmanager/alertmanager.yml.template:ro
+      - ./monitoring/alertmanager/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks:
+      - asana-network
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${ADMIN_USERNAME:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - asana-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - asana-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.3
+    container_name: kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_PUBLICBASEURL=${KIBANA_ROOT_URL:-http://localhost/kibana}
+      - SERVER_BASEPATH=/kibana
+      - SERVER_REWRITEBASEPATH=true
+    depends_on:
+      - elasticsearch
+    networks:
+      - asana-network
+
+  kibana-setup:
+    image: curlimages/curl:8.10.1
+    container_name: kibana-setup
+    restart: "no"
+    volumes:
+      - ./monitoring/kibana/setup.sh:/setup.sh:ro
+    entrypoint: ["/bin/sh", "/setup.sh"]
+    depends_on:
+      - kibana
+      - elasticsearch
+    networks:
+      - asana-network
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.14.3
+    container_name: filebeat
+    restart: unless-stopped
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    volumes:
+      - ./monitoring/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - asana-network
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: postgres-exporter
+    restart: unless-stopped
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${DB_USER:-asana_user}:${DB_PASSWORD:-asana_password}@postgres:5432/${DB_NAME:-asana_db}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - asana-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: redis-exporter
+    restart: unless-stopped
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - asana-network
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector"
+    volumes:
+      - /:/host:ro
+      - monitoring_textfile:/var/lib/node_exporter/textfile_collector
+    networks:
+      - asana-network
+
+  backup-runner:
+    build:
+      context: ./backup-runner
+      dockerfile: Dockerfile
+    image: asana-backup-runner:latest
+    container_name: backup-runner
+    restart: unless-stopped
+    environment:
+      - BACKUP_CRON=${BACKUP_CRON:-0 3 * * *}
+      - RUN_BACKUP_ON_START=${RUN_BACKUP_ON_START:-true}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_BUCKET=${NAME_BUCKET_IMAGES_MINIO:-images}
+      - S3_BACKUP_PREFIXES=${S3_BACKUP_PREFIXES:-asans,avatars}
+      - ONTOLOGY_PATH=/app/ontology_updated.owl
+      - GDRIVE_REMOTE=${GDRIVE_REMOTE:-gdrive:asana-backups}
+      - RCLONE_CONFIG_BASE64=${RCLONE_CONFIG_BASE64:-}
+      - TEXTFILE_DIR=/var/lib/node_exporter/textfile_collector
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./asana-dict-service/backend/ontology_updated.owl:/app/ontology_updated.owl:ro
+      - backup_data:/backup-data
+      - ./backup-runner/rclone:/root/.config/rclone
+      - monitoring_textfile:/var/lib/node_exporter/textfile_collector
+    networks:
+      - asana-network
+
 volumes:
   pgdata:
   minio_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+  backup_data:
+  monitoring_textfile:
 
 networks:
   asana-network:

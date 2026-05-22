@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path
+from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
@@ -9,11 +10,16 @@ import logging
 import json
 import uuid
 import asyncio
+import time
+import smtplib
+import secrets
+import string
 from datetime import datetime
 import httpx
 from starlette.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
+from email.message import EmailMessage
 from app.auth import (
     get_current_user, is_admin, is_expert_or_admin, get_user_info_from_token_sync
 )
@@ -35,15 +41,45 @@ from app.moderation_photo import (
 from app.config import logger, NAME_BUCKET_IMAGES_MINIO, S3_IMPORT_STAGING_PREFIX
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem, AISimilarityProposal
+from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem, AISimilarityProposal, AuditEvent
 from sqlalchemy import create_engine, func, asc, desc
 from sqlalchemy.orm import sessionmaker
 from app import config
 from fastapi.templating import Jinja2Templates
 from jose import jwt, JWTError
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 # Create module logger
 logger = logging.getLogger("asana_service.api")
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["service", "method", "path", "status"],
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request duration in seconds",
+    ["service", "method", "path"],
+)
+CATALOG_ENTITIES_TOTAL = Gauge(
+    "catalog_entities_total",
+    "Catalog entities in mirror",
+    ["entity_type"],
+)
+MODERATION_PENDING_TOTAL = Gauge(
+    "moderation_pending_total",
+    "Pending moderation rows",
+    ["kind"],
+)
+CATALOG_VISITORS_TOTAL = Gauge(
+    "catalog_visitors_total",
+    "Total unique authenticated users who visited the catalog",
+)
+CATALOG_USERS_ONLINE = Gauge(
+    "catalog_users_online",
+    "Authenticated users active within the online window",
+)
 
 # Определение моделей для данных, используемых в API
 class AsanaNameCreate(BaseModel):
@@ -79,14 +115,30 @@ app = FastAPI(
     description=config.APP_DESCRIPTION,
     version=config.APP_VERSION,
     contact={"email": config.APP_CONTACT_EMAIL},
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    docs_url=None,
+    redoc_url=None,
+    openapi_url="/api/openapi.json"
 )
 
 # Middleware для защиты документации API
 class DocsAuthMiddleware(BaseHTTPMiddleware):
-    """Middleware для защиты документации API - только для авторизованных пользователей (админ/эксперт)"""
+    """Middleware для защиты документации API - только для администратора."""
+
+    @staticmethod
+    def _extract_token_from_referer(referer: str | None) -> str | None:
+        if not referer:
+            return None
+        try:
+            from urllib.parse import parse_qs, urlparse
+
+            parsed = urlparse(referer)
+            query = parse_qs(parsed.query or "")
+            token_values = query.get("access_token") or query.get("token")
+            if token_values and token_values[0]:
+                return token_values[0]
+        except Exception:
+            return None
+        return None
     
     async def dispatch(self, request: StarletteRequest, call_next):
         # Проверяем, является ли запрос к документации
@@ -94,12 +146,18 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
         
         # Защищаем основные пути документации
         # Также защищаем статические файлы Swagger UI (они загружаются через /docs/static/...)
-        protected_paths = ["/docs", "/redoc", "/openapi.json"]
+        protected_paths = ["/api/docs", "/api/redoc", "/api/openapi.json"]
         is_protected = any(path == protected or path.startswith(protected + "/") for protected in protected_paths)
         
         if is_protected:
             # Получаем токен из заголовков или cookies
-            token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token") or request.cookies.get("session_token")
+            token = (
+                request.headers.get("Authorization", "").replace("Bearer ", "")
+                or request.cookies.get("access_token")
+                or request.cookies.get("session_token")
+                or request.query_params.get("access_token")
+                or self._extract_token_from_referer(request.headers.get("referer"))
+            )
             
             if not token:
                 return JSONResponse(
@@ -116,14 +174,12 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
                         content={"detail": "Недействительный токен авторизации"}
                     )
                 
-                # Проверяем, что пользователь является админом или экспертом
+                # Проверяем, что пользователь является администратором
                 is_admin_flag = user_data.get("is_admin", False)
-                permission_study = user_data.get("permission_study", False)
-                
-                if not (is_admin_flag or permission_study):
+                if not is_admin_flag:
                     return JSONResponse(
                         status_code=403,
-                        content={"detail": "Доступ к документации API разрешен только администраторам и экспертам"}
+                        content={"detail": "Доступ к документации API разрешен только администраторам"}
                     )
                 
                 # Пользователь авторизован и имеет нужные права - пропускаем запрос
@@ -138,8 +194,215 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
+
+def _extract_docs_token(request: Request) -> str | None:
+    return (
+        request.headers.get("Authorization", "").replace("Bearer ", "")
+        or request.cookies.get("access_token")
+        or request.cookies.get("session_token")
+        or request.query_params.get("access_token")
+    )
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def custom_swagger_docs(request: Request):
+    from urllib.parse import quote
+
+    token = _extract_docs_token(request)
+    openapi_url = "/api/openapi.json"
+    if token:
+        openapi_url = f"/api/openapi.json?access_token={quote(token, safe='')}"
+    return get_swagger_ui_html(openapi_url=openapi_url, title=f"{config.APP_NAME} - Swagger UI")
+
+
+@app.get("/api/redoc", include_in_schema=False)
+async def custom_redoc_docs(request: Request):
+    from urllib.parse import quote
+
+    token = _extract_docs_token(request)
+    openapi_url = "/api/openapi.json"
+    if token:
+        openapi_url = f"/api/openapi.json?access_token={quote(token, safe='')}"
+    return get_redoc_html(openapi_url=openapi_url, title=f"{config.APP_NAME} - ReDoc")
+
+
+def _extract_monitoring_token(request: Request) -> str | None:
+    return (
+        request.headers.get("Authorization", "").replace("Bearer ", "")
+        or request.headers.get("X-Access-Token", "")
+        or request.cookies.get("monitoring_token")
+        or request.query_params.get("access_token")
+    )
+
+
+def _require_admin_from_token(token: str) -> dict:
+    user_data = get_user_info_from_token_sync(token)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Недействительный токен")
+    if not user_data.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Доступ только для администратора")
+    return user_data
+
+
+@app.api_route("/api/auth/verify-admin", methods=["GET", "HEAD"], include_in_schema=False)
+async def verify_admin_monitoring(request: Request):
+    """Проверка прав админа для nginx auth_request (Grafana/Kibana)."""
+    token = _extract_monitoring_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    _require_admin_from_token(token)
+    return Response(status_code=200)
+
+
+@app.get("/api/auth/monitoring-session", include_in_schema=False)
+async def monitoring_session(
+    request: Request,
+    access_token: str = Query(..., description="JWT администратора"),
+    next: str = Query("/grafana/"),
+):
+    """Выдаёт cookie для доступа к Grafana/Kibana только администратору."""
+    _require_admin_from_token(access_token)
+    if not (next.startswith("/grafana") or next.startswith("/kibana")):
+        raise HTTPException(status_code=400, detail="Недопустимый redirect")
+    response = RedirectResponse(url=next, status_code=302)
+    secure = request.url.scheme == "https"
+    response.set_cookie(
+        key="monitoring_token",
+        value=access_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=8 * 3600,
+        path="/",
+    )
+    return response
+
+
+class AuditMiddleware(BaseHTTPMiddleware):
+    """Записывает аудит mutating API-запросов для админ-панели."""
+
+    _skip_prefixes = ("/api/docs", "/api/redoc", "/api/openapi.json", "/health", "/metrics")
+    _skip_exact = ("/api/auth/check",)
+    _track_methods = {"POST", "PATCH", "PUT", "DELETE"}
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        from app.audit_context import (
+            build_audit_payload,
+            parse_request_body,
+            prefetch_entity_context,
+        )
+
+        path = request.url.path
+        method = request.method.upper()
+        should_track = (
+            method in self._track_methods
+            and not any(path.startswith(prefix) for prefix in self._skip_prefixes)
+            and path not in self._skip_exact
+        )
+        start = datetime.utcnow()
+        query_params = dict(request.query_params)
+        body_raw = b""
+        prefetched: dict = {}
+
+        if should_track:
+            body_raw = await request.body()
+
+            async def receive():
+                return {"type": "http.request", "body": body_raw, "more_body": False}
+
+            request._receive = receive
+            prefetched = prefetch_entity_context(method, path, query_params)
+
+        response = await call_next(request)
+
+        if not should_track or SessionLocal is None:
+            return response
+
+        token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+        user_data = get_user_info_from_token_sync(token) if token else None
+        login = (user_data or {}).get("login")
+        avatar_url = (user_data or {}).get("avatar_url")
+
+        body_data = parse_request_body(body_raw, request.headers.get("content-type"))
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        audit = build_audit_payload(
+            method=method,
+            path=path,
+            query_params=query_params,
+            body=body_data,
+            status_code=int(response.status_code),
+            duration_ms=duration_ms,
+            prefetched=prefetched,
+        )
+
+        db = SessionLocal()
+        try:
+            event = AuditEvent(
+                timestamp=datetime.utcnow().isoformat(),
+                login=login,
+                avatar_url=avatar_url,
+                method=method,
+                path=path,
+                status_code=int(response.status_code),
+                action_code=audit["action_code"],
+                entity_type=audit.get("entity_type"),
+                entity_id=audit.get("entity_id"),
+                ip=(request.client.host if request.client else None),
+                details=json.dumps(audit["details"], ensure_ascii=False),
+            )
+            db.add(event)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Failed to write audit event: %s", exc)
+        finally:
+            db.close()
+        return response
+
+
+class UserActivityMiddleware(BaseHTTPMiddleware):
+    """Учёт уникальных посетителей и онлайн-пользователей (Redis → Prometheus)."""
+
+    _skip_prefixes = (
+        "/api/docs",
+        "/api/redoc",
+        "/api/openapi.json",
+        "/health",
+        "/metrics",
+        "/api/auth/verify-admin",
+        "/api/auth/monitoring-session",
+    )
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        response = await call_next(request)
+        if response.status_code >= 400:
+            return response
+        path = request.url.path
+        if any(path.startswith(prefix) for prefix in self._skip_prefixes):
+            return response
+        token = (
+            request.headers.get("Authorization", "").replace("Bearer ", "")
+            or request.cookies.get("access_token")
+            or request.cookies.get("session_token")
+            or request.query_params.get("access_token")
+        )
+        if not token:
+            return response
+        try:
+            from app.user_activity import record_user_activity
+
+            user_data = get_user_info_from_token_sync(token)
+            if user_data and user_data.get("login"):
+                record_user_activity(user_data.get("login"))
+        except Exception as exc:
+            logger.debug("User activity tracking skipped: %s", exc)
+        return response
+
+
 # Добавляем middleware для защиты документации (перед CORS)
 app.add_middleware(DocsAuthMiddleware)
+app.add_middleware(AuditMiddleware)
+app.add_middleware(UserActivityMiddleware)
 
 # Разрешаем CORS для всех источников (для разработки)
 app.add_middleware(
@@ -149,6 +412,48 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def prometheus_metrics_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - start
+    path = request.url.path
+    method = request.method
+    HTTP_REQUESTS_TOTAL.labels("asana-backend", method, path, str(response.status_code)).inc()
+    HTTP_REQUEST_DURATION_SECONDS.labels("asana-backend", method, path).observe(elapsed)
+    return response
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    if SessionLocal is not None:
+        db = SessionLocal()
+        try:
+            from app.models import CatalogMirrorItem
+            for entity_type, count in db.query(CatalogMirrorItem.entity_type, func.count()).group_by(CatalogMirrorItem.entity_type).all():
+                CATALOG_ENTITIES_TOTAL.labels((entity_type or "unknown").lower()).set(int(count))
+
+            MODERATION_PENDING_TOTAL.labels("manual").set(
+                int(db.query(func.count(ModerationItem.id)).filter(ModerationItem.resolved == False).scalar() or 0)
+            )
+            MODERATION_PENDING_TOTAL.labels("ai").set(
+                int(db.query(func.count(AISimilarityProposal.id)).filter(AISimilarityProposal.status == "pending").scalar() or 0)
+            )
+        except Exception as exc:
+            logger.warning("Failed to refresh domain gauges: %s", exc)
+        finally:
+            db.close()
+    try:
+        from app.user_activity import get_activity_metrics
+
+        visitors, online = get_activity_metrics()
+        CATALOG_VISITORS_TOTAL.set(visitors)
+        CATALOG_USERS_ONLINE.set(online)
+    except Exception as exc:
+        logger.warning("Failed to refresh user activity gauges: %s", exc)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Обработчик ошибок валидации
 @app.exception_handler(RequestValidationError)
@@ -185,6 +490,7 @@ def init_database():
         from sqlalchemy import text
         from app.models import (
             AboutProject,
+            AuditEvent,
             AISimilarityProposal,
             CatalogMirrorItem,
             CatalogSyncState,
@@ -202,12 +508,15 @@ def init_database():
                 )
                 try:
                     conn.execute(text("CREATE SCHEMA IF NOT EXISTS dict_schema"))
+                    conn.execute(text("ALTER TABLE IF EXISTS dict_schema.users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(1024)"))
+                    conn.execute(text("ALTER TABLE IF EXISTS dict_schema.users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE"))
                     Base.metadata.create_all(
                         bind=conn,
                         tables=[
                             User.__table__,
                             AboutProject.__table__,
                             ExpertInstructions.__table__,
+                            AuditEvent.__table__,
                             ModerationItem.__table__,
                             CatalogSyncState.__table__,
                             CatalogMirrorItem.__table__,
@@ -2147,6 +2456,146 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     permission_study: Optional[bool] = None
+    is_blocked: Optional[bool] = None
+
+
+def _send_new_user_credentials_email(login: str, email: str, plain_password: str) -> None:
+    """Отправляет новому пользователю письмо с логином и паролем."""
+    msg = EmailMessage()
+    msg["From"] = config.SMTP_FROM
+    msg["To"] = email
+    msg["Subject"] = "Доступ к Каталогу асан"
+    msg.set_content(
+        "Вам создана учетная запись в системе \"Каталог асан\".\n\n"
+        f"Логин: {login}\n"
+        f"Пароль: {plain_password}\n\n"
+        "Рекомендуем сменить пароль после первого входа в профиль."
+    )
+
+    smtp_port = int(config.SMTP_PORT)
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(config.SMTP_SERVER, smtp_port, timeout=20) as server:
+            server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+            server.send_message(msg)
+        return
+
+    with smtplib.SMTP(config.SMTP_SERVER, smtp_port, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+        server.send_message(msg)
+
+
+def _generate_temporary_password(length: int = 14) -> str:
+    """Генерирует временный пароль с цифрами/буквами/спецсимволами."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+    while True:
+        pwd = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(c.islower() for c in pwd)
+            and any(c.isupper() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+            and any(c in "!@#$%^&*()-_=+" for c in pwd)
+        ):
+            return pwd
+
+
+def _send_unblock_credentials_email(login: str, email: str, plain_password: str) -> None:
+    """Отправляет письмо с новым паролем после разблокировки учетной записи."""
+    msg = EmailMessage()
+    msg["From"] = config.SMTP_FROM
+    msg["To"] = email
+    msg["Subject"] = "Учетная запись разблокирована"
+    msg.set_content(
+        "Ваша учетная запись в системе \"Каталог асан\" разблокирована администратором.\n\n"
+        f"Логин: {login}\n"
+        f"Новый пароль: {plain_password}\n\n"
+        "Рекомендуем сменить пароль сразу после входа."
+    )
+
+    smtp_port = int(config.SMTP_PORT)
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(config.SMTP_SERVER, smtp_port, timeout=20) as server:
+            server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+            server.send_message(msg)
+        return
+
+    with smtplib.SMTP(config.SMTP_SERVER, smtp_port, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+        server.send_message(msg)
+
+
+def _audit_summary_from_row(row: AuditEvent) -> str:
+    """Человекочитаемое описание для старых и новых записей аудита."""
+    if row.details:
+        try:
+            payload = json.loads(row.details)
+            if isinstance(payload, dict) and payload.get("summary"):
+                return str(payload["summary"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if row.action_code and ":" not in row.action_code:
+        parts = [row.action_code.replace(".", " ").replace("_", " ")]
+        if row.entity_id:
+            parts.append(str(row.entity_id))
+        return " — ".join(parts)
+    return f"{row.method} {row.path}"
+
+
+@app.get("/api/audit/events", tags=["audit"])
+async def get_audit_events(
+    user: str = Depends(is_admin),
+    login: Optional[str] = Query(default=None),
+    action_code: Optional[str] = Query(default=None),
+    from_ts: Optional[str] = Query(default=None),
+    to_ts: Optional[str] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+):
+    db = SessionLocal()
+    try:
+        query = db.query(AuditEvent)
+        if login:
+            query = query.filter(AuditEvent.login == login)
+        if action_code:
+            query = query.filter(AuditEvent.action_code.ilike(f"%{action_code}%"))
+        if from_ts:
+            query = query.filter(AuditEvent.timestamp >= from_ts)
+        if to_ts:
+            query = query.filter(AuditEvent.timestamp <= to_ts)
+
+        total = query.count()
+        rows = query.order_by(desc(AuditEvent.id)).offset(offset).limit(limit).all()
+        return {
+            "total": total,
+            "items": [
+                {
+                    "id": row.id,
+                    "timestamp": row.timestamp,
+                    "login": row.login,
+                    "avatar_url": row.avatar_url,
+                    "method": row.method,
+                    "path": row.path,
+                    "status_code": row.status_code,
+                    "action_code": row.action_code,
+                    "entity_type": row.entity_type,
+                    "entity_id": row.entity_id,
+                    "ip": row.ip,
+                    "details": row.details,
+                    "summary": _audit_summary_from_row(row),
+                }
+                for row in rows
+            ],
+        }
+    except Exception as exc:
+        logger.error("Error fetching audit events: %s", exc)
+        raise HTTPException(status_code=500, detail="Ошибка при получении аудита")
+    finally:
+        db.close()
 
 @app.get("/api/users", tags=["users"])
 async def get_all_users(request: Request, user: str = Depends(is_admin)):
@@ -2184,7 +2633,9 @@ async def get_all_users(request: Request, user: str = Depends(is_admin)):
                 "mail": u.mail,
                 "is_admin": u.is_admin,
                 "permission_study": u.permission_study,
-                "is_verify": u.is_verify
+                "is_verify": u.is_verify,
+                "is_blocked": bool(getattr(u, "is_blocked", False)),
+                "avatar_url": u.avatar_url,
             })
         return result
     except Exception as e:
@@ -2213,19 +2664,35 @@ async def create_user(user_data: UserCreate, user: str = Depends(is_admin)):
             raise HTTPException(status_code=400, detail="Пользователь с таким email уже существует")
         
         # Создаем нового пользователя
-        hashed_password = pwd_context.hash(user_data.password)
+        plain_password = user_data.password
+        hashed_password = pwd_context.hash(plain_password)
         new_user = User(
             login=user_data.login,
             mail=user_data.mail,
             password=hashed_password,
             is_admin=user_data.is_admin,
             permission_study=user_data.permission_study,
-            is_verify=True  # Админ создает сразу верифицированных пользователей
+            is_verify=True,  # Админ создает сразу верифицированных пользователей
+            is_blocked=False,
         )
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        
+
+        email_sent = True
+        email_error = None
+        try:
+            _send_new_user_credentials_email(new_user.login, new_user.mail, plain_password)
+        except Exception as email_exc:
+            email_sent = False
+            email_error = str(email_exc)
+            logger.error(
+                "Failed to send new-user credentials email for %s (%s): %s",
+                new_user.login,
+                new_user.mail,
+                email_exc,
+            )
+
         logger.info(f"Admin {user} created new user: {user_data.login}")
         return {
             "id": new_user.id,
@@ -2233,7 +2700,11 @@ async def create_user(user_data: UserCreate, user: str = Depends(is_admin)):
             "mail": new_user.mail,
             "is_admin": new_user.is_admin,
             "permission_study": new_user.permission_study,
-            "is_verify": new_user.is_verify
+            "is_verify": new_user.is_verify,
+            "is_blocked": bool(getattr(new_user, "is_blocked", False)),
+            "avatar_url": new_user.avatar_url,
+            "email_sent": email_sent,
+            "email_error": email_error,
         }
     except HTTPException:
         db.rollback()
@@ -2264,6 +2735,8 @@ async def update_user(user_id: int, user_update: UserUpdate, request: Request, u
             target_user.is_admin = user_update.is_admin
         if user_update.permission_study is not None:
             target_user.permission_study = user_update.permission_study
+        if user_update.is_blocked is not None:
+            target_user.is_blocked = user_update.is_blocked
         
         db.commit()
         db.refresh(target_user)
@@ -2275,7 +2748,9 @@ async def update_user(user_id: int, user_update: UserUpdate, request: Request, u
             "mail": target_user.mail,
             "is_admin": target_user.is_admin,
             "permission_study": target_user.permission_study,
-            "is_verify": target_user.is_verify
+            "is_verify": target_user.is_verify,
+            "is_blocked": bool(getattr(target_user, "is_blocked", False)),
+            "avatar_url": target_user.avatar_url,
         }
     except HTTPException:
         db.rollback()
@@ -2286,6 +2761,91 @@ async def update_user(user_id: int, user_update: UserUpdate, request: Request, u
         raise HTTPException(status_code=500, detail=f"Ошибка при обновлении пользователя: {str(e)}")
     finally:
         db.close()
+
+
+@app.post("/api/users/{user_id}/block", tags=["users"])
+async def block_user(user_id: int, request: Request, user: str = Depends(is_admin)):
+    """Заблокировать учетную запись пользователя."""
+    db = SessionLocal()
+    try:
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+        current_user_data = get_user_info_from_token_sync(token)
+        if current_user_data and current_user_data.get("login") == target_user.login:
+            raise HTTPException(status_code=400, detail="Нельзя заблокировать самого себя")
+
+        target_user.is_blocked = True
+        db.commit()
+        db.refresh(target_user)
+        logger.info("Admin %s blocked user %s", user, target_user.login)
+        return {"message": f"Пользователь {target_user.login} заблокирован", "is_blocked": True}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error blocking user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при блокировке пользователя: {str(e)}")
+    finally:
+        db.close()
+
+
+@app.post("/api/users/{user_id}/unblock", tags=["users"])
+async def unblock_user(user_id: int, user: str = Depends(is_admin)):
+    """
+    Разблокировать учетную запись пользователя, сгенерировать новый пароль
+    и отправить его на email пользователя.
+    """
+    from passlib.context import CryptContext
+
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    db = SessionLocal()
+    try:
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        temp_password = _generate_temporary_password()
+        target_user.password = pwd_context.hash(temp_password)
+        target_user.is_blocked = False
+        db.commit()
+        db.refresh(target_user)
+
+        try:
+            _send_unblock_credentials_email(target_user.login, target_user.mail, temp_password)
+        except Exception as email_exc:
+            target_user.is_blocked = True
+            db.commit()
+            logger.error(
+                "Failed to send unblock credentials email for %s (%s): %s",
+                target_user.login,
+                target_user.mail,
+                email_exc,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Не удалось отправить новый пароль на почту. Разблокировка отменена.",
+            )
+
+        logger.info("Admin %s unblocked user %s and sent new password", user, target_user.login)
+        return {
+            "message": f"Пользователь {target_user.login} разблокирован, новый пароль отправлен на email",
+            "is_blocked": False,
+            "email_sent": True,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error unblocking user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при разблокировке пользователя: {str(e)}")
+    finally:
+        db.close()
+
 
 @app.delete("/api/users/{user_id}", tags=["users"])
 async def delete_user(user_id: int, request: Request, user: str = Depends(is_admin)):

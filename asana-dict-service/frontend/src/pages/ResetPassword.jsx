@@ -4,7 +4,7 @@ import { authAPI } from '../api/auth';
 import '../styles/Login.css';
 
 const ResetPassword = () => {
-  const [email, setEmail] = useState('');
+  const [login, setLogin] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -15,10 +15,17 @@ const ResetPassword = () => {
     setLoading(true);
 
     try {
-      await authAPI.resetPasswordRequest(email);
+      await authAPI.resetPasswordRequest(login);
       setSuccess(true);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Ошибка при запросе сброса пароля');
+      const status = err.response?.status;
+      if (status === 429) {
+        setError(err.response?.data?.detail || 'Слишком много попыток. Подождите и повторите позже.');
+      } else if (status === 401) {
+        setError(err.response?.data?.detail || 'Логин или email не найден.');
+      } else {
+        setError(err.response?.data?.detail || 'Ошибка при запросе сброса пароля');
+      }
     } finally {
       setLoading(false);
     }
@@ -28,9 +35,9 @@ const ResetPassword = () => {
     return (
       <div className="container">
         <div className="auth-container">
-          <h1 className="auth-title">Письмо отправлено</h1>
-          <p>Проверьте вашу почту для получения кода сброса пароля.</p>
-          <Link to="/reset-password-confirm" className="btn-primary">
+          <h1 className="auth-title">Код отправлен</h1>
+          <p>На email учётной записи отправлен код. Введите его на следующем шаге.</p>
+          <Link to={`/reset-password-confirm?login=${encodeURIComponent(login)}`} className="btn-primary">
             Ввести код
           </Link>
         </div>
@@ -45,12 +52,12 @@ const ResetPassword = () => {
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="login">Логин или email</label>
             <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              id="login"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
               required
             />
           </div>

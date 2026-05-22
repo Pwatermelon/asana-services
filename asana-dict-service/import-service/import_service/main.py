@@ -3,31 +3,37 @@
 Запуск: uvicorn import_service.main:app
 Общий код каталога — пакет app (../backend/app в репозитории, монтируется/копируется в образ).
 """
+import time
+import json
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import config
 from app.auth import get_user_info_from_token_sync
 from app.config import logger
+from app.models import AuditEvent
+from app.main import SessionLocal, HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION_SECONDS
 from import_service.routes import router as import_router
 
 app = FastAPI(
     title=f"{config.APP_NAME} — import/export",
     description="Импорт и экспорт данных каталога (Excel, онтология)",
     version=config.APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/api/import/docs",
+    redoc_url="/api/import/redoc",
+    openapi_url="/api/import/openapi.json",
 )
-
 
 class DocsAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: StarletteRequest, call_next):
         path = request.url.path
-        protected_paths = ["/docs", "/redoc", "/openapi.json"]
+        protected_paths = ["/api/import/docs", "/api/import/redoc", "/api/import/openapi.json"]
         is_protected = any(
             path == protected or path.startswith(protected + "/") for protected in protected_paths
         )
@@ -50,12 +56,11 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
                         content={"detail": "Недействительный токен авторизации"},
                     )
                 is_admin_flag = user_data.get("is_admin", False)
-                permission_study = user_data.get("permission_study", False)
-                if not (is_admin_flag or permission_study):
+                if not is_admin_flag:
                     return JSONResponse(
                         status_code=403,
                         content={
-                            "detail": "Доступ к документации API разрешен только администраторам и экспертам"
+                            "detail": "Доступ к документации API разрешен только администраторам"
                         },
                     )
             except Exception as e:
@@ -65,7 +70,60 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class AuditMiddleware(BaseHTTPMiddleware):
+    _track_methods = {"POST", "PATCH", "PUT", "DELETE"}
+    _skip_prefixes = ("/api/import/docs", "/api/import/redoc", "/api/import/openapi.json", "/metrics")
+
+    @staticmethod
+    def _extract_entity(path: str) -> tuple[str | None, str | None]:
+        parts = (path or "").strip("/").split("/")
+        if parts and parts[0] == "api":
+            parts = parts[1:]
+        if not parts:
+            return None, None
+        entity = parts[0]
+        entity_id = parts[1] if len(parts) > 1 else None
+        return entity, entity_id
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        should_track = request.method.upper() in self._track_methods and not any(
+            request.url.path.startswith(prefix) for prefix in self._skip_prefixes
+        )
+        response = await call_next(request)
+        if not should_track or SessionLocal is None:
+            return response
+
+        token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
+        user_data = get_user_info_from_token_sync(token) if token else None
+        entity_type, entity_id = self._extract_entity(request.url.path)
+
+        db = SessionLocal()
+        try:
+            event = AuditEvent(
+                timestamp=datetime.utcnow().isoformat(),
+                login=(user_data or {}).get("login"),
+                avatar_url=(user_data or {}).get("avatar_url"),
+                method=request.method.upper(),
+                path=request.url.path,
+                status_code=int(response.status_code),
+                action_code=f"{request.method.upper()}:{request.url.path}",
+                entity_type=entity_type,
+                entity_id=entity_id,
+                ip=(request.client.host if request.client else None),
+                details=json.dumps({"query": str(request.query_params)}, ensure_ascii=False),
+            )
+            db.add(event)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Failed to write import audit event: %s", exc)
+        finally:
+            db.close()
+        return response
+
+
 app.add_middleware(DocsAuthMiddleware)
+app.add_middleware(AuditMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -75,6 +133,21 @@ app.add_middleware(
 )
 
 app.include_router(import_router)
+
+
+@app.middleware("http")
+async def metrics_middleware(request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - start
+    HTTP_REQUESTS_TOTAL.labels("asana-import", request.method, request.url.path, str(response.status_code)).inc()
+    HTTP_REQUEST_DURATION_SECONDS.labels("asana-import", request.method, request.url.path).observe(elapsed)
+    return response
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.on_event("startup")

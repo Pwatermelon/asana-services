@@ -160,9 +160,12 @@ Compose подхватывает переменные из корневого `.
 
 - база: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`;
 - auth: `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`;
-- почта: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`;
+- почта (Яндекс): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`;
 - minio: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `NAME_BUCKET_IMAGES_MINIO`;
-- интеграции: `AUTH_SERVICE_URL`, `NETWORK_SERVICE_URL`.
+- интеграции: `AUTH_SERVICE_URL`, `NETWORK_SERVICE_URL`;
+- мониторинг: `GRAFANA_ROOT_URL`, `KIBANA_ROOT_URL` (логин Grafana = `ADMIN_USERNAME` / `ADMIN_PASSWORD`);
+- алерты Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`;
+- активность пользователей: `REDIS_URL`, `USER_ONLINE_WINDOW_SECONDS` (по умолчанию 300 — окно «онлайн»).
 
 Важно:
 - `.env` не должен попадать в git;
@@ -259,6 +262,76 @@ docker compose down
 - проверьте `asana-import` и `redis`;
 - проверьте nginx route `/api/import/status/...`;
 - проверьте таймауты клиента и proxy.
+
+### Мониторинг и логи (только администратор)
+
+- **Grafana** (`/grafana/`) — метрики и дашборды (Application, Catalog, AI, Infrastructure, Backup).
+- **Kibana** (`/kibana/`) — логи контейнеров (Data View `asana-logs-*`, раздел Discover).
+- **Swagger** (`/api/docs`) — документация API.
+
+Доступ закрыт на уровне nginx: без cookie администратора откроется 403.  
+Ссылки в админ-панели выдают cookie через `/api/auth/monitoring-session` (нужен JWT админа).
+
+Прямые порты Prometheus/Elasticsearch/Kibana/Grafana наружу не публикуются — только через nginx.
+
+### Алерты в Telegram
+
+В `.env` на сервере:
+
+```env
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_CHAT_ID=123456789
+```
+
+Как получить `TELEGRAM_CHAT_ID`: напишите боту `/start`, затем откройте  
+`https://api.telegram.org/bot<TOKEN>/getUpdates` и возьмите `chat.id`.
+
+После изменения `.env`:
+
+```bash
+docker compose up -d alertmanager prometheus
+```
+
+Alertmanager шлёт уведомления (правила в `monitoring/prometheus/alerts.yml`):
+
+| Алерт | Условие |
+|-------|---------|
+| **ServiceDown** | Сервис не отдаёт метрики **5+ минут** |
+| **CoreApiDown** | `asana-backend` или `server-module` недоступен **3+ мин** |
+| **Http5xxBurst** | **>10** ответов 5xx за **10 минут** (по сервису) |
+| **Http5xxBurstGlobal** | **>25** ошибок 5xx за 10 мин по всем API |
+| **HighHttp5xxRate** | >10% запросов — 5xx в течение 10 мин |
+| **HighHttp4xxRate** | >25% запросов — 4xx (15 мин) |
+| **HighLatencyP95** | P95 ответа API >5 с (10 мин) |
+| **ImportServiceHighLatency** | P95 импорта >30 с (15 мин) |
+| **BackupFailed / BackupStale / BackupGDriveFailed** | ошибка, нет бэкапа >26 ч, не загрузился в Drive |
+| **HighMemoryUsage / HighDiskUsage / HighCpuLoad** | RAM >90%, диск >85%, CPU >90% |
+| **AiServiceDown / AiHttp5xxBurst** | ИИ-сервис недоступен 5 мин или >5 ошибок 5xx за 10 мин |
+
+Без `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` Alertmanager стартует, но уведомления не отправляет.
+
+После деплоя CI шлёт **один алерт** `DeployCompleted` в Alertmanager (`POST /api/v2/alerts`) — в Telegram уходит то же сообщение, что и для остальных алертов (нужны `TELEGRAM_*` в `.env`).
+
+### Почта (Яндекс)
+
+В `/app/.env`:
+
+```env
+SMTP_HOST=smtp.yandex.ru
+SMTP_PORT=465
+SMTP_USER=noreply@yandex.ru
+SMTP_PASSWORD=пароль_приложения
+SMTP_FROM=noreply@yandex.ru
+```
+
+- **SMTP_PASSWORD** — [пароль приложения](https://id.yandex.ru/security/app-passwords) (не основной пароль от почты).
+- В настройках почты Яндекса включите **«С сервера imap.yandex.ru» / доступ по SMTP**.
+
+Порт **465** — SSL. Для **587** в коде автоматически используется STARTTLS.
+
+```bash
+docker compose up -d server-module asana-backend
+```
 
 ---
 

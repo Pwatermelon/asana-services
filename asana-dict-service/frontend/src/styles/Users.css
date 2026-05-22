@@ -121,7 +121,9 @@
 }
 
 .btn-edit,
-.btn-delete {
+.btn-delete,
+.btn-lock,
+.btn-unlock {
   padding: 6px 12px;
   margin-right: 8px;
   border: none;
@@ -158,7 +160,9 @@
 }
 
 .users-table .table-action-group .btn-edit,
-.users-table .table-action-group .btn-delete {
+.users-table .table-action-group .btn-delete,
+.users-table .table-action-group .btn-lock,
+.users-table .table-action-group .btn-unlock {
   margin: 0;
   width: 100%;
   min-height: 2.25rem;
@@ -195,6 +199,52 @@
   background: var(--danger-color, #ef4444);
   color: #ffffff;
   border-color: var(--danger-color, #ef4444);
+}
+
+.users-table .table-action-group .btn-lock {
+  background: #ffffff;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.users-table .table-action-group .btn-lock:hover {
+  background: #f59e0b;
+  color: #ffffff;
+  border-color: #f59e0b;
+}
+
+.users-table .table-action-group .btn-unlock {
+  background: #ffffff;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+
+.users-table .table-action-group .btn-unlock:hover {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #10b981;
+}
+
+.user-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.user-status-badge--active {
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.user-status-badge--blocked {
+  color: #991b1b;
+  background: #fee2e2;
 }
 
 .modal-overlay {

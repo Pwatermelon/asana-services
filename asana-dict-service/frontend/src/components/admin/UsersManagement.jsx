@@ -11,6 +11,7 @@ const UsersManagement = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [info, setInfo] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [formData, setFormData] = useState({
@@ -42,6 +43,7 @@ const UsersManagement = () => {
   };
 
   const handleAddUser = () => {
+    setInfo(null);
     setFormData({
       login: '',
       mail: '',
@@ -54,6 +56,7 @@ const UsersManagement = () => {
   };
 
   const handleEditUser = (user) => {
+    setInfo(null);
     setFormData({
       login: user.login,
       mail: user.mail,
@@ -78,7 +81,12 @@ const UsersManagement = () => {
         }
         await usersAPI.updateUser(editingUser.id, updateData);
       } else {
-        await usersAPI.createUser(formData);
+        const created = await usersAPI.createUser(formData);
+        if (created?.email_sent === false) {
+          setInfo(`Пользователь создан, но письмо не отправлено: ${created.email_error || 'ошибка SMTP'}`);
+        } else if (created?.email_sent === true) {
+          setInfo('Пользователь создан, данные отправлены на почту.');
+        }
       }
       setShowAddModal(false);
       loadUsers();
@@ -101,6 +109,36 @@ const UsersManagement = () => {
     }
   };
 
+  const handleBlockUser = async (targetUser) => {
+    if (!window.confirm(`Заблокировать учетную запись "${targetUser.login}"?`)) {
+      return;
+    }
+    try {
+      setInfo(null);
+      const result = await usersAPI.blockUser(targetUser.id);
+      setInfo(result?.message || `Пользователь ${targetUser.login} заблокирован.`);
+      loadUsers();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Ошибка при блокировке пользователя');
+      console.error('Error blocking user:', err);
+    }
+  };
+
+  const handleUnblockUser = async (targetUser) => {
+    if (!window.confirm(`Разблокировать "${targetUser.login}" и отправить новый пароль на email?`)) {
+      return;
+    }
+    try {
+      setInfo(null);
+      const result = await usersAPI.unblockUser(targetUser.id);
+      setInfo(result?.message || `Пользователь ${targetUser.login} разблокирован.`);
+      loadUsers();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Ошибка при разблокировке пользователя');
+      console.error('Error unblocking user:', err);
+    }
+  };
+
   if (!isAdmin) {
     return <div className="error-message">Доступ запрещён.</div>;
   }
@@ -119,6 +157,7 @@ const UsersManagement = () => {
       </div>
 
       {error && <div className="error-message">{error}</div>}
+      {info && <div className="success-message">{info}</div>}
 
       <div className="users-table-container">
         <table className="users-table">
@@ -129,7 +168,7 @@ const UsersManagement = () => {
               <th>Email</th>
               <th>Администратор</th>
               <th>Эксперт</th>
-              <th>Верифицирован</th>
+              <th>Статус</th>
               <th>Действия</th>
             </tr>
           </thead>
@@ -141,7 +180,13 @@ const UsersManagement = () => {
                 <td>{user.mail}</td>
                 <td>{user.is_admin ? 'Да' : 'Нет'}</td>
                 <td>{user.permission_study ? 'Да' : 'Нет'}</td>
-                <td>{user.is_verify ? 'Да' : 'Нет'}</td>
+                <td>
+                  {user.is_blocked ? (
+                    <span className="user-status-badge user-status-badge--blocked">Не активен</span>
+                  ) : (
+                    <span className="user-status-badge user-status-badge--active">Активен</span>
+                  )}
+                </td>
                 <td>
                   <div className="table-action-group">
                     <button
@@ -151,6 +196,23 @@ const UsersManagement = () => {
                     >
                       Изменить
                     </button>
+                    {user.is_blocked ? (
+                      <button
+                        type="button"
+                        className="btn-unlock"
+                        onClick={() => handleUnblockUser(user)}
+                      >
+                        Разблокировать
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-lock"
+                        onClick={() => handleBlockUser(user)}
+                      >
+                        Заблокировать
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn-delete"

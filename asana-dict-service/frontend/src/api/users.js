@@ -20,6 +20,16 @@ export const usersAPI = {
     const response = await apiClient.delete(`/api/users/${userId}`);
     return response.data;
   },
+
+  blockUser: async (userId) => {
+    const response = await apiClient.post(`/api/users/${userId}/block`);
+    return response.data;
+  },
+
+  unblockUser: async (userId) => {
+    const response = await apiClient.post(`/api/users/${userId}/unblock`);
+    return response.data;
+  },
 };
 
 

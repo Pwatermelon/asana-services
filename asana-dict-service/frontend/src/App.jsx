@@ -6,7 +6,6 @@ import Footer from './components/Footer';
 
 // Страницы
 import Login from './pages/Login';
-import Register from './pages/Register';
 import ConfirmRegistration from './pages/ConfirmRegistration';
 import ResetPassword from './pages/ResetPassword';
 import ResetPasswordConfirm from './pages/ResetPasswordConfirm';
@@ -24,6 +23,7 @@ import Users from './pages/Users';
 import Admin from './pages/Admin';
 import AsanaNamesPage from './pages/AsanaNamesPage';
 import AIModeration from './pages/AIModeration';
+import Profile from './pages/Profile';
 import ScrollToTop from './components/ScrollToTop';
 
 // Защищенные маршруты
@@ -42,10 +42,17 @@ function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/asanas" replace />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
               <Route path="/confirm-registration" element={<ConfirmRegistration />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/reset-password-confirm" element={<ResetPasswordConfirm />} />
+              <Route
+                path="/profile"
+                element={
+                  <PrivateRoute>
+                    <Profile />
+                  </PrivateRoute>
+                }
+              />
               
               <Route path="/asanas" element={<AsanasList />} />
               <Route path="/asana/:id" element={<AsanaDetail />} />

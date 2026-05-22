@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.auth.utils.password_policy import validate_strong_password
 from src.api.auth.schemas import ResetPasswordDto
 from src.api.request_to_admin_status.schemas import RequestToAdminStatusOutDto
 from src.api.request_to_admin_status.service import RequestToAdminStatusService
@@ -36,6 +37,26 @@ class UserService:
     async def patch_password(self, mail: str, password: str, session: AsyncSession) -> UserOutDto:
         user: User = await self.user_repository.patch_password(mail, password, session)
         return UserOutDto.from_user(user)
+
+    async def change_password(self, user: UserOutDto, current_password: str, new_password: str, session: AsyncSession) -> UserOutDto:
+        from src.api.auth.exceptions import CredentialsExceptionPassword
+        from src.api.auth.utils.auth_utils import verify_password, get_password_hash
+
+        if not verify_password(current_password, user.password):
+            raise CredentialsExceptionPassword()
+
+        validate_strong_password(new_password)
+        hashed = get_password_hash(new_password)
+        updated_user: User | None = await self.user_repository.patch_password_by_id(user.id, hashed, session)
+        if updated_user is None:
+            raise CredentialsExceptionPassword()
+        return UserOutDto.from_user(updated_user)
+
+    async def patch_avatar(self, user: UserOutDto, avatar_url: str | None, session: AsyncSession) -> UserOutDto:
+        updated_user: User | None = await self.user_repository.patch_avatar_by_id(user.id, avatar_url, session)
+        if updated_user is None:
+            return user
+        return UserOutDto.from_user(updated_user)
 
     async def create_request_to_admin_status(self, user: UserOutDto, session: AsyncSession) -> RequestToAdminStatusOutDto:
         return await self.request_to_admin_status_service.create_request_to_admin_status(user, session)

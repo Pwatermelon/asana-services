@@ -22,6 +22,8 @@ class UserOutDto(BaseModel):
     is_admin: bool
     permission_study: bool
     is_verify: bool
+    is_blocked: bool = False
+    avatar_url: str | None = None
 
     @staticmethod
     def from_user(user: User) -> "UserOutDto":
@@ -32,5 +34,12 @@ class UserOutDto(BaseModel):
             password=user.password,
             is_admin=user.is_admin,
             permission_study=user.permission_study,
-            is_verify=user.is_verify
+            is_verify=user.is_verify,
+            is_blocked=getattr(user, "is_blocked", False),
+            avatar_url=user.avatar_url,
         )
+
+
+class ChangePasswordDto(BaseModel):
+    current_password: str
+    new_password: str

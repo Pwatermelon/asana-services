@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: AsanaDashboards
+    orgId: 1
+    folder: Asana
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/dashboards
