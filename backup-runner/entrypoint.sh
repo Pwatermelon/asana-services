@@ -17,4 +17,4 @@ if [[ "${RUN_BACKUP_ON_START:-false}" == "true" ]]; then
   /run-backup.sh || true
 fi
 
-exec crond -f -l 8
+exec crond -f -s

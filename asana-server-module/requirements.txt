@@ -2,6 +2,7 @@ fastapi
 alembic
 sqlalchemy
 pydantic
+email-validator>=2.0.0
 loguru
 python-dotenv
 asyncpg
