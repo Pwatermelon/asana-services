@@ -29,8 +29,7 @@
 - [11. Масштабирование импорта](#11-масштабирование-импорта)
 - [12. Диагностика и эксплуатация](#12-диагностика-и-эксплуатация)
 - [13. Безопасность перед публикацией репозитория](#13-безопасность-перед-публикацией-репозитория)
-- [14. Roadmap](#14-roadmap)
-- [15. Contributing](#15-contributing)
+- [14. Contributing](#14-contributing)
 
 ---
 
@@ -41,10 +40,11 @@
 Проект решает практическую задачу: хранить и обновлять большой каталог асан в одном месте, с прозрачной ролью каждого пользователя и управляемым процессом импорта данных.
 
 Ключевые особенности реализации:
-- выделенный контур тяжелого импорта и экспорта;
-- отдельный контур основного API для интерфейса;
-- хранение изображений в S3-совместимом хранилище;
-- ИИ-сервис для поиска потенциальных совпадений и поддержки модерации.
+- выделенный контур тяжелого импорта и экспорта (`asana-import` + Redis);
+- отдельный контур auth и пользователей (`server-module`, SMTP, OTP-сброс пароля);
+- хранение изображений в S3-совместимом хранилище (MinIO);
+- ИИ-сервис для поиска совпадений и модерации связей `isSameAs`;
+- мониторинг, логи, алерты в Telegram и ежедневные бэкапы в Google Drive.
 
 ---
 
@@ -52,10 +52,16 @@
 
 - каталог асан с источниками, названиями и изображениями;
 - роли доступа (гость, эксперт, администратор);
-- импорт и экспорт данных (в том числе длинные операции через отдельный сервис);
+- создание пользователей администратором (самостоятельная регистрация отключена);
+- профиль пользователя: смена пароля и аватара;
+- восстановление пароля по **6-значному OTP-коду** на email;
+- импорт и экспорт данных (длинные операции через отдельный сервис);
 - модерация записей и подтверждение изменений;
-- интеграция с ИИ-сервисом для обработки изображений;
-- работа через единый веб-интерфейс с API за reverse proxy.
+- ИИ-модерация связей `isSameAs` (pHash + YOLO);
+- аудит действий пользователей (админ-панель);
+- мониторинг (Prometheus, Grafana, Kibana) и алерты в Telegram;
+- ежедневные бэкапы PostgreSQL, OWL и S3 → Google Drive;
+- работа через единый веб-интерфейс (React SPA) с API за reverse proxy.
 
 ---
 
@@ -69,18 +75,42 @@
 
 ## 4. Архитектура
 
-Основная схема взаимодействия:
+Платформа разделена на независимые контейнеры за единым **Nginx**. Тяжёлый импорт, авторизация, ИИ-обработка, мониторинг и бэкапы вынесены в отдельные сервисы, чтобы не блокировать интерактивный API каталога.
 
-1. Клиент открывает сайт через `nginx`.
-2. `nginx` маршрутизирует запросы:
-   - auth и user API -> `server-module`;
-   - импорт/экспорт и задачи с длинными таймаутами -> `asana-import`;
-   - основной API каталога -> `asana-backend`.
-3. `asana-backend` и `asana-import` работают с общей БД (`postgres`) и S3-хранилищем (`minio`).
-4. Для координации импортных задач используется `redis`.
-5. ИИ-проверки изображений выполняет отдельный `server-network`.
+### Диаграмма
 
-Ключевая идея: тяжелые операции вынесены в отдельный сервис, чтобы не блокировать основное API каталога.
+<div align="center">
+
+![Архитектура asana-services — production-стек](./architecture_diagram.png)
+
+</div>
+
+<p align="center"><sub>Клиенты → Nginx → прикладные сервисы → PostgreSQL / Redis / MinIO · мониторинг · бэкапы · SMTP / Telegram / Google Drive</sub></p>
+
+### Маршрутизация Nginx
+
+| Путь | Сервис | Назначение |
+|------|--------|------------|
+| `/` | `asana-frontend` | React SPA |
+| `/api/auth*`, `/api/users*` | `server-module` | вход, профиль, OTP-сброс, пользователи |
+| `/api/import*`, `/api/export*`, онтология upload/download | `asana-import` | длинный импорт/экспорт |
+| `/api/*` | `asana-backend` | каталог, модерация, аудит, контент |
+| `/images/*` | `minio` | фото асан и аватары |
+| `/grafana/`, `/kibana/` | Grafana, Kibana | только админ (cookie через `/api/auth/monitoring-session`) |
+
+### Потоки данных
+
+1. **Каталог** — frontend → `asana-backend` → PostgreSQL / OWL / MinIO; JWT проверяется через `server-module`.
+2. **Импорт Excel** — frontend → `asana-import` → Redis (статусы, lock OWL) → PostgreSQL / OWL / MinIO; масштабируется `--scale asana-import=N`.
+3. **ИИ-модерация** — `asana-backend` → `server-network` → предложения `isSameAs` в очередь эксперта.
+4. **Почта** — `server-module` → Yandex SMTP (создание пользователя, OTP-код восстановления пароля).
+5. **Мониторинг** — Prometheus собирает метрики сервисов и exporters; Alertmanager → `telegram-proxy` → Telegram.
+6. **Логи** — Filebeat → Elasticsearch → Kibana.
+7. **Бэкапы** — `backup-runner` по cron: дамп PostgreSQL + OWL + префиксы S3 → архив → Google Drive (rclone); метрики в Prometheus.
+
+### CI/CD
+
+GitHub Actions (`.github/workflows/deploy-dict-service.yml`) собирает образы, пушит в registry и перезапускает стек на сервере `/app`. После деплоя в Alertmanager уходит алерт `DeployCompleted`.
 
 ---
 
@@ -91,9 +121,13 @@ asana-services/
 ├── asana-dict-service/
 │   ├── backend/                # API каталога (FastAPI)
 │   ├── import-service/         # воркер импорта/экспорта
-│   └── frontend/               # SPA (React/Vite)
-├── asana-server-module/        # auth + user API
+│   ├── frontend/               # SPA (React/Vite)
+│   └── ИНСТРУКЦИЯ_ДЛЯ_ЭКСПЕРТОВ.md
+├── asana-server-module/        # auth + user API + SMTP
 ├── asana-network-service/      # ИИ-сервис обработки изображений
+├── backup-runner/              # cron-бэкапы БД/OWL/S3 → Google Drive
+├── monitoring/                 # Prometheus, Grafana, Alertmanager, exporters
+├── architecture_diagram.png    # диаграмма архитектуры (README)
 ├── docker-compose.yml          # локальный/dev стек
 ├── docker-compose.prod.yml     # production стек
 ├── nginx.conf                  # nginx для локального запуска
@@ -109,7 +143,11 @@ asana-services/
 - База данных: PostgreSQL
 - Координация задач: Redis
 - Объектное хранилище: MinIO (S3 API)
-- Reverse proxy: Nginx
+- Reverse proxy: Nginx (+ Certbot в production)
+- Мониторинг: Prometheus, Grafana, Alertmanager, exporters
+- Логи: Filebeat, Elasticsearch, Kibana
+- Бэкапы: backup-runner, rclone → Google Drive
+- CI/CD: GitHub Actions
 - Контейнеризация: Docker, Docker Compose
 
 ---
@@ -161,11 +199,13 @@ Compose подхватывает переменные из корневого `.
 - база: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`;
 - auth: `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`;
 - почта (Яндекс): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`;
+- сброс пароля: `PASSWORD_RESET_OTP_TTL_MINUTES` (по умолчанию 15);
 - minio: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `NAME_BUCKET_IMAGES_MINIO`;
 - интеграции: `AUTH_SERVICE_URL`, `NETWORK_SERVICE_URL`;
 - мониторинг: `GRAFANA_ROOT_URL`, `KIBANA_ROOT_URL` (логин Grafana = `ADMIN_USERNAME` / `ADMIN_PASSWORD`);
-- алерты Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`;
-- активность пользователей: `REDIS_URL`, `USER_ONLINE_WINDOW_SECONDS` (по умолчанию 300 — окно «онлайн»).
+- алерты Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (опционально `TELEGRAM_HTTP_PROXY`, `VLESS_URI` для telegram-proxy);
+- активность пользователей: `REDIS_URL`, `USER_ONLINE_WINDOW_SECONDS` (по умолчанию 300);
+- бэкапы: `BACKUP_CRON`, `RUN_BACKUP_ON_START`, `BACKUP_MIN_INTERVAL_SECONDS`, `GDRIVE_REMOTE`, `RCLONE_CONFIG_BASE64`.
 
 Важно:
 - `.env` не должен попадать в git;
@@ -333,6 +373,45 @@ SMTP_FROM=noreply@yandex.ru
 docker compose up -d server-module asana-backend
 ```
 
+### Ежедневные бэкапы
+
+Сервис `backup-runner` по cron (по умолчанию **03:00 UTC**) создаёт архив:
+
+- дамп PostgreSQL;
+- файл онтологии OWL;
+- префиксы S3 (`asans`, `avatars`).
+
+Архив загружается в **Google Drive** через `rclone`. На сервере в `/app/.env`:
+
+```env
+BACKUP_CRON=0 3 * * *
+RUN_BACKUP_ON_START=false
+BACKUP_MIN_INTERVAL_SECONDS=82800
+BACKUP_KEEP_LOCAL_ARCHIVES=1
+GDRIVE_REMOTE=gdrive:asana-backups
+RCLONE_CONFIG_BASE64=...   # base64 конфига rclone с OAuth к Google Drive
+```
+
+- **`RUN_BACKUP_ON_START=false`** — не запускать бэкап при каждом рестарте контейнера.
+- **`BACKUP_MIN_INTERVAL_SECONDS=82800`** (~23 ч) — защита от частых повторных запусков.
+- Локально хранится один последний архив; в Drive — файл `asana-backup-latest.tar.gz` (перезапись).
+
+Статус бэкапов — метрики в Prometheus и дашборд **Backup Status** в Grafana. Алерты: `BackupFailed`, `BackupStale`, `BackupGDriveFailed`.
+
+Ручной запуск на сервере:
+
+```bash
+docker compose exec backup-runner BACKUP_FORCE=1 /app/run-backup.sh
+```
+
+Конфиг rclone на сервере: `./backup-runner/rclone/` (или через `RCLONE_CONFIG_BASE64`).
+
+### Инструкция для экспертов
+
+- В репозитории: `asana-dict-service/ИНСТРУКЦИЯ_ДЛЯ_ЭКСПЕРТОВ.md`
+- В UI: раздел **«Инструкции»** (редактируется администратором)
+- При первом старте backend подхватывает markdown из volume `seed_content`
+
 ---
 
 ## 13. Безопасность перед публикацией репозитория
@@ -350,17 +429,7 @@ docker compose up -d server-module asana-backend
 
 ---
 
-## 14. Roadmap
-
-- [ ] Добавить root `.env.example` с безопасными шаблонными значениями;
-- [ ] Добавить корневой `.gitignore` для исключения секретов и локальных артефактов;
-- [ ] Добавить OpenAPI/Swagger раздел с примерами запросов;
-- [ ] Добавить диаграмму архитектуры (`docs/architecture.png`) прямо в README;
-- [ ] добавить e2e smoke-проверку для production деплоя.
-
----
-
-## 15. Contributing
+## 14. Contributing
 
 Если хочешь предложить улучшение:
 
@@ -382,7 +451,9 @@ docker compose up -d server-module asana-backend
 ## Смежные README
 
 - `asana-dict-service/README.md`
+- `asana-dict-service/ИНСТРУКЦИЯ_ДЛЯ_ЭКСПЕРТОВ.md`
 - `asana-dict-service/frontend/README.md`
 - `asana-front-module/README.md`
 - `android-dict-app/README.md`
+- `monitoring/alertmanager/README.md`
 
