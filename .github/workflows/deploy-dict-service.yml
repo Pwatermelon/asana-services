@@ -155,6 +155,23 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Освободить место на диске (Docker prune)
+        run: |
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'sudo bash -s' <<'CLEANUP'
+          set -euo pipefail
+          echo "=== Диск до очистки ==="
+          df -h / | tail -1
+          docker system df 2>/dev/null || true
+          # Кэш сборок и «висячие» слои
+          docker builder prune -af 2>/dev/null || true
+          docker image prune -af 2>/dev/null || true
+          # Обрезать раздутые json-логи контейнеров (частая причина 100% диска)
+          find /var/lib/docker/containers -name '*-json.log' -size +50M -exec truncate -s 10M {} \; 2>/dev/null || true
+          echo "=== Диск после очистки ==="
+          df -h / | tail -1
+          docker system df 2>/dev/null || true
+          CLEANUP
+
       - name: Залить docker-compose и nginx на сервер (sudo)
         run: |
           cat docker-compose.prod.yml | ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'sudo tee /app/docker-compose.yml > /dev/null'
@@ -174,10 +191,16 @@ jobs:
             printf '\nDICT_SERVICE_VERSION=%s\n' "${VERSION}" >> .env
           fi
           export DICT_SERVICE_VERSION="${VERSION}"
+          echo "=== Остановка стека и удаление старых образов ==="
+          sudo docker-compose down --remove-orphans || true
+          docker image prune -af 2>/dev/null || true
+          docker builder prune -af 2>/dev/null || true
+          docker container prune -f 2>/dev/null || true
+          df -h / | tail -1
+          echo "=== Pull и запуск ==="
           sudo docker-compose pull
-          sudo docker-compose down
           sudo docker-compose up -d --scale asana-import=3
-          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
+          if [ -f .env ] && grep -qE '^VLESS_URI=.' .env; then
             sudo docker-compose --profile telegram-vpn build telegram-proxy
             sudo docker-compose --profile telegram-vpn up -d telegram-proxy
           fi

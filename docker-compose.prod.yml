@@ -5,6 +5,8 @@
 #
 # В .env на сервере должны быть в т.ч.:
 #   SMTP_HOST, URL_NETWORK_SERVER (compose подставляет их в server-module)
+#   PROMETHEUS_RETENTION_TIME=1d, PROMETHEUS_RETENTION_SIZE=10GB, ES_LOG_RETENTION=7d
+#   ES_PURGE_OLD_LOGS=true — один раз снести все asana-logs-* после переполнения диска
 #   NETWORK_SERVICE_URL (опционально; по умолчанию http://server-network:8001 внутри сети)
 #
 # Имена и теги образов ниже — ориентир; при необходимости замените сами.
@@ -340,6 +342,8 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-1d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-10GB}"
     depends_on:
       - alertmanager
     networks:
@@ -403,6 +407,10 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - ES_LOG_RETENTION=${ES_LOG_RETENTION:-7d}
+      - cluster.routing.allocation.disk.watermark.low=${ES_DISK_WATERMARK_LOW:-15gb}
+      - cluster.routing.allocation.disk.watermark.high=${ES_DISK_WATERMARK_HIGH:-10gb}
+      - cluster.routing.allocation.disk.watermark.flood_stage=${ES_DISK_WATERMARK_FLOOD:-5gb}
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
@@ -426,6 +434,10 @@ services:
     image: curlimages/curl:8.10.1
     container_name: kibana-setup
     restart: "no"
+    environment:
+      - ES_URL=http://elasticsearch:9200
+      - ES_LOG_RETENTION=${ES_LOG_RETENTION:-7d}
+      - ES_PURGE_OLD_LOGS=${ES_PURGE_OLD_LOGS:-false}
     volumes:
       - ./monitoring/kibana/setup.sh:/setup.sh:ro
     entrypoint: ["/bin/sh", "/setup.sh"]
@@ -445,7 +457,10 @@ services:
       - ./monitoring/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_started
+      kibana-setup:
+        condition: service_completed_successfully
     networks:
       - asana-network
 

@@ -35,11 +35,14 @@ output.elasticsearch:
   hosts: ["http://elasticsearch:9200"]
   index: "asana-logs-%{+yyyy.MM.dd}"
 
-setup.ilm.enabled: false
+setup.ilm.enabled: true
+setup.ilm.policy_name: asana-logs-policy
 setup.template.name: "asana-logs"
 setup.template.pattern: "asana-logs-*"
 setup.template.type: index
 setup.template.settings:
   index.number_of_shards: 1
+  index.codec: best_compression
+  index.lifecycle.name: asana-logs-policy
 
 logging.level: info
