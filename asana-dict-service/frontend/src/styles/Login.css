@@ -8,6 +8,10 @@
   border: 1px solid var(--border-light);
 }
 
+.auth-container-wide {
+  max-width: 480px;
+}
+
 .auth-title {
   text-align: center;
   font-size: 2em;

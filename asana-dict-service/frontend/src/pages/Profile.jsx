@@ -1,16 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../api/auth';
+import PasswordRequirements from '../components/PasswordRequirements';
+import { allPasswordRulesOk } from '../utils/passwordRules';
 import '../styles/Profile.css';
-
-const buildPasswordRules = (value) => ({
-  length: value.length >= 12,
-  upper: /[A-Z]/.test(value),
-  lower: /[a-z]/.test(value),
-  digit: /\d/.test(value),
-  special: /[^A-Za-z0-9]/.test(value),
-  noSpace: !/\s/.test(value),
-});
+import '../styles/PasswordForm.css';
 
 const Profile = () => {
   const { user, refreshUser } = useAuth();
@@ -22,8 +16,7 @@ const Profile = () => {
   const [avatarError, setAvatarError] = useState('');
   const [avatarMessage, setAvatarMessage] = useState('');
   const [avatarLoading, setAvatarLoading] = useState(false);
-  const passwordRules = buildPasswordRules(newPassword);
-  const allRulesOk = Object.values(passwordRules).every(Boolean);
+  const allRulesOk = allPasswordRulesOk(newPassword);
   const passwordsMatch = confirmPassword.length > 0 && newPassword === confirmPassword;
 
   const handleChangePassword = async (e) => {
@@ -155,14 +148,7 @@ const Profile = () => {
               required
             />
           </div>
-          <ul className="password-rules-list">
-            <li className={passwordRules.length ? 'rule-ok' : 'rule-bad'}>{passwordRules.length ? '✓' : '○'} минимум 12 символов</li>
-            <li className={passwordRules.upper ? 'rule-ok' : 'rule-bad'}>{passwordRules.upper ? '✓' : '○'} минимум одна заглавная буква</li>
-            <li className={passwordRules.lower ? 'rule-ok' : 'rule-bad'}>{passwordRules.lower ? '✓' : '○'} минимум одна строчная буква</li>
-            <li className={passwordRules.digit ? 'rule-ok' : 'rule-bad'}>{passwordRules.digit ? '✓' : '○'} минимум одна цифра</li>
-            <li className={passwordRules.special ? 'rule-ok' : 'rule-bad'}>{passwordRules.special ? '✓' : '○'} минимум один спецсимвол</li>
-            <li className={passwordRules.noSpace ? 'rule-ok' : 'rule-bad'}>{passwordRules.noSpace ? '✓' : '○'} без пробелов</li>
-          </ul>
+          <PasswordRequirements password={newPassword} confirmPassword="" showMatch={false} />
           <div className="form-group">
             <label htmlFor="confirm-password">Подтвердите новый пароль</label>
             <input
@@ -173,12 +159,8 @@ const Profile = () => {
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
             />
-            {confirmPassword.length > 0 && (
-              <div className={passwordsMatch ? 'match-ok' : 'match-bad'}>
-                {passwordsMatch ? '✓ Пароли совпадают' : 'Пароли не совпадают'}
-              </div>
-            )}
           </div>
+          <PasswordRequirements password={newPassword} confirmPassword={confirmPassword} showMatch />
           <button type="submit" className="btn-primary" disabled={!allRulesOk || !passwordsMatch}>
             Сменить пароль
           </button>

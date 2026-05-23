@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/Login.css';
 
@@ -11,6 +11,8 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const resetSuccessMessage = location.state?.message;
   const [searchParams] = useSearchParams();
   const nextPath = searchParams.get('next');
 
@@ -51,6 +53,11 @@ const Login = () => {
         <h1 className="auth-title">Вход в систему</h1>
         {nextPath && (
           <p className="auth-hint">После входа вы будете перенаправлены в запрошенный раздел.</p>
+        )}
+        {resetSuccessMessage && (
+          <div className="success-message" role="status">
+            {resetSuccessMessage}
+          </div>
         )}
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
