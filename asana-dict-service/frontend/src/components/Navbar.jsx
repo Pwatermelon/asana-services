@@ -314,7 +314,9 @@ const Navbar = () => {
                 ) : (
                   <div className="user-avatar">{getInitials(user?.login)}</div>
                 )}
-                <span className="user-login">{user?.login || 'Пользователь'}</span>
+                <span className="user-login" title={user?.login || undefined}>
+                  {user?.login || 'Пользователь'}
+                </span>
                 <span className="dropdown-arrow">▼</span>
               </div>
               {isDropdownOpen && (

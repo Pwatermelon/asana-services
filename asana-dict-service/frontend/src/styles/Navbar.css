@@ -56,9 +56,8 @@
 
 .navbar-links--desktop {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.35rem 0.65rem;
-  row-gap: 0.4rem;
   flex: 1;
   min-width: 0;
   justify-content: center;
@@ -105,15 +104,19 @@
   gap: 0.5rem 0.65rem;
   flex-wrap: nowrap;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .navbar-user-wrap {
   position: relative;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: min(200px, 22vw);
 }
 
 .navbar-add-wrap {
   position: relative;
+  flex-shrink: 0;
 }
 
 .navbar-burger {
@@ -383,6 +386,8 @@
   transition: all 0.2s ease;
   background: transparent;
   border: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .user-menu-trigger:hover {
@@ -413,12 +418,18 @@
   font-size: 1rem;
   font-weight: 500;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 9.5rem;
 }
 
 .dropdown-arrow {
   font-size: 0.75rem;
   color: var(--text-secondary);
   transition: transform 0.2s;
+  flex-shrink: 0;
 }
 
 .user-menu-trigger:hover .dropdown-arrow {
@@ -610,6 +621,23 @@
 }
 
 /* Узкие экраны: меньше отступы у пунктов, чтобы не ломать ряд */
+@media (max-width: 1280px) {
+  .user-login,
+  .user-menu-trigger .dropdown-arrow {
+    display: none;
+  }
+
+  .user-menu-trigger {
+    padding: 0.35em 0.5em;
+    gap: 0;
+  }
+
+  .navbar-user-wrap {
+    max-width: none;
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 1100px) {
   .nav-link {
     font-size: 0.85rem;
