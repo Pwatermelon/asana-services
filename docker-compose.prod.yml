@@ -44,8 +44,8 @@ services:
       - SMTP_FROM=${SMTP_FROM}
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
-      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - USER_MINIO=${MINIO_ROOT_USER:-minioadmin}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
       - PASSWORD_RESET_OTP_TTL_MINUTES=${PASSWORD_RESET_OTP_TTL_MINUTES:-15}
@@ -82,8 +82,8 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - EXPERT_USERNAME=${EXPERT_USERNAME:-expert}
       - EXPERT_PASSWORD=${EXPERT_PASSWORD:-expert123}
-      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - USER_MINIO=${MINIO_ROOT_USER:-minioadmin}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
@@ -157,8 +157,8 @@ services:
       - OWL_MIGRATE_STAGING_PHOTOS_ON_START=false
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
-      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - USER_MINIO=${MINIO_ROOT_USER:-minioadmin}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
       - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
@@ -235,8 +235,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -266,8 +266,8 @@ services:
         mc anonymous set public local/images || true
         echo 'MinIO bucket policy configured successfully'
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     networks:
       - asana-network
 
@@ -519,8 +519,8 @@ services:
       - RUN_BACKUP_ON_START=${RUN_BACKUP_ON_START:-false}
       - BACKUP_MIN_INTERVAL_SECONDS=${BACKUP_MIN_INTERVAL_SECONDS:-82800}
       - BACKUP_KEEP_LOCAL_ARCHIVES=${BACKUP_KEEP_LOCAL_ARCHIVES:-1}
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
       - S3_ENDPOINT=http://minio:9000
       - S3_BUCKET=${NAME_BUCKET_IMAGES_MINIO:-images}
       - S3_BACKUP_PREFIXES=${S3_BACKUP_PREFIXES:-asans,avatars}

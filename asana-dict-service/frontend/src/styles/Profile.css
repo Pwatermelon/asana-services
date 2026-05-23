@@ -54,6 +54,12 @@
   cursor: pointer;
 }
 
+.profile-form .btn-primary {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.25rem;
+}
+
 .profile-form .form-group {
   margin-bottom: 14px;
 }

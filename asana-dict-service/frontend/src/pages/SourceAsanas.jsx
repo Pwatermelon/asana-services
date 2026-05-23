@@ -1,17 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { sourcesAPI } from '../api/sources';
-import { useAuth } from '../contexts/AuthContext';
 import { CompactAsanaRow } from '../components/CompactAsanaRow';
 import '../styles/AsanasList.css';
 import './SourceAsanas.css';
 
 const SourceAsanas = () => {
   const { id } = useParams();
-  const { isExpertOrAdmin } = useAuth();
   const [source, setSource] = useState(null);
-  const [asanas, setAsanas] = useState([]);
   const [groupedAsanas, setGroupedAsanas] = useState({});
   const [alphabet, setAlphabet] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -27,9 +24,7 @@ const SourceAsanas = () => {
       setSource(sourceData);
 
       const asanasData = await asanasAPI.getBySource(shortId);
-      setAsanas(asanasData);
 
-      // Группировка по буквам
       const grouped = {};
       asanasData.forEach((asana) => {
         const firstLetter = asana.name?.name_ru?.[0]?.toUpperCase() || '?';
@@ -39,8 +34,7 @@ const SourceAsanas = () => {
         grouped[firstLetter].push(asana);
       });
 
-      // Сортируем асаны внутри каждой буквы по названию
-      Object.keys(grouped).forEach(letter => {
+      Object.keys(grouped).forEach((letter) => {
         grouped[letter].sort((a, b) => {
           const nameA = (a.name?.name_ru || '').toLowerCase();
           const nameB = (b.name?.name_ru || '').toLowerCase();
@@ -68,9 +62,7 @@ const SourceAsanas = () => {
   return (
     <div className="container">
       <div className="page-header">
-        <h1 className="page-title">
-          Асаны из источника: {source.title}
-        </h1>
+        <h1 className="page-title">Асаны из источника: {source.title}</h1>
         <p className="page-description">
           Автор: {source.author}
           {source.year != null && source.year !== '' && ` • ${source.year}`}
@@ -94,46 +86,11 @@ const SourceAsanas = () => {
         .map(([letter, letterAsanas]) => (
           <div key={letter} className="letter-section" id={`letter-${letter}`}>
             <h2 className="letter-heading">{letter}</h2>
-            {isExpertOrAdmin ? (
-              <div className="asana-grid">
-                {letterAsanas.map((asana) => {
-                  const rawId = asana.id.split('#').pop();
-                  return (
-                    <div key={asana.id} className="asana-card">
-                      <div className="asana-image">
-                        {asana.photo ? (
-                          <img
-                            src={asana.photo.startsWith('http') || asana.photo.startsWith('data:') ? asana.photo : `data:image/jpeg;base64,${asana.photo}`}
-                            alt={asana.name?.name_ru}
-                          />
-                        ) : (
-                          <div className="no-image">Нет фото</div>
-                        )}
-                      </div>
-                      <div className="asana-content">
-                        <h3 className="asana-title">{asana.name?.name_ru}</h3>
-                        <div className="asana-details">
-                          {asana.name?.name_sanskrit && (
-                            <p className="sanskrit-name">{asana.name.name_sanskrit}</p>
-                          )}
-                        </div>
-                        <div className="asana-actions">
-                          <Link to={`/asana/${rawId}-page`} className="btn-view">
-                            Подробнее
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="asana-lines">
-                {letterAsanas.map((asana) => (
-                  <CompactAsanaRow key={asana.id} asana={asana} />
-                ))}
-              </div>
-            )}
+            <div className="asana-lines">
+              {letterAsanas.map((asana) => (
+                <CompactAsanaRow key={asana.id} asana={asana} />
+              ))}
+            </div>
           </div>
         ))}
     </div>
@@ -141,4 +98,3 @@ const SourceAsanas = () => {
 };
 
 export default SourceAsanas;
-

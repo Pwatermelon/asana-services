@@ -32,8 +32,8 @@ services:
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
       # Совпадают с контейнером minio (MINIO_ROOT_*); при отсутствии — fallback на USER_MINIO из .env
-      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - USER_MINIO=${MINIO_ROOT_USER:-minioadmin}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
       - PASSWORD_RESET_OTP_TTL_MINUTES=${PASSWORD_RESET_OTP_TTL_MINUTES:-15}
@@ -81,8 +81,8 @@ services:
       - SMTP_FROM_NAME=${SMTP_FROM_NAME:-Каталог Асан}
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
-      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - USER_MINIO=${MINIO_ROOT_USER:-minioadmin}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
       # Только предзагрузка Excel→staging в S3 (не путать с финальным prefix=asans при apply из ячеек)
@@ -148,8 +148,8 @@ services:
       - OWL_MIGRATE_STAGING_PHOTOS_ON_START=false
       - HOST_MINIO=${HOST_MINIO:-minio}
       - PORT_MINIO=${PORT_MINIO:-9000}
-      - USER_MINIO=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - USER_MINIO=${MINIO_ROOT_USER:-minioadmin}
+      - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
       - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
@@ -240,8 +240,8 @@ services:
       - "9001:9001"
     environment:
       # Те же дефолты, что у backend/import: иначе при USER_MINIO в .env без MINIO_ROOT_* MinIO слушает minioadmin, а клиенты — другой ключ.
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -271,8 +271,8 @@ services:
         mc anonymous set public local/images || true
         echo 'MinIO bucket policy configured successfully'
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     networks:
       - asana-network
 
@@ -460,8 +460,8 @@ services:
       - RUN_BACKUP_ON_START=${RUN_BACKUP_ON_START:-false}
       - BACKUP_MIN_INTERVAL_SECONDS=${BACKUP_MIN_INTERVAL_SECONDS:-82800}
       - BACKUP_KEEP_LOCAL_ARCHIVES=${BACKUP_KEEP_LOCAL_ARCHIVES:-1}
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
       - S3_ENDPOINT=http://minio:9000
       - S3_BUCKET=${NAME_BUCKET_IMAGES_MINIO:-images}
       - S3_BACKUP_PREFIXES=${S3_BACKUP_PREFIXES:-asans,avatars}

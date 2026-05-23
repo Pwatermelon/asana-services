@@ -44,8 +44,8 @@ ONTOLOGY_PATH="${ONTOLOGY_PATH:-/app/ontology_updated.owl}"
 GDRIVE_REMOTE="${GDRIVE_REMOTE:-gdrive:asana-backups}"
 GDRIVE_ARCHIVE_NAME="${GDRIVE_ARCHIVE_NAME:-asana-backup-latest.tar.gz}"
 
-export AWS_ACCESS_KEY_ID="${MINIO_ROOT_USER:-${USER_MINIO:-minioadmin}}"
-export AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD:-${PASSWORD_MINIO:-minioadmin}}"
+export AWS_ACCESS_KEY_ID="${MINIO_ROOT_USER:-minioadmin}"
+export AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD:-minioadmin}"
 
 if [[ -f "${ONTOLOGY_PATH}" ]]; then
   cp "${ONTOLOGY_PATH}" "${WORK_DIR}/owl/ontology_updated.owl"

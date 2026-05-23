@@ -36,9 +36,13 @@ const ResetPassword = () => {
   if (success) {
     return (
       <div className="container">
-        <div className="auth-container">
+        <div className="auth-container auth-container-wide">
           <h1 className="auth-title">Код отправлен</h1>
-          <p>На указанный email отправлен код. Введите его на следующем шаге.</p>
+          <p className="auth-success-text">
+            На указанный email отправлен 6-значный код.
+            <br />
+            Введите его на следующем шаге — код действует ограниченное время.
+          </p>
           <Link to={`/reset-password-confirm?mail=${encodeURIComponent(mail.trim())}`} className="btn-primary">
             Ввести код
           </Link>
@@ -49,9 +53,9 @@ const ResetPassword = () => {
 
   return (
     <div className="container">
-      <div className="auth-container">
+      <div className="auth-container auth-container-wide">
         <h1 className="auth-title">Сброс пароля</h1>
-        <p className="auth-hint">Код придёт только на email, привязанный к учётной записи.</p>
+        <p className="auth-notice">Код придёт только на email, привязанный к учётной записи.</p>
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">

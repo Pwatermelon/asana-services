@@ -120,7 +120,7 @@ const ResetPasswordConfirm = () => {
 
         {step === 2 && (
           <form onSubmit={handleSetPassword}>
-            <p className="auth-hint">Придумайте новый пароль и повторите его.</p>
+            <p className="auth-notice">Придумайте новый пароль и повторите его.</p>
             <div className="form-group">
               <label htmlFor="new_password">Новый пароль</label>
               <input
@@ -152,25 +152,26 @@ const ResetPasswordConfirm = () => {
               confirmPassword={confirmPassword}
               showMatch
             />
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={loading || !rulesOk || !passwordsMatch}
-            >
-              {loading ? 'Сохранение...' : 'Сохранить пароль'}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ marginTop: '12px', width: '100%' }}
-              onClick={() => {
-                setStep(1);
-                setError('');
-              }}
-              disabled={loading}
-            >
-              Назад к коду
-            </button>
+            <div className="auth-form-actions">
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={loading || !rulesOk || !passwordsMatch}
+              >
+                {loading ? 'Сохранение...' : 'Сохранить пароль'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setStep(1);
+                  setError('');
+                }}
+                disabled={loading}
+              >
+                Назад к коду
+              </button>
+            </div>
           </form>
         )}
 

@@ -77,7 +77,8 @@ def smtp_user() -> str:
 
 
 def smtp_password() -> str:
-    return _strip_junk(_clean(os.getenv("SMTP_PASSWORD")))
+    val = _strip_junk(_clean(os.getenv("SMTP_PASSWORD")))
+    return val.rstrip("}")
 
 
 def smtp_from(default_user: str | None = None) -> str:

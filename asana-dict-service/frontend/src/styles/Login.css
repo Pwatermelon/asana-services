@@ -9,7 +9,7 @@
 }
 
 .auth-container-wide {
-  max-width: 480px;
+  max-width: 520px;
 }
 
 .auth-title {
@@ -28,7 +28,41 @@
   text-align: center;
   color: var(--text-secondary, #6b7280);
   font-size: 0.95rem;
-  margin: -1rem 0 1.25rem;
+  line-height: 1.5;
+  margin: -0.75rem 0 1.25rem;
+  padding: 0 0.25rem;
+}
+
+.auth-notice {
+  text-align: center;
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  margin: 0 0 1.25rem;
+  padding: 0 0.25rem;
+}
+
+.auth-success-text {
+  text-align: center;
+  color: var(--text-secondary, #6b7280);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 0 1.5rem;
+  padding: 0 0.5rem;
+}
+
+.auth-container form .btn-primary,
+.auth-container form .btn-secondary,
+.auth-container .auth-form-actions .btn-primary {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.auth-form-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 0.25rem;
 }
 
 .auth-links {
