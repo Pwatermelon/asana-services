@@ -37,12 +37,14 @@ SQLALCHEMY_DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASS
 # URL для сервиса авторизации (server-module)
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://server-module:8000")
 
+from app.smtp_env import smtp_host, smtp_port
+
 # Настройки SMTP (Яндекс: smtp.yandex.ru:465 SSL; порт 587 — STARTTLS)
-SMTP_SERVER = os.getenv("SMTP_HOST", os.getenv("SMTP_SERVER", "smtp.yandex.ru"))
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USER = os.getenv("SMTP_USER", "noreply@your-domain.com")
+SMTP_SERVER = smtp_host()
+SMTP_PORT = smtp_port(465)
+SMTP_USER = (os.getenv("SMTP_USER") or "").strip() or "noreply@your-domain.com"
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
+SMTP_FROM = (os.getenv("SMTP_FROM") or "").strip() or SMTP_USER
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Каталог Асан")
 
 # Настройки MINIO S3

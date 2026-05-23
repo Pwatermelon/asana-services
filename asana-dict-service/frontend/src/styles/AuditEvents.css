@@ -19,10 +19,17 @@
   gap: 8px;
 }
 
-.audit-events-controls input {
+.audit-events-controls input,
+.audit-events-controls select {
   padding: 8px 10px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
+}
+
+.audit-events-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  color: #6b7280;
 }
 
 .audit-table-wrap {

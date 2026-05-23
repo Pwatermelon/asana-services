@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/Login.css';
 
@@ -11,6 +11,8 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const nextPath = searchParams.get('next');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -20,6 +22,18 @@ const Login = () => {
     try {
       const result = await login(username, password, rememberMe);
       if (result.success) {
+        if (nextPath && nextPath.startsWith('/')) {
+          if (nextPath.startsWith('/grafana') || nextPath.startsWith('/kibana')) {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+              const params = new URLSearchParams({ access_token: token, next: nextPath });
+              window.location.href = `/api/auth/monitoring-session?${params.toString()}`;
+              return;
+            }
+          }
+          window.location.href = nextPath;
+          return;
+        }
         navigate('/asanas');
       } else {
         setError(result.error || 'Неверный логин или пароль');
@@ -35,6 +49,9 @@ const Login = () => {
     <div className="container">
       <div className="auth-container">
         <h1 className="auth-title">Вход в систему</h1>
+        {nextPath && (
+          <p className="auth-hint">После входа вы будете перенаправлены в запрошенный раздел.</p>
+        )}
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -58,13 +75,14 @@ const Login = () => {
             />
           </div>
           <div className="remember-me">
-            <input
-              type="checkbox"
-              id="remember-me"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-            />
-            <label htmlFor="remember-me">Запомнить меня</label>
+            <label>
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+              />
+              Запомнить меня
+            </label>
           </div>
           <button type="submit" className="btn-primary" disabled={loading}>
             {loading ? 'Вход...' : 'Войти'}
@@ -79,4 +97,3 @@ const Login = () => {
 };
 
 export default Login;
-

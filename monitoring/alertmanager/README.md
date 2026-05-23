@@ -1,39 +1,40 @@
 # Alertmanager → Telegram
 
-## Обычная настройка
-
-В `/app/.env`:
-
-- `TELEGRAM_BOT_TOKEN` — от @BotFather
-- `TELEGRAM_CHAT_ID` — id чата (напишите боту `/start`)
-
-## Telegram через VLESS (VPS в РФ)
-
-Если с сервера не открывается `api.telegram.org`, поднимается маленький HTTP-прокси **только для Alertmanager**. В `.env` вставьте ссылку из VPN-приложения (v2rayN, Happ, и т.п.):
+## Переменные в `/app/.env`
 
 ```env
-VLESS_URI=vless://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@vpn.example.com:443?encryption=none&security=tls&sni=vpn.example.com&type=ws&path=%2Fws#MyVPN
-
-TELEGRAM_HTTP_PROXY=http://telegram-proxy:8888
+TELEGRAM_BOT_TOKEN=...          # от @BotFather
+TELEGRAM_CHAT_ID=709857057      # ваш chat id (число)
+VLESS_URI=vless://...           # ссылка из VPN-клиента (для VPS в РФ)
+# TELEGRAM_HTTP_PROXY задаётся автоматически при деплое, если есть VLESS_URI
 ```
 
-Деплой с прокси:
+Боту напишите `/start` в личку или добавьте в группу.
+
+## Контейнеры
+
+После `docker compose up -d` должны быть:
+
+- `telegram-proxy` — VLESS + HTTP-прокси `:8888` (или «спит», если нет `VLESS_URI`)
+- `alertmanager` — шлёт в Telegram через прокси, если задан `VLESS_URI`
 
 ```bash
 cd /app
-sudo docker compose --profile telegram-vpn up -d telegram-proxy alertmanager
+sudo docker compose ps telegram-proxy alertmanager
+sudo docker compose logs --tail=30 telegram-proxy
+sudo docker compose logs --tail=30 alertmanager
 ```
 
-Проверка (должен ответить не «connection refused»):
+## Проверка вручную
 
 ```bash
-sudo docker compose exec alertmanager wget -qSO- -e use_proxy=yes -e http_proxy=http://telegram-proxy:8888 https://api.telegram.org 2>&1 | head -5
+cd /app
+sudo bash monitoring/test-telegram-alert.sh
 ```
 
-Сайт, БД и остальные сервисы **не** используют этот прокси — только Telegram-алерты.
+## Если алертов нет
 
-### Если не коннектится
-
-- Скопируйте ссылку целиком, в кавычках в `.env`, без переносов строк.
-- Для **Reality** в ссылке должны быть `security=reality`, `pbk`, `sid`, `sni`.
-- Логи: `sudo docker compose logs telegram-proxy`
+1. `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` пустые → alertmanager пишет в лог «отключены».
+2. Нет `VLESS_URI` на сервере в РФ → `api.telegram.org` недоступен напрямую.
+3. `telegram-proxy` не запущен — раньше был профиль `telegram-vpn`, сейчас поднимается с основным стеком.
+4. После смены `.env`: `sudo docker compose up -d --force-recreate telegram-proxy alertmanager`

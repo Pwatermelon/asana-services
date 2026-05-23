@@ -5,6 +5,8 @@ from typing import Any
 from pydantic.v1 import BaseSettings
 from dotenv import find_dotenv
 
+from src.api.auth.utils.smtp_env import smtp_host, smtp_port
+
 
 class Settings(BaseSettings):
     DB_HOST: str
@@ -38,6 +40,10 @@ class Settings(BaseSettings):
         super().__init__(**values)
         for attribute, value in self.__dict__.items():
             self.__dict__[attribute] = os.getenv(attribute, value)
+        self.__dict__["SMTP_SERVER"] = smtp_host()
+        self.__dict__["SMTP_PORT"] = str(smtp_port(465))
+        if not (self.__dict__.get("SMTP_FROM") or "").strip():
+            self.__dict__["SMTP_FROM"] = self.__dict__.get("SMTP_USER") or ""
 
     def get_database_url(self, driver) -> str:
         return f"{driver}://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"

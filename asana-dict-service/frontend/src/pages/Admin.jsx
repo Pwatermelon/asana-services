@@ -17,7 +17,7 @@ const Admin = () => {
 
   const monitoringUrl = (targetPath) => {
     if (!accessToken) {
-      return `${baseUrl}${targetPath}`;
+      return `${baseUrl}/login?next=${encodeURIComponent(targetPath)}`;
     }
     const params = new URLSearchParams({
       access_token: accessToken,
@@ -28,9 +28,9 @@ const Admin = () => {
 
   const grafanaUrl = monitoringUrl('/grafana/');
   const kibanaUrl = monitoringUrl('/kibana/');
-  const swaggerUrl = `${baseUrl}/api/docs${
-    accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : ''
-  }`;
+  const swaggerUrl = accessToken
+    ? `${baseUrl}/api/docs?access_token=${encodeURIComponent(accessToken)}`
+    : `${baseUrl}/login?next=${encodeURIComponent('/api/docs')}`;
 
   const toggleSection = (section) => {
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));

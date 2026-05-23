@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import random
+import loguru
 from fastapi import HTTPException
 
 from prometheus_client import Counter
@@ -89,9 +90,18 @@ class AuthService:
             used=False,
         )
         session.add(reset_code)
-        await session.commit()
         await session.flush()
-        send_reset_password_request(user.mail, code)
+        try:
+            send_reset_password_request(user.mail, code)
+        except Exception as exc:
+            await session.rollback()
+            PASSWORD_RESET_REQUESTS_TOTAL.labels("smtp_error").inc()
+            loguru.logger.exception("SMTP error on password reset for %s: %s", user.login, exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Не удалось отправить письмо. Проверьте SMTP на сервере (SMTP_HOST=smtp.yandex.ru, пароль приложения Яндекса).",
+            ) from exc
+        await session.commit()
         PASSWORD_RESET_REQUESTS_TOTAL.labels("ok").inc()
 
     async def verify_reset_code(self, payload: ResetPasswordVerifyDto, session: AsyncSession) -> None:

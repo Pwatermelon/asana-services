@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, EmailStr
 import base64
@@ -140,6 +140,22 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
             return None
         return None
     
+    @staticmethod
+    def _wants_html(request: StarletteRequest) -> bool:
+        accept = (request.headers.get("accept") or "").lower()
+        return "text/html" in accept or "*/*" in accept and "application/json" not in accept
+
+    @staticmethod
+    def _docs_login_redirect(request: StarletteRequest) -> RedirectResponse:
+        from urllib.parse import quote
+
+        nxt = quote(request.url.path, safe="")
+        return RedirectResponse(url=f"/login?next={nxt}", status_code=302)
+
+    @staticmethod
+    def _docs_forbidden_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/admin?forbidden=docs", status_code=302)
+
     async def dispatch(self, request: StarletteRequest, call_next):
         # Проверяем, является ли запрос к документации
         path = request.url.path
@@ -160,26 +176,32 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
             )
             
             if not token:
+                if self._wants_html(request):
+                    return self._docs_login_redirect(request)
                 return JSONResponse(
                     status_code=401,
-                    content={"detail": "Требуется авторизация для доступа к документации API"}
+                    content={"detail": "Требуется авторизация для доступа к документации API"},
                 )
             
             # Проверяем авторизацию и роль пользователя
             try:
                 user_data = get_user_info_from_token_sync(token)
                 if not user_data:
+                    if self._wants_html(request):
+                        return self._docs_login_redirect(request)
                     return JSONResponse(
                         status_code=401,
-                        content={"detail": "Недействительный токен авторизации"}
+                        content={"detail": "Недействительный токен авторизации"},
                     )
                 
                 # Проверяем, что пользователь является администратором
                 is_admin_flag = user_data.get("is_admin", False)
                 if not is_admin_flag:
+                    if self._wants_html(request):
+                        return self._docs_forbidden_redirect()
                     return JSONResponse(
                         status_code=403,
-                        content={"detail": "Доступ к документации API разрешен только администраторам"}
+                        content={"detail": "Доступ к документации API разрешен только администраторам"},
                     )
                 
                 # Пользователь авторизован и имеет нужные права - пропускаем запрос
@@ -278,11 +300,47 @@ async def monitoring_session(
     return response
 
 
+def _clear_auth_cookies(response: Response, *, secure: bool) -> None:
+    for key in ("monitoring_token", "access_token", "session_token"):
+        response.delete_cookie(key=key, path="/", secure=secure, samesite="lax")
+
+
+@app.api_route("/api/auth/logout", methods=["GET", "POST"], include_in_schema=False)
+async def logout_session(request: Request):
+    """Сброс cookie мониторинга и Swagger (localStorage чистит фронтенд)."""
+    response = JSONResponse({"ok": True})
+    _clear_auth_cookies(response, secure=request.url.scheme == "https")
+    return response
+
+
+@app.get("/api/auth/access-denied", include_in_schema=False)
+async def access_denied_page(code: int = Query(403, ge=401, le=403)):
+    """Страница «нет доступа» для nginx auth_request (UTF-8)."""
+    if code == 401:
+        body = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Требуется вход</title></head>
+<body style="font-family:sans-serif;padding:2rem;max-width:36rem">
+<h1>Требуется вход</h1>
+<p>Grafana и Kibana доступны только администратору после входа в каталог.</p>
+<p><a href="/login">Перейти на страницу входа</a></p>
+</body></html>"""
+    else:
+        body = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Доступ запрещён</title></head>
+<body style="font-family:sans-serif;padding:2rem;max-width:36rem">
+<h1>Доступ запрещён</h1>
+<p>Grafana и Kibana доступны только администратору. Войдите под учётной записью администратора
+и откройте ссылку из раздела «Администрирование».</p>
+<p><a href="/login">Войти</a> · <a href="/asanas">На главную</a></p>
+</body></html>"""
+    return HTMLResponse(content=body, status_code=code, media_type="text/html; charset=utf-8")
+
+
 class AuditMiddleware(BaseHTTPMiddleware):
     """Записывает аудит mutating API-запросов для админ-панели."""
 
     _skip_prefixes = ("/api/docs", "/api/redoc", "/api/openapi.json", "/health", "/metrics")
-    _skip_exact = ("/api/auth/check",)
+    _skip_exact = ("/api/auth/check", "/api/auth/logout")
     _track_methods = {"POST", "PATCH", "PUT", "DELETE"}
 
     async def dispatch(self, request: StarletteRequest, call_next):
@@ -290,6 +348,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             build_audit_payload,
             parse_request_body,
             prefetch_entity_context,
+            should_record_audit,
         )
 
         path = request.url.path
@@ -320,8 +379,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
         user_data = get_user_info_from_token_sync(token) if token else None
-        login = (user_data or {}).get("login")
-        avatar_url = (user_data or {}).get("avatar_url")
+
+        if not should_record_audit(
+            method=method,
+            path=path,
+            status_code=int(response.status_code),
+            user_data=user_data,
+        ):
+            return response
+
+        login = user_data.get("login")
+        avatar_url = user_data.get("avatar_url")
 
         body_data = parse_request_body(body_raw, request.headers.get("content-type"))
         duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
@@ -334,6 +402,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
             duration_ms=duration_ms,
             prefetched=prefetched,
         )
+        if user_data.get("is_admin"):
+            audit["details"]["actor_role"] = "admin"
+        elif user_data.get("permission_study"):
+            audit["details"]["actor_role"] = "expert"
 
         db = SessionLocal()
         try:
@@ -711,6 +783,19 @@ def run_application_startup() -> None:
                 except Exception as rel_err:
                     logger.warning("release_owl_write_lease после миграции staging: %s", rel_err)
             db_mig.close()
+
+    try:
+        from app.audit_context import maintain_audit_log
+
+        db_audit = SessionLocal()
+        try:
+            expired, garbage = maintain_audit_log(db_audit)
+            if expired or garbage:
+                logger.info("Аудит: удалено устаревших=%s, мусорных=%s", expired, garbage)
+        finally:
+            db_audit.close()
+    except Exception as audit_maint_err:
+        logger.warning("Очистка журнала аудита пропущена: %s", audit_maint_err)
 
     logger.info("Application startup completed successfully")
 
@@ -2556,9 +2641,29 @@ async def get_audit_events(
     limit: int = Query(default=200, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
 ):
+    from datetime import datetime, timedelta
+    from app.models import User
+
+    retention_days = int(os.getenv("AUDIT_RETENTION_DAYS", "7"))
+    if not from_ts:
+        from_ts = (datetime.utcnow() - timedelta(days=retention_days)).isoformat()
+
     db = SessionLocal()
     try:
-        query = db.query(AuditEvent)
+        privileged_logins = {
+            row[0]
+            for row in db.query(User.login).filter(
+                (User.is_admin == True) | (User.permission_study == True)  # noqa: E712
+            ).all()
+            if row[0]
+        }
+
+        query = db.query(AuditEvent).filter(AuditEvent.status_code < 400)
+        if privileged_logins:
+            query = query.filter(AuditEvent.login.in_(list(privileged_logins)))
+        else:
+            query = query.filter(AuditEvent.login.isnot(None))
+
         if login:
             query = query.filter(AuditEvent.login == login)
         if action_code:

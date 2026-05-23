@@ -20,6 +20,13 @@
   line-height: 1.2;
 }
 
+.auth-hint {
+  text-align: center;
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.95rem;
+  margin: -1rem 0 1.25rem;
+}
+
 .auth-links {
   text-align: center;
   margin-top: 2em;

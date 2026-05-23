@@ -23,6 +23,9 @@ services:
     ports:
       - "8001:8000"
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
@@ -69,6 +72,9 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
@@ -349,15 +355,13 @@ services:
     networks:
       - asana-network
 
-  # HTTP-прокси через VLESS только для Alertmanager → Telegram (профиль telegram-vpn).
-  # В .env: VLESS_URI=vless://... и TELEGRAM_HTTP_PROXY=http://telegram-proxy:8888
+  # HTTP-прокси VLESS → Telegram (Alertmanager). Нужен VLESS_URI в .env на сервере.
   telegram-proxy:
+    image: plwatermelon/asana-telegram-proxy:${DICT_SERVICE_VERSION:-local}
     build:
       context: ./monitoring/telegram-proxy
       dockerfile: Dockerfile
     container_name: telegram-proxy
-    profiles:
-      - telegram-vpn
     restart: unless-stopped
     environment:
       - VLESS_URI=${VLESS_URI:-}
@@ -373,10 +377,13 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - TELEGRAM_HTTP_PROXY=${TELEGRAM_HTTP_PROXY:-}
+      - VLESS_URI=${VLESS_URI:-}
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml.template:/etc/alertmanager/alertmanager.yml.template:ro
       - ./monitoring/alertmanager/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    depends_on:
+      - telegram-proxy
     networks:
       - asana-network
 

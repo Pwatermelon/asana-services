@@ -16,6 +16,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import config
 from app.auth import get_user_info_from_token_sync
+from app.audit_context import build_audit_payload, parse_request_body, should_record_audit
 from app.config import logger
 from app.models import AuditEvent
 from app.main import SessionLocal, HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION_SECONDS
@@ -74,43 +75,68 @@ class AuditMiddleware(BaseHTTPMiddleware):
     _track_methods = {"POST", "PATCH", "PUT", "DELETE"}
     _skip_prefixes = ("/api/import/docs", "/api/import/redoc", "/api/import/openapi.json", "/metrics")
 
-    @staticmethod
-    def _extract_entity(path: str) -> tuple[str | None, str | None]:
-        parts = (path or "").strip("/").split("/")
-        if parts and parts[0] == "api":
-            parts = parts[1:]
-        if not parts:
-            return None, None
-        entity = parts[0]
-        entity_id = parts[1] if len(parts) > 1 else None
-        return entity, entity_id
-
     async def dispatch(self, request: StarletteRequest, call_next):
-        should_track = request.method.upper() in self._track_methods and not any(
-            request.url.path.startswith(prefix) for prefix in self._skip_prefixes
+        path = request.url.path
+        method = request.method.upper()
+        should_track = method in self._track_methods and not any(
+            path.startswith(prefix) for prefix in self._skip_prefixes
         )
+        body_raw = b""
+        if should_track:
+            body_raw = await request.body()
+
+            async def receive():
+                return {"type": "http.request", "body": body_raw, "more_body": False}
+
+            request._receive = receive
+
+        start = datetime.utcnow()
         response = await call_next(request)
+
         if not should_track or SessionLocal is None:
             return response
 
         token = request.headers.get("Authorization", "").replace("Bearer ", "") or request.cookies.get("access_token")
         user_data = get_user_info_from_token_sync(token) if token else None
-        entity_type, entity_id = self._extract_entity(request.url.path)
+
+        if not should_record_audit(
+            method=method,
+            path=path,
+            status_code=int(response.status_code),
+            user_data=user_data,
+        ):
+            return response
+
+        body_data = parse_request_body(body_raw, request.headers.get("content-type"))
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        audit = build_audit_payload(
+            method=method,
+            path=path,
+            query_params=dict(request.query_params),
+            body=body_data,
+            status_code=int(response.status_code),
+            duration_ms=duration_ms,
+            prefetched={},
+        )
+        if user_data.get("is_admin"):
+            audit["details"]["actor_role"] = "admin"
+        elif user_data.get("permission_study"):
+            audit["details"]["actor_role"] = "expert"
 
         db = SessionLocal()
         try:
             event = AuditEvent(
                 timestamp=datetime.utcnow().isoformat(),
-                login=(user_data or {}).get("login"),
-                avatar_url=(user_data or {}).get("avatar_url"),
-                method=request.method.upper(),
-                path=request.url.path,
+                login=user_data.get("login"),
+                avatar_url=user_data.get("avatar_url"),
+                method=method,
+                path=path,
                 status_code=int(response.status_code),
-                action_code=f"{request.method.upper()}:{request.url.path}",
-                entity_type=entity_type,
-                entity_id=entity_id,
+                action_code=audit["action_code"],
+                entity_type=audit.get("entity_type"),
+                entity_id=audit.get("entity_id"),
                 ip=(request.client.host if request.client else None),
-                details=json.dumps({"query": str(request.query_params)}, ensure_ascii=False),
+                details=json.dumps(audit["details"], ensure_ascii=False),
             )
             db.add(event)
             db.commit()

@@ -131,13 +131,21 @@ jobs:
           push: true
           tags: plwatermelon/asana-backup-runner:${{ needs.resolve.outputs.version }}
 
-      - name: "Auth service (server-module — профиль, OTP, смена пароля)"
+      - name: Auth service (server-module — профиль, OTP, смена пароля)
         uses: docker/build-push-action@v6
         with:
           context: ./asana-server-module
           file: ./asana-server-module/Dockerfile
           push: true
           tags: plwatermelon/server-module:${{ needs.resolve.outputs.version }}
+
+      - name: Telegram proxy (VLESS для Alertmanager)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./monitoring/telegram-proxy
+          file: ./monitoring/telegram-proxy/Dockerfile
+          push: true
+          tags: plwatermelon/asana-telegram-proxy:${{ needs.resolve.outputs.version }}
 
   deploy:
     needs: [resolve, build-and-push]
@@ -200,14 +208,21 @@ jobs:
           echo "=== Pull и запуск ==="
           sudo docker-compose pull
           sudo docker-compose up -d --scale asana-import=3
-          if [ -f .env ] && grep -qE '^VLESS_URI=.' .env; then
-            sudo docker-compose --profile telegram-vpn build telegram-proxy
-            sudo docker-compose --profile telegram-vpn up -d telegram-proxy
+          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
+            if ! grep -qE '^TELEGRAM_HTTP_PROXY=' .env; then
+              printf '\nTELEGRAM_HTTP_PROXY=http://telegram-proxy:8888\n' >> .env
+            fi
+            sudo docker-compose pull telegram-proxy 2>/dev/null || true
+            sudo docker-compose up -d telegram-proxy
           fi
-          sleep 5
+          sudo docker-compose up -d --force-recreate alertmanager
+          sleep 8
           sudo docker-compose exec -T nginx nginx -s reload 2>/dev/null || true
-          # Одноразовый алерт в Alertmanager → Telegram (те же TELEGRAM_* из .env)
-          sudo docker-compose exec -T prometheus sh -c \
-            'wget -qO- --header="Content-Type: application/json" --post-data="[{\"labels\":{\"alertname\":\"DeployCompleted\",\"severity\":\"info\",\"version\":\"'"${VERSION}"'\"},\"annotations\":{\"summary\":\"Деплой завершён\",\"description\":\"Установлена версия '"${VERSION}"'\"}}]" http://alertmanager:9093/api/v2/alerts' \
-            2>/dev/null || true
+          echo "=== Тест алерта Telegram ==="
+          sudo docker-compose exec -T prometheus wget -qO- \
+            --header="Content-Type: application/json" \
+            --post-data="[{\"labels\":{\"alertname\":\"DeployCompleted\",\"severity\":\"info\",\"version\":\"'"${VERSION}"'\"},\"annotations\":{\"summary\":\"Деплой завершён\",\"description\":\"Установлена версия '"${VERSION}"'\"}}]" \
+            http://alertmanager:9093/api/v2/alerts \
+            || echo "WARN: не удалось отправить тестовый алерт в alertmanager"
+          sudo docker-compose logs --tail=20 alertmanager 2>/dev/null || true
           REMOTE_SCRIPT

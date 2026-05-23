@@ -42,7 +42,140 @@ _ACTION_RULES: list[tuple[str, str, str, str]] = [
     ("POST", "/api/ai/scan", "ai.scan", "Запуск AI-сканирования"),
     ("POST", "/api/import/", "import.run", "Импорт данных"),
     ("DELETE", "/api/import/", "import.delete", "Удаление импорта"),
+    ("POST", "/api/export/", "export.run", "Экспорт данных"),
+    ("POST", "/api/upload-ontology", "ontology.upload", "Загрузка онтологии"),
+    ("POST", "/api/download-ontology", "ontology.download", "Скачивание онтологии"),
+    ("POST", "/api/moderation/items/export", "moderation.export", "Экспорт модерации"),
 ]
+
+# Префиксы API, которые имеет смысл аудировать (админы/эксперты). Сканеры /api/route и т.п. — нет.
+_AUDIT_PATH_PREFIXES = (
+    "/api/asanas",
+    "/api/asana/",
+    "/api/asana-names",
+    "/api/sources",
+    "/api/delete-source",
+    "/api/delete-asana-name",
+    "/api/users",
+    "/api/about-project",
+    "/api/expert-instructions",
+    "/api/moderation/",
+    "/api/ai/",
+    "/api/import/",
+    "/api/export/",
+    "/api/upload-ontology",
+    "/api/download-ontology",
+)
+
+_AUDIT_SKIP_PREFIXES = (
+    "/api/docs",
+    "/api/redoc",
+    "/api/openapi",
+    "/api/auth/",
+    "/api/users/me",
+    "/api/route",
+    "/api/audit/",
+    "/metrics",
+    "/health",
+)
+
+
+def is_registered_action(method: str, path: str) -> bool:
+    """True, если path — известный бизнес-эндпоинт каталога (не мусорный 404)."""
+    method = method.upper()
+    path = path or ""
+
+    for sm, fragment, _code, _label in [
+        ("POST", "/block", "user.block", ""),
+        ("POST", "/unblock", "user.unblock", ""),
+        ("DELETE", "/photo/", "asana.photo.delete", ""),
+        ("POST", "/add-photo", "asana.photo.add", ""),
+        ("POST", "/rotate", "asana.photo.rotate", ""),
+        ("PUT", "/photo/", "asana.photo.replace", ""),
+        ("DELETE", "/same-as/", "asana.same_as.remove", ""),
+        ("POST", "/same-as", "asana.same_as.add", ""),
+        ("PATCH", "/confirm", "ai.proposal.confirm", ""),
+        ("PATCH", "/reject", "ai.proposal.reject", ""),
+    ]:
+        if method == sm and fragment in path:
+            return True
+
+    for rule_method, rule_path, _code, _label in _ACTION_RULES:
+        if method != rule_method:
+            continue
+        if path == rule_path or path.rstrip("/") == rule_path.rstrip("/"):
+            return True
+        if rule_path.endswith("/") and path.startswith(rule_path):
+            return True
+
+    if any(path.startswith(prefix) for prefix in _AUDIT_PATH_PREFIXES):
+        if path.startswith("/api/users/me"):
+            return False
+        return True
+    return False
+
+
+def is_privileged_actor(user_data: dict[str, Any] | None) -> bool:
+    if not user_data or not user_data.get("login"):
+        return False
+    return bool(user_data.get("is_admin") or user_data.get("permission_study"))
+
+
+def should_record_audit(
+    *,
+    method: str,
+    path: str,
+    status_code: int,
+    user_data: dict[str, Any] | None,
+) -> bool:
+    """Пишем только успешные действия авторизованных админов/экспертов по белому списку API."""
+    if method.upper() not in {"POST", "PATCH", "PUT", "DELETE"}:
+        return False
+    if status_code >= 400:
+        return False
+    if not is_privileged_actor(user_data):
+        return False
+    if any(path.startswith(p) for p in _AUDIT_SKIP_PREFIXES):
+        return False
+    if not path.startswith("/api/"):
+        return False
+    return is_registered_action(method, path)
+
+
+def maintain_audit_log(db, *, retention_days: int | None = None) -> tuple[int, int]:
+    """Удаляет записи старше retention и мусор (гости, 404, не админы/эксперты)."""
+    import os
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import or_
+
+    from app.models import AuditEvent, User
+
+    days = retention_days if retention_days is not None else int(os.getenv("AUDIT_RETENTION_DAYS", "7"))
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    expired = db.query(AuditEvent).filter(AuditEvent.timestamp < cutoff).delete(synchronize_session=False)
+
+    privileged_logins = {
+        row[0]
+        for row in db.query(User.login).filter(
+            (User.is_admin == True) | (User.permission_study == True)  # noqa: E712
+        ).all()
+        if row[0]
+    }
+
+    garbage_filters = [
+        AuditEvent.login.is_(None),
+        AuditEvent.login == "",
+        AuditEvent.status_code >= 400,
+        AuditEvent.path.like("/api/route%"),
+        AuditEvent.path == "/api",
+    ]
+    if privileged_logins:
+        garbage_filters.append(~AuditEvent.login.in_(list(privileged_logins)))
+
+    garbage = db.query(AuditEvent).filter(or_(*garbage_filters)).delete(synchronize_session=False)
+    db.commit()
+    return expired, garbage
 
 
 def short_uri(uri: str | None) -> str | None:

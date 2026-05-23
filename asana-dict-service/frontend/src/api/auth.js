@@ -89,7 +89,12 @@ export const authAPI = {
     return response.data;
   },
 
-  logout: () => {
+  logout: async () => {
+    try {
+      await apiClient.post('/api/auth/logout');
+    } catch {
+      // cookie httponly — без API не сбросить
+    }
     localStorage.removeItem('access_token');
     localStorage.removeItem('user_role');
   },

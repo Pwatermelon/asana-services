@@ -23,6 +23,8 @@ const ResetPassword = () => {
         setError(err.response?.data?.detail || 'Слишком много попыток. Подождите и повторите позже.');
       } else if (status === 401) {
         setError(err.response?.data?.detail || 'Логин или email не найден.');
+      } else if (status === 503) {
+        setError(err.response?.data?.detail || 'Почтовый сервер недоступен. Обратитесь к администратору.');
       } else {
         setError(err.response?.data?.detail || 'Ошибка при запросе сброса пароля');
       }
