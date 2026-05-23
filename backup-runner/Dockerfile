@@ -12,7 +12,8 @@ RUN apk add --no-cache \
     tzdata \
     tar \
     gzip \
-    aws-cli
+    aws-cli \
+    util-linux
 
 WORKDIR /app
 

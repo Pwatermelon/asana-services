@@ -4,7 +4,7 @@ import { authAPI } from '../api/auth';
 import '../styles/Login.css';
 
 const ResetPassword = () => {
-  const [login, setLogin] = useState('');
+  const [mail, setMail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -15,14 +15,14 @@ const ResetPassword = () => {
     setLoading(true);
 
     try {
-      await authAPI.resetPasswordRequest(login);
+      await authAPI.resetPasswordRequest(mail.trim());
       setSuccess(true);
     } catch (err) {
       const status = err.response?.status;
       if (status === 429) {
         setError(err.response?.data?.detail || 'Слишком много попыток. Подождите и повторите позже.');
-      } else if (status === 401) {
-        setError(err.response?.data?.detail || 'Логин или email не найден.');
+      } else if (status === 422) {
+        setError('Укажите корректный email.');
       } else if (status === 503) {
         setError(err.response?.data?.detail || 'Почтовый сервер недоступен. Обратитесь к администратору.');
       } else {
@@ -38,8 +38,8 @@ const ResetPassword = () => {
       <div className="container">
         <div className="auth-container">
           <h1 className="auth-title">Код отправлен</h1>
-          <p>На email учётной записи отправлен код. Введите его на следующем шаге.</p>
-          <Link to={`/reset-password-confirm?login=${encodeURIComponent(login)}`} className="btn-primary">
+          <p>На указанный email отправлен код. Введите его на следующем шаге.</p>
+          <Link to={`/reset-password-confirm?mail=${encodeURIComponent(mail.trim())}`} className="btn-primary">
             Ввести код
           </Link>
         </div>
@@ -51,20 +51,22 @@ const ResetPassword = () => {
     <div className="container">
       <div className="auth-container">
         <h1 className="auth-title">Сброс пароля</h1>
+        <p className="auth-hint">Код придёт только на email, привязанный к учётной записи.</p>
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="login">Логин или email</label>
+            <label htmlFor="mail">Email</label>
             <input
-              type="text"
-              id="login"
-              value={login}
-              onChange={(e) => setLogin(e.target.value)}
+              type="email"
+              id="mail"
+              value={mail}
+              onChange={(e) => setMail(e.target.value)}
+              autoComplete="email"
               required
             />
           </div>
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Отправка...' : 'Отправить'}
+            {loading ? 'Отправка...' : 'Отправить код'}
           </button>
         </form>
         <div className="auth-links">
@@ -76,4 +78,3 @@ const ResetPassword = () => {
 };
 
 export default ResetPassword;
-

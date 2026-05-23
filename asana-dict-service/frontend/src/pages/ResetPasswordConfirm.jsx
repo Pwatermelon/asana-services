@@ -5,7 +5,7 @@ import '../styles/Login.css';
 
 const ResetPasswordConfirm = () => {
   const [searchParams] = useSearchParams();
-  const [login, setLogin] = useState(searchParams.get('login') || '');
+  const [mail, setMail] = useState(searchParams.get('mail') || '');
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [error, setError] = useState('');
@@ -19,15 +19,18 @@ const ResetPasswordConfirm = () => {
     setLoading(true);
 
     try {
-      await authAPI.verifyResetCode(login, code);
-      await authAPI.resetPasswordConfirm(login, code, newPassword);
+      const normalizedMail = mail.trim();
+      await authAPI.verifyResetCode(normalizedMail, code);
+      await authAPI.resetPasswordConfirm(normalizedMail, code, newPassword);
       navigate('/login');
     } catch (err) {
       const status = err.response?.status;
       if (status === 429) {
         setError(err.response?.data?.detail || 'Слишком много попыток. Подождите и повторите позже.');
+      } else if (status === 422) {
+        setError('Укажите корректный email.');
       } else {
-        setError(err.response?.data?.detail || 'Ошибка при сбросе пароля');
+        setError(err.response?.data?.detail || 'Неверный код или email. Запросите код заново.');
       }
     } finally {
       setLoading(false);
@@ -41,22 +44,26 @@ const ResetPasswordConfirm = () => {
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="login">Логин или email</label>
+            <label htmlFor="mail">Email</label>
             <input
-              type="text"
-              id="login"
-              value={login}
-              onChange={(e) => setLogin(e.target.value)}
+              type="email"
+              id="mail"
+              value={mail}
+              onChange={(e) => setMail(e.target.value)}
+              autoComplete="email"
               required
+              readOnly={Boolean(searchParams.get('mail'))}
             />
           </div>
           <div className="form-group">
-            <label htmlFor="code">Код подтверждения</label>
+            <label htmlFor="code">Код из письма</label>
             <input
               type="text"
               id="code"
               value={code}
               onChange={(e) => setCode(e.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
               required
             />
           </div>
@@ -67,6 +74,7 @@ const ResetPasswordConfirm = () => {
               id="new_password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
               required
             />
           </div>
@@ -75,6 +83,7 @@ const ResetPasswordConfirm = () => {
           </button>
         </form>
         <div className="auth-links">
+          <Link to="/reset-password">Запросить код снова</Link>
           <Link to="/login">Вернуться к входу</Link>
         </div>
       </div>
@@ -83,4 +92,3 @@ const ResetPasswordConfirm = () => {
 };
 
 export default ResetPasswordConfirm;
-

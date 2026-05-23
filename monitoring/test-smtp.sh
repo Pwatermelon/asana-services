@@ -19,9 +19,14 @@ fi
 echo ""
 echo "=== Переменные внутри server-module (восстановление пароля) ==="
 docker compose exec -T server-module python3 - <<'PY' 2>/dev/null || docker-compose exec -T server-module python3 - <<'PY'
+import os
 from config import get_settings
 s = get_settings()
-print(f"host={s.SMTP_SERVER!r} port={s.SMTP_PORT!r} user={s.SMTP_USER!r} from={s.SMTP_FROM!r} pass_len={len(s.SMTP_PASSWORD or '')}")
+print("os.environ SMTP_HOST=", repr(os.environ.get("SMTP_HOST")))
+print("os.environ SMTP_SERVER=", repr(os.environ.get("SMTP_SERVER")))
+print(f"settings host={s.SMTP_SERVER!r} port={s.SMTP_PORT!r} user={s.SMTP_USER!r} pass_len={len(s.SMTP_PASSWORD or '')}")
+from src.api.auth.utils.smtp_env import smtp_host
+print("smtp_host()=", repr(smtp_host()))
 PY
 
 echo ""

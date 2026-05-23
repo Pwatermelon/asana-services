@@ -59,6 +59,15 @@ async def registration(
 ) -> UserOutDto:
     return await auth_service.registration_user(user_data, session)
 
+@router.api_route("/logout", methods=["GET", "POST"], include_in_schema=False)
+async def logout(request: Request, response: Response) -> dict:
+    """Сброс cookie сессии (monitoring_token выставляет asana-backend)."""
+    secure = request.url.scheme == "https"
+    for key in ("access_token", "monitoring_token", "session_token"):
+        response.delete_cookie(key=key, path="/", secure=secure, samesite="lax")
+    return {"ok": True}
+
+
 @router.post("/reset_password_request")
 async def reset_password_request(
     request: Request,
@@ -66,8 +75,8 @@ async def reset_password_request(
     auth_service: AuthService = Depends(AuthService),
     session: AsyncSession = Depends(get_session)
 ) -> None:
-    enforce_password_reset_request_limit(request, payload.login)
-    return await auth_service.reset_password_request(payload.login, session)
+    enforce_password_reset_request_limit(request, str(payload.mail))
+    return await auth_service.reset_password_request(str(payload.mail), session)
 
 
 @router.post("/reset_password_verify")
@@ -77,7 +86,7 @@ async def reset_password_verify(
     auth_service: AuthService = Depends(AuthService),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    enforce_password_reset_verify_limit(request, payload.login)
+    enforce_password_reset_verify_limit(request, str(payload.mail))
     return await auth_service.verify_reset_code(payload, session)
 
 
@@ -88,5 +97,5 @@ async def reset_password(
     auth_service: AuthService = Depends(AuthService),
     session: AsyncSession = Depends(get_session)
 ) -> UserOutDto:
-    enforce_password_reset_confirm_limit(request, reset_password_data.login)
+    enforce_password_reset_confirm_limit(request, str(reset_password_data.mail))
     return await auth_service.reset_password(reset_password_data, session)

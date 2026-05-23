@@ -70,14 +70,16 @@ class AuthService:
         mail = verify_token_mail(token)
         return await self.user_service.verify_user(mail, session)
 
-    async def reset_password_request(self, login: str, session: AsyncSession) -> None:
-        user: UserOutDto = await self.user_service.get_user_by_login(login, session)
+    async def reset_password_request(self, mail: str, session: AsyncSession) -> None:
+        user: UserOutDto | None = await self.user_service.get_user_by_mail(mail.strip().lower(), session)
         if user is None:
-            user: UserOutDto = await self.user_service.get_user_by_mail(login, session)
+            # повтор с исходным регистром (старые записи в БД)
+            user = await self.user_service.get_user_by_mail(mail.strip(), session)
 
         if user is None:
             PASSWORD_RESET_REQUESTS_TOTAL.labels("not_found").inc()
-            raise CredentialsException()
+            # Не раскрываем, есть ли такой пользователь (и не путаем с ошибкой bcrypt/SMTP)
+            return
 
         await session.execute(delete(PasswordResetCode).where(PasswordResetCode.user_id == user.id))
         ttl_minutes = int(getattr(settings, "PASSWORD_RESET_OTP_TTL_MINUTES", "15") or "15")
@@ -105,9 +107,10 @@ class AuthService:
         PASSWORD_RESET_REQUESTS_TOTAL.labels("ok").inc()
 
     async def verify_reset_code(self, payload: ResetPasswordVerifyDto, session: AsyncSession) -> None:
-        user: UserOutDto = await self.user_service.get_user_by_login(payload.login, session)
+        mail = str(payload.mail).strip()
+        user: UserOutDto | None = await self.user_service.get_user_by_mail(mail.lower(), session)
         if user is None:
-            user = await self.user_service.get_user_by_mail(payload.login, session)
+            user = await self.user_service.get_user_by_mail(mail, session)
         if user is None:
             PASSWORD_RESET_VERIFICATIONS_TOTAL.labels("not_found").inc()
             raise CredentialsException()
@@ -129,12 +132,13 @@ class AuthService:
 
     async def reset_password(self, reset_password_data: ResetPasswordDto, session: AsyncSession) -> UserOutDto:
         await self.verify_reset_code(
-            ResetPasswordVerifyDto(login=reset_password_data.login, code=reset_password_data.code),
+            ResetPasswordVerifyDto(mail=reset_password_data.mail, code=reset_password_data.code),
             session,
         )
-        user: UserOutDto = await self.user_service.get_user_by_login(reset_password_data.login, session)
+        mail = str(reset_password_data.mail).strip()
+        user: UserOutDto | None = await self.user_service.get_user_by_mail(mail.lower(), session)
         if user is None:
-            user = await self.user_service.get_user_by_mail(reset_password_data.login, session)
+            user = await self.user_service.get_user_by_mail(mail, session)
         if user is None:
             raise CredentialsException()
 

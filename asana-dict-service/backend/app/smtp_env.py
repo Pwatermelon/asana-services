@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
+
+_DEFAULT_HOST = "smtp.yandex.ru"
+_HOST_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 
 def _clean(value: str | None) -> str:
@@ -14,21 +18,35 @@ def _clean(value: str | None) -> str:
     return val
 
 
+def _normalize_host(raw: str) -> str:
+    val = _clean(raw)
+    if not val:
+        return ""
+    if "${" in val or val.startswith("$"):
+        return ""
+    val = val.strip("{}'\"$` ")
+    if ":" in val and not val.startswith("["):
+        val = val.rsplit(":", 1)[0].strip()
+    val = val.strip("{}'\"$` ")
+    if not _HOST_RE.match(val):
+        val = re.sub(r"[^a-zA-Z0-9.-]+$", "", val)
+        val = re.sub(r"^[^a-zA-Z0-9]+", "", val)
+    return val.strip()
+
+
 def smtp_host() -> str:
     for key in ("SMTP_HOST", "SMTP_SERVER"):
-        val = _clean(os.getenv(key))
-        if not val:
-            continue
-        if ":" in val and not val.startswith("["):
-            val = val.rsplit(":", 1)[0].strip()
-        return val
-    return "smtp.yandex.ru"
+        val = _normalize_host(os.getenv(key) or "")
+        if val:
+            return val
+    return _DEFAULT_HOST
 
 
 def smtp_port(default: int = 465) -> int:
     raw = _clean(os.getenv("SMTP_PORT"))
     if not raw:
         return default
+    raw = raw.rstrip("}'\" ")
     try:
         return int(raw)
     except ValueError:

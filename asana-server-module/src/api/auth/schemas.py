@@ -1,5 +1,5 @@
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from fastapi import Request
 
 
@@ -17,15 +17,15 @@ class Token(BaseModel):
 
 
 class ResetPasswordDto(BaseModel):
-    login: str
+    mail: EmailStr
     code: str
     password: str
 
 
 class ResetPasswordRequestDto(BaseModel):
-    login: str
+    mail: EmailStr
 
 
 class ResetPasswordVerifyDto(BaseModel):
-    login: str
+    mail: EmailStr
     code: str

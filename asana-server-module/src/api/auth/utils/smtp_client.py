@@ -44,6 +44,11 @@ def send_email(to: str, subject: str, body: str) -> None:
             server.ehlo()
             server.login(user, password)
             server.send_message(msg)
+    except OSError as exc:
+        raise OSError(
+            f"Не удалось подключиться к SMTP {host!r}:{port} — проверьте SMTP_HOST в /app/.env "
+            f"(без лишних символов вроде '}}'). Исходная ошибка: {exc}"
+        ) from exc
     except smtplib.SMTPAuthenticationError as exc:
         raise smtplib.SMTPAuthenticationError(
             exc.smtp_code,

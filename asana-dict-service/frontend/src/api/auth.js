@@ -48,19 +48,22 @@ export const authAPI = {
     return response.data;
   },
 
-  resetPasswordRequest: async (login) => {
-    const response = await apiClient.post('/api/auth/reset_password_request', { login });
+  resetPasswordRequest: async (mail) => {
+    const response = await apiClient.post('/api/auth/reset_password_request', { mail: mail.trim() });
     return response.data;
   },
 
-  verifyResetCode: async (login, code) => {
-    const response = await apiClient.post('/api/auth/reset_password_verify', { login, code });
+  verifyResetCode: async (mail, code) => {
+    const response = await apiClient.post('/api/auth/reset_password_verify', {
+      mail: mail.trim(),
+      code,
+    });
     return response.data;
   },
 
-  resetPasswordConfirm: async (login, code, newPassword) => {
+  resetPasswordConfirm: async (mail, code, newPassword) => {
     const response = await apiClient.patch('/api/auth/reset_password', {
-      login,
+      mail: mail.trim(),
       code,
       password: newPassword,
     });
