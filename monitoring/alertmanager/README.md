@@ -16,7 +16,32 @@ VLESS_URI=vless://...           # ссылка из VPN-клиента (для V
 После `docker compose up -d` должны быть:
 
 - `telegram-proxy` — VLESS + HTTP-прокси `:8888` (или «спит», если нет `VLESS_URI`)
-- `alertmanager` — шлёт в Telegram через прокси, если задан `VLESS_URI`
+- `alertmanager` — шлёт в Telegram **только когда получает алерт** (при старте молчит)
+
+**Alertmanager не шлёт «я запустился» сам.** Алерт приходит если:
+- CI-деплой отправил `DeployCompleted`;
+- Prometheus сработал по правилам (сервис down 3–5 мин и т.д.);
+- вы вручную POST в `/api/v2/alerts`.
+
+### Тест вручную (на сервере)
+
+```bash
+cd /app
+sudo docker compose exec -T prometheus wget -qO- \
+  --header="Content-Type: application/json" \
+  --post-data='[{"labels":{"alertname":"TelegramTest","severity":"info"},"annotations":{"summary":"Ручной тест","description":"Проверка Telegram"}}]' \
+  http://alertmanager:9093/api/v2/alerts
+
+# через ~5 сек смотрите логи (ошибки Telegram будут здесь):
+sudo docker compose logs --tail=30 alertmanager
+```
+
+Или: `TELEGRAM_STARTUP_TEST=1` в `.env` → один тест при каждом перезапуске alertmanager.
+
+```bash
+grep -q '^TELEGRAM_STARTUP_TEST=' .env || echo 'TELEGRAM_STARTUP_TEST=1' >> .env
+sudo docker compose up -d --force-recreate alertmanager
+```
 
 ```bash
 cd /app

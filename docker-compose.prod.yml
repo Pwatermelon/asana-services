@@ -36,6 +36,7 @@ services:
       - PORT_SERVER=8000
       - SECRET_KEY=${SECRET_KEY}
       - HOST_NETWORK_SERVER=${URL_NETWORK_SERVER}
+      - SMTP_HOST=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
       - SMTP_SERVER=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
       - SMTP_PORT=${SMTP_PORT:-465}
       - SMTP_USER=${SMTP_USER}
@@ -378,6 +379,7 @@ services:
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - TELEGRAM_HTTP_PROXY=${TELEGRAM_HTTP_PROXY:-}
       - VLESS_URI=${VLESS_URI:-}
+      - TELEGRAM_STARTUP_TEST=${TELEGRAM_STARTUP_TEST:-0}
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml.template:/etc/alertmanager/alertmanager.yml.template:ro
       - ./monitoring/alertmanager/entrypoint.sh:/entrypoint.sh:ro

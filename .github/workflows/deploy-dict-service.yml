@@ -224,5 +224,6 @@ jobs:
             --post-data="[{\"labels\":{\"alertname\":\"DeployCompleted\",\"severity\":\"info\",\"version\":\"'"${VERSION}"'\"},\"annotations\":{\"summary\":\"Деплой завершён\",\"description\":\"Установлена версия '"${VERSION}"'\"}}]" \
             http://alertmanager:9093/api/v2/alerts \
             || echo "WARN: не удалось отправить тестовый алерт в alertmanager"
-          sudo docker-compose logs --tail=20 alertmanager 2>/dev/null || true
+          sleep 25
+          sudo docker-compose logs --tail=40 alertmanager 2>/dev/null || true
           REMOTE_SCRIPT

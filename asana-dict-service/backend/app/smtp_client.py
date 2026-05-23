@@ -5,25 +5,22 @@ from __future__ import annotations
 import smtplib
 from email.message import EmailMessage
 
-from config import get_settings
-from src.api.auth.utils.smtp_env import smtp_host, smtp_port, smtp_user, smtp_password, smtp_from
-
-settings = get_settings()
+from app import config
+from app.smtp_env import smtp_host, smtp_port, smtp_user, smtp_password, smtp_from
 
 
 def send_email(to: str, subject: str, body: str) -> None:
-    # Всегда через smtp_host(): в .env часто SMTP_HOST= (пустая строка) → compose кладёт "" в контейнер
     host = smtp_host()
     if not host:
-        raise ValueError("SMTP_HOST не задан. Укажите SMTP_HOST=smtp.yandex.ru в /app/.env")
+        raise ValueError("SMTP_HOST не задан")
 
-    user = smtp_user() or (settings.SMTP_USER or "").strip()
-    password = smtp_password() or (settings.SMTP_PASSWORD or "").strip()
+    user = smtp_user()
+    password = smtp_password()
     if not user or not password:
         raise ValueError("SMTP_USER или SMTP_PASSWORD не заданы в .env")
 
-    port = smtp_port(465)
-    from_addr = smtp_from(user) or getattr(settings, "SMTP_FROM", None) or user
+    port = smtp_port(int(config.SMTP_PORT))
+    from_addr = smtp_from(user)
 
     msg = EmailMessage()
     msg["From"] = from_addr

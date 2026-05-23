@@ -11,7 +11,6 @@ import json
 import uuid
 import asyncio
 import time
-import smtplib
 import secrets
 import string
 from datetime import datetime
@@ -19,7 +18,7 @@ import httpx
 from starlette.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
-from email.message import EmailMessage
+from app.smtp_client import send_email
 from app.auth import (
     get_current_user, is_admin, is_expert_or_admin, get_user_info_from_token_sync
 )
@@ -2546,30 +2545,14 @@ class UserUpdate(BaseModel):
 
 def _send_new_user_credentials_email(login: str, email: str, plain_password: str) -> None:
     """Отправляет новому пользователю письмо с логином и паролем."""
-    msg = EmailMessage()
-    msg["From"] = config.SMTP_FROM
-    msg["To"] = email
-    msg["Subject"] = "Доступ к Каталогу асан"
-    msg.set_content(
+    send_email(
+        email,
+        "Доступ к Каталогу асан",
         "Вам создана учетная запись в системе \"Каталог асан\".\n\n"
         f"Логин: {login}\n"
         f"Пароль: {plain_password}\n\n"
-        "Рекомендуем сменить пароль после первого входа в профиль."
+        "Рекомендуем сменить пароль после первого входа в профиль.",
     )
-
-    smtp_port = int(config.SMTP_PORT)
-    if smtp_port == 465:
-        with smtplib.SMTP_SSL(config.SMTP_SERVER, smtp_port, timeout=20) as server:
-            server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-            server.send_message(msg)
-        return
-
-    with smtplib.SMTP(config.SMTP_SERVER, smtp_port, timeout=20) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-        server.send_message(msg)
 
 
 def _generate_temporary_password(length: int = 14) -> str:
@@ -2588,30 +2571,14 @@ def _generate_temporary_password(length: int = 14) -> str:
 
 def _send_unblock_credentials_email(login: str, email: str, plain_password: str) -> None:
     """Отправляет письмо с новым паролем после разблокировки учетной записи."""
-    msg = EmailMessage()
-    msg["From"] = config.SMTP_FROM
-    msg["To"] = email
-    msg["Subject"] = "Учетная запись разблокирована"
-    msg.set_content(
+    send_email(
+        email,
+        "Учетная запись разблокирована",
         "Ваша учетная запись в системе \"Каталог асан\" разблокирована администратором.\n\n"
         f"Логин: {login}\n"
         f"Новый пароль: {plain_password}\n\n"
-        "Рекомендуем сменить пароль сразу после входа."
+        "Рекомендуем сменить пароль сразу после входа.",
     )
-
-    smtp_port = int(config.SMTP_PORT)
-    if smtp_port == 465:
-        with smtplib.SMTP_SSL(config.SMTP_SERVER, smtp_port, timeout=20) as server:
-            server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-            server.send_message(msg)
-        return
-
-    with smtplib.SMTP(config.SMTP_SERVER, smtp_port, timeout=20) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-        server.send_message(msg)
 
 
 def _audit_summary_from_row(row: AuditEvent) -> str:

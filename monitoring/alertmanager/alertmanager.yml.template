@@ -9,14 +9,19 @@ route:
   repeat_interval: 4h
   routes:
     - match:
+        alertname: DeployCompleted
+      group_wait: 0s
+      repeat_interval: 8760h
+    - match:
+        alertname: TelegramTest
+      group_wait: 0s
+      repeat_interval: 8760h
+    - match:
         severity: critical
       repeat_interval: 2h
     - match:
         severity: warning
       repeat_interval: 6h
-    - match:
-        alertname: DeployCompleted
-      repeat_interval: 8760h
 
 inhibit_rules:
   - source_matchers:

@@ -53,6 +53,38 @@ fi
 echo "Alertmanager Telegram: chat_id=${TELEGRAM_CHAT_ID}"
 render_config
 
+# Alertmanager сам по себе при старте ничего не шлёт — только когда получает алерт.
+# TELEGRAM_STARTUP_TEST=1 → один тестовый алерт после готовности (ручной compose up).
+if [ "${TELEGRAM_STARTUP_TEST:-0}" = "1" ]; then
+  echo "TELEGRAM_STARTUP_TEST=1 — после старта отправим тестовый алерт"
+  /bin/alertmanager \
+    --config.file=/tmp/alertmanager.yml \
+    --storage.path=/alertmanager &
+  _am_pid=$!
+  _ready=0
+  _i=0
+  while [ "$_i" -lt 30 ]; do
+    if wget -qO- http://127.0.0.1:9093/-/ready >/dev/null 2>&1; then
+      _ready=1
+      break
+    fi
+    _i=$((_i + 1))
+    sleep 1
+  done
+  if [ "$_ready" = "1" ]; then
+  wget -qO- \
+    --header="Content-Type: application/json" \
+    --post-data='[{"labels":{"alertname":"TelegramTest","severity":"info"},"annotations":{"summary":"Alertmanager запущен","description":"Тестовый алерт при старте (TELEGRAM_STARTUP_TEST=1)"}}]' \
+    http://127.0.0.1:9093/api/v2/alerts \
+    && echo "Тестовый алерт отправлен в Alertmanager (ждите ~20с group_wait → Telegram)" \
+    || echo "WARN: не удалось отправить тестовый алерт"
+  else
+    echo "WARN: Alertmanager не стал ready за 30с, тестовый алерт пропущен"
+  fi
+  wait "$_am_pid"
+  exit $?
+fi
+
 exec /bin/alertmanager \
   --config.file=/tmp/alertmanager.yml \
   --storage.path=/alertmanager

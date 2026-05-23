@@ -23,6 +23,7 @@ services:
       - PORT_SERVER=8000
       - SECRET_KEY=${SECRET_KEY}
       - HOST_NETWORK_SERVER=${URL_NETWORK_SERVER}
+      - SMTP_HOST=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
       - SMTP_SERVER=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
       - SMTP_PORT=${SMTP_PORT:-465}
       - SMTP_USER=${SMTP_USER}
