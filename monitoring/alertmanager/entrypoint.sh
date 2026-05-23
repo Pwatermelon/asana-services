@@ -7,7 +7,6 @@ render_config() {
   _token="${TELEGRAM_BOT_TOKEN:-}"
   _chat="${TELEGRAM_CHAT_ID:-}"
 
-  # prom/alertmanager не содержит envsubst — подставляем через sed
   _token_escaped=$(printf '%s' "$_token" | sed 's/[&|\\]/\\&/g')
   _chat_escaped=$(printf '%s' "$_chat" | sed 's/[&|\\]/\\&/g')
 
@@ -15,6 +14,19 @@ render_config() {
     -e "s|\${TELEGRAM_BOT_TOKEN}|${_token_escaped}|g" \
     -e "s|\${TELEGRAM_CHAT_ID}|${_chat_escaped}|g" \
     "$_src" > "$_dst"
+
+  if [ -n "${TELEGRAM_HTTP_PROXY:-}" ]; then
+    awk -v proxy="$TELEGRAM_HTTP_PROXY" '
+      /#TELEGRAM_PROXY_BLOCK#/ {
+        print "        http_config:"
+        print "          proxy_url: '\''" proxy "'\''"
+        next
+      }
+      { print }
+    ' "$_dst" > "$_dst.tmp" && mv "$_dst.tmp" "$_dst"
+  else
+    sed '/#TELEGRAM_PROXY_BLOCK#/d' "$_dst" > "$_dst.tmp" && mv "$_dst.tmp" "$_dst"
+  fi
 }
 
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then

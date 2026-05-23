@@ -16,7 +16,7 @@ services:
   # Основной сервис (asana-server-module)
   # ============================================
   server-module:
-    image: plwatermelon/server-module:1.0.2-beta
+    image: plwatermelon/server-module:${DICT_SERVICE_VERSION:-2.1.5-beta}
     container_name: server-module
     ports:
       - "8001:8000"
@@ -88,6 +88,13 @@ services:
       - ALGORITHM=${ALGORITHM:-HS256}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - SMTP_HOST=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
+      - SMTP_SERVER=${SMTP_HOST:-${SMTP_SERVER:-smtp.yandex.ru}}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM=${SMTP_FROM:-${SMTP_USER}}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-Каталог Асан}
       # ИИ-сервис (asana-network-service): скан дубликатов / классификация для модерации isSameAs
       - NETWORK_SERVICE_URL=${NETWORK_SERVICE_URL:-http://server-network:8001}
       - NETWORK_SERVICE_TIMEOUT=${NETWORK_SERVICE_TIMEOUT:-300}
@@ -338,6 +345,22 @@ services:
     networks:
       - asana-network
 
+  # HTTP-прокси через VLESS только для Alertmanager → Telegram (профиль telegram-vpn).
+  # В .env: VLESS_URI=vless://... и TELEGRAM_HTTP_PROXY=http://telegram-proxy:8888
+  telegram-proxy:
+    build:
+      context: ./monitoring/telegram-proxy
+      dockerfile: Dockerfile
+    container_name: telegram-proxy
+    profiles:
+      - telegram-vpn
+    restart: unless-stopped
+    environment:
+      - VLESS_URI=${VLESS_URI:-}
+      - TELEGRAM_PROXY_PORT=8888
+    networks:
+      - asana-network
+
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: alertmanager
@@ -345,6 +368,7 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - TELEGRAM_HTTP_PROXY=${TELEGRAM_HTTP_PROXY:-}
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml.template:/etc/alertmanager/alertmanager.yml.template:ro
       - ./monitoring/alertmanager/entrypoint.sh:/entrypoint.sh:ro

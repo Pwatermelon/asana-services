@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 import base64
 import os
 import logging
@@ -2448,7 +2448,7 @@ async def check_auth(request: Request):
 # API для управления пользователями (только для админа)
 class UserCreate(BaseModel):
     login: str
-    mail: str
+    mail: EmailStr
     password: str
     is_admin: bool = False
     permission_study: bool = False
@@ -2685,7 +2685,7 @@ async def create_user(user_data: UserCreate, user: str = Depends(is_admin)):
             _send_new_user_credentials_email(new_user.login, new_user.mail, plain_password)
         except Exception as email_exc:
             email_sent = False
-            email_error = str(email_exc)
+            email_error = str(email_exc).strip() or email_exc.__class__.__name__
             logger.error(
                 "Failed to send new-user credentials email for %s (%s): %s",
                 new_user.login,

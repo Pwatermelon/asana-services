@@ -131,6 +131,14 @@ jobs:
           push: true
           tags: plwatermelon/asana-backup-runner:${{ needs.resolve.outputs.version }}
 
+      - name: Auth service (server-module: профиль, OTP, смена пароля)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./asana-server-module
+          file: ./asana-server-module/Dockerfile
+          push: true
+          tags: plwatermelon/server-module:${{ needs.resolve.outputs.version }}
+
   deploy:
     needs: [resolve, build-and-push]
     if: needs.resolve.outputs.deploy == 'true'
@@ -169,6 +177,10 @@ jobs:
           sudo docker-compose pull
           sudo docker-compose down
           sudo docker-compose up -d --scale asana-import=3
+          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
+            sudo docker-compose --profile telegram-vpn build telegram-proxy
+            sudo docker-compose --profile telegram-vpn up -d telegram-proxy
+          fi
           sleep 5
           sudo docker-compose exec -T nginx nginx -s reload 2>/dev/null || true
           # Одноразовый алерт в Alertmanager → Telegram (те же TELEGRAM_* из .env)
