@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import random
+import smtplib
 import loguru
 from fastapi import HTTPException
 
@@ -95,13 +96,19 @@ class AuthService:
         await session.flush()
         try:
             send_reset_password_request(user.mail, code)
+        except smtplib.SMTPAuthenticationError as exc:
+            await session.rollback()
+            PASSWORD_RESET_REQUESTS_TOTAL.labels("smtp_error").inc()
+            detail = exc.smtp_error.decode("utf-8", errors="replace") if getattr(exc, "smtp_error", None) else str(exc)
+            loguru.logger.error("SMTP auth on password reset for %s: %s", user.login, detail)
+            raise HTTPException(status_code=503, detail=detail) from exc
         except Exception as exc:
             await session.rollback()
             PASSWORD_RESET_REQUESTS_TOTAL.labels("smtp_error").inc()
             loguru.logger.exception("SMTP error on password reset for %s: %s", user.login, exc)
             raise HTTPException(
                 status_code=503,
-                detail="Не удалось отправить письмо. Проверьте SMTP на сервере (SMTP_HOST=smtp.yandex.ru, пароль приложения Яндекса).",
+                detail="Не удалось отправить письмо. Проверьте SMTP на сервере.",
             ) from exc
         await session.commit()
         PASSWORD_RESET_REQUESTS_TOTAL.labels("ok").inc()

@@ -7,6 +7,7 @@ import re
 
 _DEFAULT_HOST = "smtp.yandex.ru"
 _HOST_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
+_EMAIL_JUNK = "{}'\"$` "
 
 
 def _clean(value: str | None) -> str:
@@ -18,19 +19,36 @@ def _clean(value: str | None) -> str:
     return val
 
 
+def _strip_junk(val: str) -> str:
+    val = val.strip(_EMAIL_JUNK)
+    while val and val[0] in _EMAIL_JUNK:
+        val = val[1:]
+    while val and val[-1] in _EMAIL_JUNK:
+        val = val[:-1]
+    return val.strip()
+
+
 def _normalize_host(raw: str) -> str:
     val = _clean(raw)
-    if not val:
+    if not val or "${" in val or val.startswith("$"):
         return ""
-    if "${" in val or val.startswith("$"):
-        return ""
-    val = val.strip("{}'\"$` ")
+    val = _strip_junk(val)
     if ":" in val and not val.startswith("["):
         val = val.rsplit(":", 1)[0].strip()
-    val = val.strip("{}'\"$` ")
+    val = _strip_junk(val)
     if not _HOST_RE.match(val):
         val = re.sub(r"[^a-zA-Z0-9.-]+$", "", val)
         val = re.sub(r"^[^a-zA-Z0-9]+", "", val)
+    return val.strip()
+
+
+def _normalize_email(raw: str) -> str:
+    val = _strip_junk(_clean(raw))
+    if not val or "${" in val or val.startswith("$"):
+        return ""
+    if "@" in val:
+        val = re.sub(r"[^a-zA-Z0-9._%+-@]+$", "", val)
+        val = re.sub(r"^[^a-zA-Z0-9._%+-]+", "", val)
     return val.strip()
 
 
@@ -43,10 +61,9 @@ def smtp_host() -> str:
 
 
 def smtp_port(default: int = 465) -> int:
-    raw = _clean(os.getenv("SMTP_PORT"))
+    raw = _strip_junk(_clean(os.getenv("SMTP_PORT")))
     if not raw:
         return default
-    raw = raw.rstrip("}'\" ")
     try:
         return int(raw)
     except ValueError:
@@ -54,16 +71,16 @@ def smtp_port(default: int = 465) -> int:
 
 
 def smtp_user() -> str:
-    return _clean(os.getenv("SMTP_USER"))
+    return _normalize_email(os.getenv("SMTP_USER") or "")
 
 
 def smtp_password() -> str:
-    return _clean(os.getenv("SMTP_PASSWORD"))
+    return _strip_junk(_clean(os.getenv("SMTP_PASSWORD")))
 
 
 def smtp_from(default_user: str | None = None) -> str:
-    val = _clean(os.getenv("SMTP_FROM"))
+    val = _normalize_email(os.getenv("SMTP_FROM") or "")
     if val:
         return val
-    user = default_user if default_user is not None else smtp_user()
+    user = _normalize_email(default_user or "") if default_user else smtp_user()
     return user or "noreply@your-domain.com"
