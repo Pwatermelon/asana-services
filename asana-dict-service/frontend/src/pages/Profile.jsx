@@ -148,7 +148,6 @@ const Profile = () => {
               required
             />
           </div>
-          <PasswordRequirements password={newPassword} confirmPassword="" showMatch={false} />
           <div className="form-group">
             <label htmlFor="confirm-password">Подтвердите новый пароль</label>
             <input
