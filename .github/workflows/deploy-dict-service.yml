@@ -131,7 +131,7 @@ jobs:
           push: true
           tags: plwatermelon/asana-backup-runner:${{ needs.resolve.outputs.version }}
 
-      - name: Auth service (server-module: профиль, OTP, смена пароля)
+      - name: "Auth service (server-module — профиль, OTP, смена пароля)"
         uses: docker/build-push-action@v6
         with:
           context: ./asana-server-module
