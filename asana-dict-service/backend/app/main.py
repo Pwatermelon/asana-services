@@ -2543,15 +2543,36 @@ class UserUpdate(BaseModel):
     is_blocked: Optional[bool] = None
 
 
+def _public_site_url() -> str:
+    """Базовый URL сайта для ссылок в письмах."""
+    explicit = (os.getenv("PUBLIC_SITE_URL") or os.getenv("SITE_URL") or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    minio_prefix = (os.getenv("MINIO_URL_PREFIX") or "").strip().rstrip("/")
+    if minio_prefix.endswith("/images"):
+        return minio_prefix[: -len("/images")]
+    if minio_prefix:
+        return minio_prefix
+    return "https://catalog-asan.ru"
+
+
+def _login_page_url() -> str:
+    return f"{_public_site_url()}/login"
+
+
 def _send_new_user_credentials_email(login: str, email: str, plain_password: str) -> None:
     """Отправляет новому пользователю письмо с логином и паролем."""
+    site_url = _public_site_url()
+    login_url = _login_page_url()
     send_email(
         email,
         "Доступ к Каталогу асан",
         "Вам создана учетная запись в системе \"Каталог асан\".\n\n"
+        f"Сайт: {site_url}\n"
+        f"Вход: {login_url}\n\n"
         f"Логин: {login}\n"
         f"Пароль: {plain_password}\n\n"
-        "Рекомендуем сменить пароль после первого входа в профиль.",
+        "Рекомендуем сменить пароль после первого входа в профиле.",
     )
 
 

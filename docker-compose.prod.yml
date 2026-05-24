@@ -48,6 +48,7 @@ services:
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
+      - PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-https://catalog-asan.ru}
       - PASSWORD_RESET_OTP_TTL_MINUTES=${PASSWORD_RESET_OTP_TTL_MINUTES:-15}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - REDIS_URL=redis://redis:6379/0
@@ -161,6 +162,7 @@ services:
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-https://catalog-asan.ru/images}
+      - PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-https://catalog-asan.ru}
       - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
     depends_on:
       postgres:

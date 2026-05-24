@@ -36,6 +36,7 @@ services:
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
+      - PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-http://localhost}
       - PASSWORD_RESET_OTP_TTL_MINUTES=${PASSWORD_RESET_OTP_TTL_MINUTES:-15}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - REDIS_URL=redis://redis:6379/0
@@ -85,7 +86,8 @@ services:
       - PASSWORD_MINIO=${MINIO_ROOT_PASSWORD:-minioadmin}
       - NAME_BUCKET_IMAGES_MINIO=${NAME_BUCKET_IMAGES_MINIO:-images}
       - MINIO_URL_PREFIX=${MINIO_URL_PREFIX:-http://localhost/images}
-      # Только предзагрузка Excel→staging в S3 (не путать с финальным prefix=asans при apply из ячеек)
+      - PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-http://localhost}
+      # Только предзагрузка Excel→staging в S3
       - S3_IMPORT_STAGING_PREFIX=${S3_IMPORT_STAGING_PREFIX:-import-staging}
       # URL нейросетевого сервиса для модерации isSameAs (см. server-network ниже)
       - NETWORK_SERVICE_URL=${NETWORK_SERVICE_URL:-http://server-network:8001}
