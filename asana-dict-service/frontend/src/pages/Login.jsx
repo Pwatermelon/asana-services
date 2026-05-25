@@ -38,7 +38,7 @@ const Login = () => {
         }
         navigate('/asanas');
       } else {
-        setError(result.error || 'Неверный логин или пароль');
+        setError(result.error || 'Неверный email/логин или пароль');
       }
     } catch (err) {
       setError('Ошибка при входе в систему');
@@ -62,10 +62,11 @@ const Login = () => {
         {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="username">Логин</label>
+            <label htmlFor="username">Email или логин</label>
             <input
               type="text"
               id="username"
+              autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required

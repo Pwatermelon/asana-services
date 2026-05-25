@@ -324,36 +324,23 @@ const Moderation = () => {
                 </div>
                 
                 <div className="moderation-item-content">
-                  <div className="moderation-item-field">
-                    <strong>Сообщение:</strong> {item.error_message}
-                  </div>
-                  
                   {item.asana_name && (
                     <div className="moderation-item-field">
                       <strong>Название асаны:</strong> {item.asana_name}
+                      {item.moderation_type === 'name_mismatch' && item.suggested_name_sanskrit && (
+                        <span className="mod-field-sub"> · {item.suggested_name_sanskrit}</span>
+                      )}
+                      {item.moderation_type === 'name_mismatch' && item.suggested_transliteration && (
+                        <span className="mod-field-sub"> · {item.suggested_transliteration}</span>
+                      )}
                     </div>
                   )}
-                  
+
                   {item.moderation_type === 'name_mismatch' && (
                     <>
-                      {item.suggested_name_ru && (
-                        <div className="moderation-item-field">
-                          <strong>Предложенное название:</strong> {item.suggested_name_ru}
-                        </div>
-                      )}
                       {item.existing_name_ru && (
                         <div className="moderation-item-field">
                           <strong>Существующее название:</strong> {item.existing_name_ru}
-                        </div>
-                      )}
-                      {item.suggested_name_sanskrit && (
-                        <div className="moderation-item-field">
-                          <strong>Санскрит:</strong> {item.suggested_name_sanskrit}
-                        </div>
-                      )}
-                      {item.suggested_transliteration && (
-                        <div className="moderation-item-field">
-                          <strong>Транслитерация:</strong> {item.suggested_transliteration}
                         </div>
                       )}
                       {item.suggested_definition && (
@@ -363,48 +350,87 @@ const Moderation = () => {
                       )}
                     </>
                   )}
-                  
-                  {/* Показываем поля из import_data */}
-                  {item.import_data && typeof item.import_data === 'object' && (
-                    <div className="moderation-item-import-data">
-                      {Object.entries(item.import_data).map(([key, value]) => {
-                        // Пропускаем фото — превью отдельно (в т.ч. несколько URL)
-                        if (
-                          key === 'photo' ||
-                          key === 'photo_url' ||
-                          key === 'photo_base64' ||
-                          key === 'photo_preview_urls' ||
-                          key === 'import_photo_urls' ||
-                          key === '_staged_import_photos'
-                        ) {
-                          return null;
-                        }
-                        
-                        // Пропускаем пустые значения
-                        if (!value || value === '' || (Array.isArray(value) && value.length === 0)) {
-                          return null;
-                        }
-                        
-                        // Форматируем ключ для отображения
-                        const displayKey = key
-                          .replace(/_/g, ' ')
-                          .replace(/\b\w/g, l => l.toUpperCase());
-                        
-                        return (
-                          <div key={key} className="moderation-item-field">
-                            <strong>{displayKey}:</strong>{' '}
-                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+
+                  {item.import_data && typeof item.import_data === 'object' && (() => {
+                    const d = item.import_data;
+                    const HIDDEN_KEYS = new Set([
+                      'photo',
+                      'photo_url',
+                      'photo_base64',
+                      'photo_preview_urls',
+                      'import_photo_urls',
+                      '_staged_import_photos',
+                      'name_ru',
+                      'name_sanskrit',
+                      'transliteration',
+                      'definition',
+                      'source_title',
+                      'source_author',
+                      'source_year',
+                      'source_publisher',
+                      'source_pages',
+                    ]);
+                    const KEY_LABELS = {
+                      source_annotation: 'Аннотация',
+                    };
+
+                    const sourceLineParts = [];
+                    if (d.source_title) sourceLineParts.push(String(d.source_title));
+                    const meta = [];
+                    if (d.source_year != null && d.source_year !== '') meta.push(String(d.source_year));
+                    if (d.source_publisher) meta.push(String(d.source_publisher));
+                    if (d.source_pages != null && d.source_pages !== '') {
+                      meta.push(`с. ${d.source_pages}`);
+                    }
+                    const sourceLine = sourceLineParts.length || meta.length
+                      ? `${sourceLineParts.join('')}${meta.length ? ` · ${meta.join(' · ')}` : ''}`
+                      : '';
+
+                    const restEntries = Object.entries(d).filter(([key, value]) => {
+                      if (HIDDEN_KEYS.has(key)) return false;
+                      if (value === null || value === undefined || value === '') return false;
+                      if (Array.isArray(value) && value.length === 0) return false;
+                      return true;
+                    });
+
+                    const photoUrls = moderationPhotoUrlList(d);
+                    const hasPhotoPreview =
+                      photoUrls.length > 0 || d.photo_url || d.photo_base64 || d.photo;
+
+                    if (
+                      !d.source_author &&
+                      !sourceLine &&
+                      restEntries.length === 0 &&
+                      !hasPhotoPreview
+                    ) {
+                      return null;
+                    }
+
+                    return (
+                      <div className="moderation-item-import-data">
+                        {d.source_author && (
+                          <div className="moderation-item-field">
+                            <strong>Автор источника:</strong> {String(d.source_author)}
                           </div>
-                        );
-                      })}
-                      
-                      {/* Фото из импорта: несколько URL (staging S3) или одно встроенное */}
-                      {(moderationPhotoUrlList(item.import_data).length > 0) ||
-                      item.import_data.photo_url ||
-                      item.import_data.photo_base64 ||
-                      item.import_data.photo ? (
-                        <div className="moderation-item-field">
-                          <strong>Изображения из импорта:</strong>
+                        )}
+                        {sourceLine && (
+                          <div className="moderation-item-field">
+                            <strong>Источник:</strong> {sourceLine}
+                          </div>
+                        )}
+                        {restEntries.map(([key, value]) => {
+                          const displayKey =
+                            KEY_LABELS[key] ||
+                            key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+                          return (
+                            <div key={key} className="moderation-item-field">
+                              <strong>{displayKey}:</strong>{' '}
+                              {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                            </div>
+                          );
+                        })}
+
+                        {hasPhotoPreview && (
                           <div
                             className="moderation-photo-preview"
                             style={{ marginTop: '0.5em', display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}
@@ -482,10 +508,10 @@ const Moderation = () => {
                               )
                             ) : null}
                           </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 
                 <div className="moderation-item-footer">
