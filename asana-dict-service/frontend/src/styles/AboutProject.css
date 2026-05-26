@@ -65,6 +65,9 @@
   box-shadow: var(--shadow-sm);
   border-radius: 8px;
   overflow: hidden;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .about-content table th,
@@ -175,5 +178,41 @@
   display: flex;
   gap: 0.65em;
   margin-top: 0.6em;
+}
+
+@media (max-width: 640px) {
+  .about-container {
+    padding: 0 0.6rem;
+  }
+
+  .about-title {
+    font-size: 1.35em;
+  }
+
+  .about-content {
+    padding: 0.85em 0.9em;
+    font-size: 0.95em;
+  }
+
+  .about-content h1 {
+    font-size: 1.3em;
+  }
+
+  .about-content h2 {
+    font-size: 1.15em;
+  }
+
+  .about-content h3 {
+    font-size: 1.05em;
+  }
+
+  .edit-actions {
+    flex-direction: column;
+  }
+
+  .edit-actions .btn-primary,
+  .edit-actions .btn-secondary {
+    width: 100%;
+  }
 }
 

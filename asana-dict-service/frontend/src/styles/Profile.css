@@ -116,3 +116,35 @@
   color: #047857;
   font-weight: 600;
 }
+
+@media (max-width: 640px) {
+  .profile-page {
+    padding: 16px 12px 32px;
+  }
+
+  .profile-card {
+    padding: 14px;
+  }
+
+  .profile-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .profile-avatar-image,
+  .profile-avatar-fallback {
+    width: 60px;
+    height: 60px;
+  }
+
+  .profile-actions {
+    width: 100%;
+  }
+
+  .profile-actions .btn-primary,
+  .profile-actions .btn-secondary,
+  .profile-actions .profile-upload-btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+}

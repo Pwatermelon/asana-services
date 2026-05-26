@@ -1,0 +1,1232 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { asanasAPI } from '../api/asanas';
+import { useAuth } from '../contexts/AuthContext';
+import { asanaPagePath } from './CompactAsanaRow';
+import {
+  canonicalAsanaId,
+  combinedSameAsForOwner,
+  filterGuestSameAsDifferentGroupName,
+  catalogRecordSecondaryParts,
+  groupLightboxOtherNamesByDisplayRu,
+  galleryImageUrl,
+  getPhotoSrc,
+  buildPhotoSourceMeta,
+} from '../utils/asanaSameAs';
+import { normalizeCatalogNameKey } from '../utils/catalogSearch';
+
+const normRotation = (d) => ((d % 360) + 360) % 360;
+
+/**
+ * Универсальный лайтбокс фотографий асан со всеми боковыми блоками и модалками
+ * эксперта. Может использоваться на странице асаны (по русскому имени) и на
+ * странице источника.
+ *
+ * Контракт колбэков:
+ *  - onMutation()     — родитель должен перезагрузить данные после успешной
+ *                       мутации (delete photo, rotate photo, sameAs изменения,
+ *                       добавление фото).
+ *  - onAsanaDeleted() — вызывается, когда из-за удаления последнего фото
+ *                       (или явного удаления сущности) исчезла запись асаны.
+ *                       Родитель решает, что сделать (например, навигировать).
+ *  - renderEditionCaption(slide, ownerAsana) → ReactNode — рендер подписи под
+ *                       картинкой в блоке «Это издание» (только editionStripVariant='edition').
+ *  - editionStripVariant: 'edition' | 'asana-link' — на странице источника вместо
+ *                       блока «Это издание» показывается ссылка на страницу асаны в каталоге.
+ *  - getPageAsana(slide, ownerAsana) → asana — «страница» для sameAs/похожих (группа по имени).
+ *  - getTitleParts(slide, ownerAsana, defaultTitle) → { title, subtitle? } —
+ *                       заголовок и подзаголовок над фото.
+ */
+export default function UserPhotoLightbox({
+  open,
+  onClose,
+  slides,
+  index,
+  setIndex,
+  allAsanas = [],
+  similarAsanas = [],
+  pageAsana = null,
+  getPageAsana = null,
+  photoGalleryVersion = 0,
+  onMutation,
+  onAsanaDeleted,
+  renderEditionCaption,
+  editionStripVariant = 'edition',
+  getTitleParts,
+}) {
+  const { isExpertOrAdmin } = useAuth();
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showMatchModal, setShowMatchModal] = useState(false);
+  const [matchSubjectAsanaId, setMatchSubjectAsanaId] = useState(null);
+  const [matchSearchQuery, setMatchSearchQuery] = useState('');
+  const [selectedMatchAsana, setSelectedMatchAsana] = useState(null);
+
+  const [showSameAsLinksModal, setShowSameAsLinksModal] = useState(false);
+  const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
+
+  const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
+  const [addPhotoTarget, setAddPhotoTarget] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
+
+  const [showPhotoEditorModal, setShowPhotoEditorModal] = useState(false);
+  const [photoEditorContext, setPhotoEditorContext] = useState(null);
+  const [editorRotationDeg, setEditorRotationDeg] = useState(0);
+  const [editorSaving, setEditorSaving] = useState(false);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [index, open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const len = slides.length;
+    if (len === 0) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose?.();
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setIndex((i) => (i - 1 + len) % len);
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setIndex((i) => (i + 1) % len);
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open, slides, onClose, setIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!slides.length) return;
+    if (index >= slides.length) setIndex(slides.length - 1);
+  }, [open, slides, index, setIndex]);
+
+  const lbSlide = slides[index] || null;
+  const lbSlideOwnerFull = useMemo(() => {
+    if (!lbSlide || !allAsanas.length) return null;
+    return (
+      allAsanas.find((a) => a.id === lbSlide.ownerId) ||
+      allAsanas.find(
+        (a) => canonicalAsanaId(a.id) === canonicalAsanaId(lbSlide.ownerId)
+      ) ||
+      null
+    );
+  }, [lbSlide, allAsanas]);
+
+  const effectivePageAsana = useMemo(() => {
+    if (typeof getPageAsana === 'function' && lbSlide && lbSlideOwnerFull) {
+      try {
+        return getPageAsana(lbSlide, lbSlideOwnerFull) || pageAsana;
+      } catch {
+        return pageAsana;
+      }
+    }
+    return pageAsana;
+  }, [getPageAsana, lbSlide, lbSlideOwnerFull, pageAsana]);
+
+  const defaultTitle =
+    lbSlideOwnerFull?.name?.name_ru || effectivePageAsana?.name?.name_ru || 'Асана';
+  const titleParts = useMemo(() => {
+    const fallback = { title: defaultTitle, subtitle: null };
+    if (typeof getTitleParts === 'function' && lbSlide) {
+      try {
+        const r = getTitleParts(lbSlide, lbSlideOwnerFull, defaultTitle) || fallback;
+        return {
+          title: r.title || fallback.title,
+          subtitle: r.subtitle || null,
+        };
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  }, [getTitleParts, lbSlide, lbSlideOwnerFull, defaultTitle]);
+
+  const lightboxOwnerSameAsVisible = useMemo(() => {
+    if (!open || !lbSlide || !allAsanas.length) return [];
+    const owner = lbSlideOwnerFull;
+    if (!owner) return [];
+    const combined = combinedSameAsForOwner(
+      owner,
+      effectivePageAsana,
+      allAsanas,
+      similarAsanas
+    );
+    const groupNameKey = normalizeCatalogNameKey(
+      effectivePageAsana?.name?.name_ru || owner?.name?.name_ru || ''
+    );
+    return filterGuestSameAsDifferentGroupName(combined, groupNameKey);
+  }, [open, lbSlide, lbSlideOwnerFull, allAsanas, similarAsanas, effectivePageAsana]);
+
+  const lightboxSameNameLinkedPhotos = useMemo(() => {
+    if (!open || !lbSlide || !allAsanas.length) return [];
+    const owner = lbSlideOwnerFull;
+    if (!owner) return [];
+    const nameLower = owner.name?.name_ru?.toLowerCase().trim();
+    if (!nameLower) return [];
+    const lid = lbSlide.linkId;
+    const linked = combinedSameAsForOwner(
+      owner,
+      effectivePageAsana,
+      allAsanas,
+      similarAsanas
+    );
+    const out = [];
+    for (const other of linked) {
+      if (canonicalAsanaId(other.id) === canonicalAsanaId(owner.id)) continue;
+      if (other.name?.name_ru?.toLowerCase().trim() !== nameLower) continue;
+      if (!other.photos?.length) continue;
+      other.photos.forEach((photo, idx) => {
+        const { caption, linkId: pLid } = buildPhotoSourceMeta(photo, other);
+        if (lid && pLid === lid) return;
+        const img = galleryImageUrl(photo, photoGalleryVersion);
+        const key =
+          typeof photo === 'object' && photo.id ? String(photo.id) : `${other.id}#photo_${idx}`;
+        out.push({
+          key,
+          src: img,
+          caption,
+          linkId: pLid,
+          ownerId: other.id,
+          photo,
+          photoIndexInOwner: idx,
+        });
+      });
+    }
+    return out;
+  }, [
+    open,
+    lbSlide,
+    lbSlideOwnerFull,
+    allAsanas,
+    effectivePageAsana,
+    similarAsanas,
+    photoGalleryVersion,
+  ]);
+
+  const lightboxSameSourceSiblings = useMemo(() => {
+    if (!lbSlide || !lbSlide.linkId) return [];
+    return slides
+      .map((slide, i) => ({ slide, i }))
+      .filter(({ slide }) => slide.linkId === lbSlide.linkId);
+  }, [slides, lbSlide]);
+
+  const lightboxLinkedForSource = useMemo(() => {
+    if (!lbSlide || !lbSlide.linkId) return [];
+    return lightboxOwnerSameAsVisible.filter((sim) =>
+      (sim.sources || []).some(
+        (src) => (src.id?.split('#').pop() || src.id) === lbSlide.linkId
+      )
+    );
+  }, [lightboxOwnerSameAsVisible, lbSlide]);
+
+  const lightboxOtherSourceVariants = useMemo(() => {
+    if (!lbSlide?.linkId) return lightboxOwnerSameAsVisible;
+    return lightboxOwnerSameAsVisible.filter(
+      (s) =>
+        !(s.sources || []).some((src) => {
+          const sid = src.id?.split('#').pop() || src.id;
+          return sid && sid === lbSlide.linkId;
+        })
+    );
+  }, [lightboxOwnerSameAsVisible, lbSlide]);
+
+  const sameAsLinksForModal = useMemo(() => {
+    if (!showSameAsLinksModal || !sameAsLinksSubjectId || !allAsanas.length) return [];
+    const owner =
+      allAsanas.find((a) => a.id === sameAsLinksSubjectId) ||
+      allAsanas.find(
+        (a) => canonicalAsanaId(a.id) === canonicalAsanaId(sameAsLinksSubjectId)
+      );
+    if (!owner) return [];
+    return combinedSameAsForOwner(
+      owner,
+      effectivePageAsana,
+      allAsanas,
+      similarAsanas
+    );
+  }, [
+    showSameAsLinksModal,
+    sameAsLinksSubjectId,
+    allAsanas,
+    effectivePageAsana,
+    similarAsanas,
+    getPageAsana,
+    lbSlide,
+    lbSlideOwnerFull,
+  ]);
+
+  const filteredAsanasForMatch = useMemo(() => {
+    if (!allAsanas.length) return [];
+    const excludeId = matchSubjectAsanaId;
+    return allAsanas
+      .filter((a) => canonicalAsanaId(a.id) !== canonicalAsanaId(excludeId))
+      .filter((a) => {
+        if (!matchSearchQuery) return true;
+        const query = matchSearchQuery.toLowerCase();
+        return (
+          a.name?.name_ru?.toLowerCase().includes(query) ||
+          a.name?.name_sanskrit?.toLowerCase().includes(query)
+        );
+      })
+      .slice(0, 20);
+  }, [allAsanas, matchSubjectAsanaId, matchSearchQuery]);
+
+  const similarPreviewSrc = (similar) => {
+    if (similar.photos?.length) {
+      const p = similar.photos[0];
+      return typeof p === 'object'
+        ? galleryImageUrl(p, photoGalleryVersion)
+        : galleryImageUrl({ image: p }, photoGalleryVersion);
+    }
+    if (similar.photo) {
+      const ph = similar.photo;
+      return typeof ph === 'object' && ph.image
+        ? galleryImageUrl(ph, photoGalleryVersion)
+        : galleryImageUrl({ image: ph }, photoGalleryVersion);
+    }
+    return null;
+  };
+
+  const handleDownloadPhoto = async () => {
+    if (!lbSlide?.src) return;
+    setMenuOpen(false);
+    const baseName = titleParts.title || 'asana';
+    const raw = baseName
+      .replace(/[<>"/\\|?*\x00-\x1f]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .slice(0, 72);
+    const filename = `${raw || 'asana'}_${index + 1}.jpg`;
+    const url = lbSlide.src;
+    try {
+      if (url.startsWith('data:') || url.startsWith('blob:')) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error('fetch failed');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch (e2) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+      console.warn('Download fallback:', err);
+    }
+  };
+
+  const resolvePhotoIdForApi = (photo, photoIndex) => {
+    if (typeof photo === 'object' && photo?.id) return photo.id;
+    return `photo_${photoIndex}`;
+  };
+
+  const openPhotoEditor = (photo, photoIndex, ownerAsanaId) => {
+    const photoId = resolvePhotoIdForApi(photo, photoIndex);
+    setPhotoEditorContext({
+      photo,
+      photoId,
+      index: photoIndex,
+      ownerAsanaId,
+    });
+    setEditorRotationDeg(0);
+    setShowPhotoEditorModal(true);
+  };
+
+  const handlePhotoEditorCancel = () => {
+    setShowPhotoEditorModal(false);
+    setPhotoEditorContext(null);
+    setEditorRotationDeg(0);
+  };
+
+  const handlePhotoEditorSave = async () => {
+    const r = normRotation(editorRotationDeg);
+    if (!photoEditorContext) return;
+    if (r === 0) {
+      handlePhotoEditorCancel();
+      return;
+    }
+    if (![90, 180, 270].includes(r)) {
+      alert('Некорректный угол поворота');
+      return;
+    }
+    setEditorSaving(true);
+    try {
+      await asanasAPI.rotatePhoto(
+        photoEditorContext.ownerAsanaId,
+        photoEditorContext.photoId,
+        r
+      );
+      handlePhotoEditorCancel();
+      onMutation?.();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      alert(detail || error.message || 'Ошибка при повороте фотографии');
+      console.error('Error rotating photo:', error);
+    } finally {
+      setEditorSaving(false);
+    }
+  };
+
+  const handleDeletePhoto = async (photo, photoIndex, ownerAsanaId) => {
+    if (!photo) return;
+    const owner =
+      allAsanas.find((a) => a.id === ownerAsanaId) ||
+      allAsanas.find((a) => canonicalAsanaId(a.id) === canonicalAsanaId(ownerAsanaId));
+    if (!owner) return;
+
+    const photoCount = Array.isArray(owner.photos) ? owner.photos.length : 0;
+    const isLastPhoto = photoCount === 1;
+    const confirmText = isLastPhoto
+      ? 'У этой асаны это последнее фото. После удаления запись асаны будет удалена целиком — иначе из того же источника нельзя будет снова прикрепить фотографии. Продолжить?'
+      : 'Вы уверены, что хотите удалить это фото? Это действие нельзя отменить.';
+
+    if (!window.confirm(confirmText)) return;
+
+    try {
+      const photoId = resolvePhotoIdForApi(photo, photoIndex);
+      const data = await asanasAPI.deletePhoto(owner.id, photoId);
+      if (data?.asana_deleted) {
+        alert(data.message || 'Фото удалено. Запись асаны удалена — не осталось фотографий.');
+        const isPageOwner =
+          pageAsana && canonicalAsanaId(owner.id) === canonicalAsanaId(pageAsana.id);
+        if (isPageOwner) {
+          onAsanaDeleted?.(owner.id);
+          return;
+        }
+        onMutation?.();
+        return;
+      }
+      onMutation?.();
+      alert(data?.message || 'Фотография успешно удалена');
+    } catch (error) {
+      alert('Ошибка при удалении фотографии');
+      console.error('Error deleting photo:', error);
+    }
+  };
+
+  const handleDeleteOwnerEntity = async (ownerId) => {
+    if (!ownerId || !allAsanas.length) return;
+    const own =
+      allAsanas.find((a) => a.id === ownerId) ||
+      allAsanas.find((a) => canonicalAsanaId(a.id) === canonicalAsanaId(ownerId));
+    if (!own) return;
+    const title = own.name?.name_ru || 'запись';
+    if (
+      !window.confirm(
+        `Удалить каталожную запись «${title}» со всеми фотографиями этой сущности? Действие необратимо.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await asanasAPI.delete(own.id);
+      setMenuOpen(false);
+      const isPageOwner =
+        pageAsana && canonicalAsanaId(own.id) === canonicalAsanaId(pageAsana.id);
+      if (isPageOwner) {
+        onAsanaDeleted?.(own.id);
+        return;
+      }
+      onClose?.();
+      onMutation?.();
+    } catch (err) {
+      alert('Не удалось удалить запись');
+      console.error(err);
+    }
+  };
+
+  const handleMatchAsana = async () => {
+    if (!selectedMatchAsana || !matchSubjectAsanaId) return;
+    try {
+      await asanasAPI.setSameAsObject(matchSubjectAsanaId, selectedMatchAsana.id);
+      setShowMatchModal(false);
+      setSelectedMatchAsana(null);
+      setMatchSearchQuery('');
+      setMatchSubjectAsanaId(null);
+      onMutation?.();
+      alert('Совпадение успешно указано!');
+    } catch (error) {
+      alert('Ошибка при указании совпадения');
+      console.error('Error setting same as object:', error);
+    }
+  };
+
+  const handleRemoveSameAsForOwner = async (subjectOwnerId, targetAsanaId) => {
+    if (!subjectOwnerId || !targetAsanaId) return;
+    if (!window.confirm('Удалить соответствие с этой записью?')) return;
+    try {
+      await asanasAPI.removeSameAsObject(subjectOwnerId, targetAsanaId);
+      onMutation?.();
+    } catch (error) {
+      alert('Ошибка при удалении соответствия');
+      console.error('Error removing same as object:', error);
+    }
+  };
+
+  const handlePhotoSubmit = async (e) => {
+    e.preventDefault();
+    if (!photoFile || !addPhotoTarget?.ownerId || !addPhotoTarget?.sourceId) return;
+    try {
+      await asanasAPI.addPhoto(
+        addPhotoTarget.ownerId,
+        photoFile,
+        addPhotoTarget.sourceId
+      );
+      setShowAddPhotoForm(false);
+      setPhotoFile(null);
+      setAddPhotoTarget(null);
+      onMutation?.();
+    } catch (error) {
+      alert('Ошибка при добавлении фотографии');
+      console.error('Error adding photo:', error);
+    }
+  };
+
+  if (!open || !slides.length || !lbSlide) return null;
+
+  return (
+    <>
+      <div
+        className="user-photo-lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Просмотр фотографий"
+        onClick={onClose}
+      >
+        <div
+          className="user-photo-lightbox-inner"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!e.target.closest('.user-lightbox-more-wrap')) {
+              setMenuOpen(false);
+            }
+          }}
+        >
+          <div className="user-photo-lightbox-topbar">
+            <div
+              className="user-photo-lightbox-topbar-side user-photo-lightbox-topbar-side--left"
+              aria-hidden="true"
+            />
+            <div className="user-photo-lightbox-topbar-center">
+              <div className="user-photo-lightbox-catalog-title">
+                {titleParts.title}
+              </div>
+              {titleParts.subtitle ? (
+                <div className="user-photo-lightbox-catalog-subtitle">
+                  {titleParts.subtitle}
+                </div>
+              ) : null}
+            </div>
+            <div className="user-photo-lightbox-topbar-side user-photo-lightbox-topbar-side--right">
+              <div className="user-lightbox-more-wrap">
+                <button
+                  type="button"
+                  className="user-lightbox-more-btn"
+                  aria-label="Меню"
+                  aria-expanded={menuOpen}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpen((v) => !v);
+                  }}
+                >
+                  ⋯
+                </button>
+                {menuOpen && (
+                  <div className="user-lightbox-more-menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="user-lightbox-more-menu-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadPhoto();
+                      }}
+                    >
+                      Скачать фото
+                    </button>
+                    {isExpertOrAdmin && lbSlide.photo && (
+                      <>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="user-lightbox-more-menu-item"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpen(false);
+                            openPhotoEditor(
+                              lbSlide.photo,
+                              lbSlide.photoIndexInOwner,
+                              lbSlide.ownerId
+                            );
+                          }}
+                        >
+                          Редактировать фото
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="user-lightbox-more-menu-item"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpen(false);
+                            handleDeletePhoto(
+                              lbSlide.photo,
+                              lbSlide.photoIndexInOwner,
+                              lbSlide.ownerId
+                            );
+                          }}
+                        >
+                          Удалить фото
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="user-photo-lightbox-close"
+                aria-label="Закрыть"
+                onClick={onClose}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className="user-photo-lightbox-stage">
+            {slides.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  className="user-photo-lightbox-nav user-photo-lightbox-nav--prev"
+                  aria-label="Предыдущее фото"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIndex((i) => (i - 1 + slides.length) % slides.length);
+                  }}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="user-photo-lightbox-nav user-photo-lightbox-nav--next"
+                  aria-label="Следующее фото"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIndex((i) => (i + 1) % slides.length);
+                  }}
+                >
+                  ›
+                </button>
+              </>
+            )}
+            <div className="user-photo-lightbox-imgwrap">
+              <img src={lbSlide.src} alt="" />
+            </div>
+          </div>
+
+          {slides.length > 1 && (
+            <p className="user-photo-lightbox-counter">
+              {index + 1} / {slides.length}
+            </p>
+          )}
+
+          <div className="user-lightbox-source-strip" onClick={(e) => e.stopPropagation()}>
+            {editionStripVariant === 'edition' ? (
+              <>
+                <h4 className="user-lightbox-source-strip-title">Это издание</h4>
+                {lbSlide.caption ? (
+                  <p className="user-lightbox-edition-caption">
+                    {typeof renderEditionCaption === 'function'
+                      ? renderEditionCaption(lbSlide, lbSlideOwnerFull)
+                      : lbSlide.caption}
+                  </p>
+                ) : null}
+              </>
+            ) : editionStripVariant === 'asana-link' && lbSlideOwnerFull ? (
+              <p className="user-lightbox-edition-caption">
+                <Link
+                  className="user-photo-source-caption-link user-photo-source-caption-link--on-dark"
+                  to={asanaPagePath(lbSlideOwnerFull)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {lbSlideOwnerFull.name?.name_ru || 'Открыть асану в каталоге'}
+                </Link>
+              </p>
+            ) : null}
+
+            {isExpertOrAdmin && lbSlide?.ownerId && (
+              <div className="user-lightbox-expert-edition-actions">
+                <button
+                  type="button"
+                  className="btn-secondary user-lightbox-expert-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!lbSlideOwnerFull) return;
+                    setMatchSubjectAsanaId(lbSlideOwnerFull.id);
+                    setShowMatchModal(true);
+                  }}
+                >
+                  Указать соответствие
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary user-lightbox-expert-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!lbSlideOwnerFull) return;
+                    setSameAsLinksSubjectId(lbSlideOwnerFull.id);
+                    setShowSameAsLinksModal(true);
+                  }}
+                >
+                  Посмотреть соответствия
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary user-lightbox-expert-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!lbSlideOwnerFull) return;
+                    let sourceId = null;
+                    if (lbSlide.linkId && lbSlideOwnerFull.sources?.length) {
+                      const s = lbSlideOwnerFull.sources.find(
+                        (x) => (x.id?.split('#').pop() || x.id) === lbSlide.linkId
+                      );
+                      if (s) sourceId = s.id;
+                    }
+                    if (!sourceId && lbSlideOwnerFull.sources?.length === 1) {
+                      sourceId = lbSlideOwnerFull.sources[0].id;
+                    }
+                    if (!sourceId) {
+                      alert('Не удалось определить источник для добавления фото.');
+                      return;
+                    }
+                    setAddPhotoTarget({ ownerId: lbSlideOwnerFull.id, sourceId });
+                    setShowAddPhotoForm(true);
+                  }}
+                >
+                  Добавить фото
+                </button>
+                <button
+                  type="button"
+                  className="user-lightbox-expert-btn user-lightbox-expert-btn--entity-delete"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteOwnerEntity(lbSlide.ownerId);
+                  }}
+                >
+                  Удалить сущность
+                </button>
+              </div>
+            )}
+
+            {lightboxSameSourceSiblings.length > 1 && (
+              <div
+                className="user-lightbox-source-thumbs"
+                role="tablist"
+                aria-label="Другие фото этой асаны из этого издания"
+              >
+                {lightboxSameSourceSiblings.map(({ slide, i }) => (
+                  <button
+                    key={slide.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === index}
+                    className={
+                      i === index
+                        ? 'user-lightbox-source-thumb user-lightbox-source-thumb--active'
+                        : 'user-lightbox-source-thumb'
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIndex(i);
+                    }}
+                  >
+                    <img src={slide.src} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {lightboxLinkedForSource.length > 0 && (
+              <>
+                <h4 className="user-lightbox-source-strip-subtitle">
+                  {lightboxSameSourceSiblings.length > 1
+                    ? 'Другое название в каталоге для этого издания'
+                    : 'Другое название в каталоге'}
+                </h4>
+                <div className="user-lightbox-source-linked">
+                  {lightboxLinkedForSource.map((sim) => {
+                    const prev = similarPreviewSrc(sim);
+                    const { secondary, muted } = catalogRecordSecondaryParts(sim);
+                    const subCls = muted
+                      ? 'user-lightbox-linked-card-source user-lightbox-linked-card-source--muted'
+                      : 'user-lightbox-linked-card-source';
+                    return (
+                      <Link
+                        key={sim.id}
+                        to={asanaPagePath(sim)}
+                        className="user-lightbox-linked-card"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="user-lightbox-linked-card-photo">
+                          {prev ? (
+                            <img src={prev} alt="" />
+                          ) : (
+                            <span className="user-lightbox-linked-card-empty">—</span>
+                          )}
+                        </div>
+                        <span className="user-lightbox-linked-card-name">
+                          {sim.name?.name_ru || 'Асана'}
+                        </span>
+                        <span className={subCls}>{secondary}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {lightboxSameNameLinkedPhotos.length > 0 && (
+            <div
+              className="user-lightbox-same-name-linked-strip"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h4 className="user-lightbox-source-strip-title">
+                Асана с тем же названием но в других источниках
+              </h4>
+              <div className="user-lightbox-same-name-linked-scroll">
+                {lightboxSameNameLinkedPhotos.map((ph) => (
+                  <button
+                    key={ph.key}
+                    type="button"
+                    className="user-lightbox-same-name-linked-thumb"
+                    title={ph.caption}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const idx = slides.findIndex((s) => s.key === ph.key);
+                      if (idx >= 0) setIndex(idx);
+                    }}
+                  >
+                    <img src={ph.src} alt="" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {lightboxOtherSourceVariants.length > 0 && (
+            <div
+              className="user-lightbox-other-sources-strip"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h4 className="user-lightbox-source-strip-title">
+                Данная асана под другими названиями
+              </h4>
+              <ul className="user-lightbox-other-sources-name-list">
+                {groupLightboxOtherNamesByDisplayRu(lightboxOtherSourceVariants).map((g) => (
+                  <li key={g.key} className="user-lightbox-other-source-row">
+                    <Link
+                      to={asanaPagePath(g.linkTarget)}
+                      className="user-lightbox-other-source-row-link"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="user-lightbox-other-source-row-inner">
+                        <div className="user-lightbox-other-source-name-cell">
+                          <span className="user-lightbox-other-source-row-title-text">
+                            {g.nameRu}
+                          </span>
+                        </div>
+                        <div
+                          className="user-lightbox-other-source-editions-col"
+                          aria-label="Издания"
+                        >
+                          {g.editionLines.map((line, idx) => (
+                            <span
+                              key={`${g.key}-ed-${idx}`}
+                              className={
+                                line.muted
+                                  ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted'
+                                  : 'user-lightbox-other-source-edition'
+                              }
+                            >
+                              {line.secondary}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Модалка добавления фото к конкретному источнику-владельцу */}
+      {isExpertOrAdmin && showAddPhotoForm && (
+        <div
+          className="modal-overlay asana-detail-overlay-top"
+          role="presentation"
+          onClick={() => {
+            setShowAddPhotoForm(false);
+            setPhotoFile(null);
+            setAddPhotoTarget(null);
+          }}
+        >
+          <div
+            className="add-photo-form add-photo-form--modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="form-title">Добавление фотографии</h3>
+            <div
+              className="form-group"
+              style={{
+                marginBottom: '1em',
+                padding: '0.75em',
+                background: 'var(--background-alt)',
+                borderRadius: '8px',
+              }}
+            >
+              <p
+                style={{ color: 'var(--text-secondary)', fontSize: '0.9em', margin: 0 }}
+              >
+                <strong>Источник:</strong>{' '}
+                {(() => {
+                  const own =
+                    allAsanas.find((a) => a.id === addPhotoTarget?.ownerId) ||
+                    allAsanas.find(
+                      (a) =>
+                        canonicalAsanaId(a.id) ===
+                        canonicalAsanaId(addPhotoTarget?.ownerId)
+                    );
+                  if (!own || !addPhotoTarget?.sourceId) return 'Источник не определен';
+                  const sid =
+                    addPhotoTarget.sourceId.split('#').pop() || addPhotoTarget.sourceId;
+                  const src = own.sources?.find(
+                    (s) => (s.id?.split('#').pop() || s.id) === sid
+                  );
+                  return src
+                    ? `${src.author} — ${src.title}${
+                        src.year != null && src.year !== '' ? ` (${src.year})` : ''
+                      }`
+                    : addPhotoTarget.sourceId;
+                })()}
+              </p>
+            </div>
+            <form onSubmit={handlePhotoSubmit}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="lb-add-photo">
+                  Фотография *
+                </label>
+                <input
+                  type="file"
+                  id="lb-add-photo"
+                  accept="image/*"
+                  onChange={(e) => setPhotoFile(e.target.files[0])}
+                  required
+                />
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="btn-primary">
+                  Добавить
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setShowAddPhotoForm(false);
+                    setPhotoFile(null);
+                    setAddPhotoTarget(null);
+                  }}
+                >
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка «Указать совпадение» */}
+      {isExpertOrAdmin && showMatchModal && (
+        <div
+          className="modal-overlay asana-detail-overlay-top"
+          onClick={() => {
+            setShowMatchModal(false);
+            setMatchSubjectAsanaId(null);
+          }}
+        >
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Указать совпадение</h3>
+              <button
+                className="modal-close"
+                onClick={() => {
+                  setShowMatchModal(false);
+                  setMatchSubjectAsanaId(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-search">
+                <input
+                  type="text"
+                  placeholder="Поиск асаны..."
+                  value={matchSearchQuery}
+                  onChange={(e) => setMatchSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="modal-asanas-list">
+                {filteredAsanasForMatch.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`modal-asana-item ${
+                      selectedMatchAsana?.id === a.id ? 'selected' : ''
+                    }`}
+                    onClick={() => setSelectedMatchAsana(a)}
+                  >
+                    {a.photo ? (
+                      <img
+                        src={getPhotoSrc(a.photo)}
+                        alt={a.name?.name_ru}
+                        className="modal-asana-thumb"
+                      />
+                    ) : (
+                      <div className="modal-asana-thumb" style={{ background: '#eee' }} />
+                    )}
+                    <div className="modal-asana-info">
+                      <div className="modal-asana-name">{a.name?.name_ru}</div>
+                      {a.sources?.[0] && (
+                        <div className="modal-asana-source">
+                          {a.sources[0].author}
+                          {a.sources[0].year && ` (${a.sources[0].year})`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {filteredAsanasForMatch.length === 0 && (
+                  <p style={{ textAlign: 'center', color: '#666' }}>Асаны не найдены</p>
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setShowMatchModal(false);
+                  setMatchSubjectAsanaId(null);
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleMatchAsana}
+                disabled={!selectedMatchAsana}
+              >
+                Указать совпадение
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка «Соответствия» */}
+      {isExpertOrAdmin && showSameAsLinksModal && sameAsLinksSubjectId && (
+        <div
+          className="modal-overlay asana-detail-overlay-top"
+          role="presentation"
+          onClick={() => {
+            setShowSameAsLinksModal(false);
+            setSameAsLinksSubjectId(null);
+          }}
+        >
+          <div
+            className="modal-content asana-sameas-links-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title">Соответствия</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => {
+                  setShowSameAsLinksModal(false);
+                  setSameAsLinksSubjectId(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {sameAsLinksForModal.length > 0 ? (
+                <ul className="asana-sameas-links-list">
+                  {sameAsLinksForModal.map((sim) => (
+                    <li key={sim.id} className="asana-sameas-links-item">
+                      <div className="asana-sameas-links-item-info">
+                        <div className="asana-sameas-links-name">
+                          {sim.name?.name_ru || '—'}
+                        </div>
+                        {sim.name?.name_sanskrit && (
+                          <div className="asana-sameas-links-sa">
+                            {sim.name.name_sanskrit}
+                          </div>
+                        )}
+                        <div className="asana-sameas-links-source">
+                          {catalogRecordSecondaryParts(sim).secondary}
+                        </div>
+                      </div>
+                      <div className="asana-sameas-links-item-actions">
+                        <Link
+                          className="btn-secondary asana-sameas-links-open"
+                          to={asanaPagePath(sim)}
+                          onClick={() => {
+                            setShowSameAsLinksModal(false);
+                            setSameAsLinksSubjectId(null);
+                          }}
+                        >
+                          Открыть
+                        </Link>
+                        <button
+                          type="button"
+                          className="btn-secondary asana-sameas-links-remove"
+                          onClick={() =>
+                            handleRemoveSameAsForOwner(sameAsLinksSubjectId, sim.id)
+                          }
+                        >
+                          Удалить соответствие
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="asana-sameas-links-empty">Соответствий не найдено.</p>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setShowSameAsLinksModal(false);
+                  setSameAsLinksSubjectId(null);
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Редактор поворота фото */}
+      {isExpertOrAdmin && showPhotoEditorModal && photoEditorContext && (
+        <div
+          className="modal-overlay asana-detail-overlay-top"
+          onClick={() => !editorSaving && handlePhotoEditorCancel()}
+        >
+          <div
+            className="modal-content photo-editor-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title">Редактировать фото</h3>
+              <button
+                type="button"
+                className="modal-close"
+                disabled={editorSaving}
+                onClick={handlePhotoEditorCancel}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="photo-editor-preview-wrap">
+                <img
+                  src={galleryImageUrl(photoEditorContext.photo, photoGalleryVersion)}
+                  alt=""
+                  className="photo-editor-preview-img"
+                  style={{ transform: `rotate(${editorRotationDeg}deg)` }}
+                />
+              </div>
+              <div className="photo-editor-toolbar">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={editorSaving}
+                  onClick={() => setEditorRotationDeg((d) => normRotation(d - 90))}
+                >
+                  ↺ −90°
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={editorSaving}
+                  onClick={() => setEditorRotationDeg((d) => normRotation(d + 90))}
+                >
+                  ↻ +90°
+                </button>
+                <span className="photo-editor-angle">
+                  <strong>{normRotation(editorRotationDeg) || 0}°</strong>
+                </span>
+              </div>
+            </div>
+            <div className="modal-footer photo-editor-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={editorSaving}
+                onClick={handlePhotoEditorCancel}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={editorSaving || normRotation(editorRotationDeg) === 0}
+                onClick={handlePhotoEditorSave}
+              >
+                {editorSaving ? 'Сохранение…' : 'Сохранить поворот'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

@@ -645,6 +645,51 @@ def load_sources_from_graph(g: Graph):
 def load_sources():
     return load_sources_from_graph(get_graph())
 
+
+def _source_search_haystack(source: Dict[str, Any]) -> str:
+    """Единая строка для поиска по полям источника."""
+    year = source.get("year")
+    year_s = str(year) if year is not None and year != "" else ""
+    parts = [
+        source.get("title") or "",
+        source.get("author") or "",
+        source.get("publisher") or "",
+        source.get("annotation") or "",
+        year_s,
+    ]
+    return " ".join(str(p) for p in parts if p).lower()
+
+
+def search_sources(query: str) -> List[Dict[str, Any]]:
+    """
+    Поиск источников: каждый токен запроса должен встретиться
+    в title / author / publisher / annotation / year.
+    """
+    q = (query or "").strip()
+    sources = load_sources()
+    if not q:
+        return sources
+
+    tokens = [t.lower() for t in re.split(r"[\s\-–—,.;:;]+", q) if t]
+    if not tokens:
+        return sources
+
+    results: List[Dict[str, Any]] = []
+    for src in sources:
+        hay = _source_search_haystack(src)
+        if all(tok in hay for tok in tokens):
+            results.append(src)
+
+    results.sort(
+        key=lambda s: (
+            (s.get("author") or "").lower(),
+            (s.get("title") or "").lower(),
+        )
+    )
+    logger.info("Found %s sources matching query: %r", len(results), q)
+    return results
+
+
 def find_existing_source(source_data: Dict[str, Any]) -> Optional[str]:
     """
     Ищет существующий источник по title, author и year.

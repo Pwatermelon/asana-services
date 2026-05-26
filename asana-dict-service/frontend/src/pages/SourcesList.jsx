@@ -4,10 +4,32 @@ import { sourcesAPI } from '../api/sources';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/SourcesList.css';
 
+function filterSourcesLocal(sources, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return sources;
+  const tokens = q.split(/[\s\-–—,.;:;]+/).filter(Boolean);
+  if (!tokens.length) return sources;
+  return sources.filter((s) => {
+    const hay = [
+      s.title,
+      s.author,
+      s.publisher,
+      s.annotation,
+      s.year != null && s.year !== '' ? String(s.year) : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return tokens.every((tok) => hay.includes(tok));
+  });
+}
+
 const SourcesList = () => {
+  const [allSources, setAllSources] = useState([]);
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchActive, setSearchActive] = useState(false);
   const { isExpertOrAdmin } = useAuth();
   const navigate = useNavigate();
 
@@ -19,7 +41,10 @@ const SourcesList = () => {
     try {
       const data = await sourcesAPI.getAll();
       data.sort((a, b) => (a.author || '').localeCompare(b.author || '', 'ru'));
+      setAllSources(data);
       setSources(data);
+      setSearchActive(false);
+      setSearchQuery('');
     } catch (error) {
       console.error('Error loading sources:', error);
     } finally {
@@ -57,15 +82,24 @@ const SourcesList = () => {
 
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchQuery.trim()) {
-      loadSources();
+    const q = searchQuery.trim();
+    if (!q) {
+      setSources(allSources);
+      setSearchActive(false);
       return;
     }
+    setSearchActive(true);
     try {
-      const results = await sourcesAPI.search(searchQuery);
-      setSources(results);
+      const results = await sourcesAPI.search(q);
+      const sorted = [...(results || [])].sort((a, b) =>
+        (a.author || '').localeCompare(b.author || '', 'ru')
+      );
+      setSources(sorted);
     } catch (error) {
-      console.error('Error searching:', error);
+      console.error('Error searching sources via API, using local filter:', error);
+      const local = filterSourcesLocal(allSources, q);
+      local.sort((a, b) => (a.author || '').localeCompare(b.author || '', 'ru'));
+      setSources(local);
     }
   };
 
@@ -82,11 +116,21 @@ const SourcesList = () => {
           <form onSubmit={handleSearch} className="search-form">
             <div className="search-input-container">
               <input
-                type="text"
+                type="search"
+                enterKeyHint="search"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск источников…"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSearchQuery(v);
+                  if (!v.trim()) {
+                    setSources(allSources);
+                    setSearchActive(false);
+                  }
+                }}
+                placeholder="Поиск по названию, автору, издательству…"
                 className="search-input"
+                autoComplete="off"
+                spellCheck={false}
               />
               <button type="submit" className="search-button">
                 Найти
@@ -96,7 +140,18 @@ const SourcesList = () => {
         </div>
       </div>
 
+      {searchActive && (
+        <p className="sources-search-hint">
+          {sources.length > 0
+            ? `Найдено: ${sources.length}`
+            : `По запросу «${searchQuery.trim()}» ничего не найдено`}
+        </p>
+      )}
+
       <div className="sources-lines">
+        {sources.length === 0 && !loading ? (
+          <p className="sources-empty">Источники не найдены</p>
+        ) : null}
         {sources.map((source) => (
           <div key={source.id} className="source-line">
             <div

@@ -88,7 +88,6 @@ def _collect_photos_from_catalog(asanas: List[Dict[str, Any]]) -> List[Dict[str,
         for p in a.get("photos") or []:
             image_url = _resolve_internal_image_url(p)
             dedup_fp = p.get("photo_dedup_fingerprint") or None
-            # Без URL и без отпечатка анализировать нечего.
             if not image_url and not dedup_fp:
                 continue
             out.append(
@@ -100,6 +99,45 @@ def _collect_photos_from_catalog(asanas: List[Dict[str, Any]]) -> List[Dict[str,
                 }
             )
     return out
+
+
+def _build_photo_meta_map(asanas: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
+    """photo_id → {source, hash, dedup_fp}.
+
+    Используется для отсева «шумных» пар, которые эксперту бесполезны:
+    - одна и та же книга у обоих фото → авторское решение;
+    - одинаковый photo_hash → буквально один и тот же файл, загруженный дважды;
+    - одинаковый photo_dedup_fingerprint → визуально идентичные кадры
+      (например, один и тот же скан, загруженный под разными названиями).
+    """
+    mapping: Dict[str, Dict[str, str]] = {}
+    for a in asanas:
+        for p in a.get("photos") or []:
+            pid = p.get("id") or ""
+            if not pid:
+                continue
+            mapping[pid] = {
+                "source": p.get("source") or "",
+                "hash": p.get("photo_hash") or "",
+                "dedup_fp": p.get("photo_dedup_fingerprint") or "",
+            }
+    return mapping
+
+
+def _pair_is_noise(meta_a: Dict[str, str], meta_b: Dict[str, str]) -> Optional[str]:
+    """Возвращает причину, по которой пару нужно отбросить, либо None."""
+    if not meta_a or not meta_b:
+        return None
+    sa, sb = meta_a.get("source"), meta_b.get("source")
+    if sa and sb and sa == sb:
+        return "same_source"
+    ha, hb = meta_a.get("hash"), meta_b.get("hash")
+    if ha and hb and ha == hb:
+        return "identical_file"
+    da, db = meta_a.get("dedup_fp"), meta_b.get("dedup_fp")
+    if da and db and da == db:
+        return "identical_image"
+    return None
 
 
 def _get_existing_same_as_pairs(asanas: List[Dict[str, Any]]) -> set[Tuple[str, str]]:
@@ -176,9 +214,16 @@ def run_ai_scan_and_save(
     asanas = load_asanas()
 
     photos = _collect_photos_from_catalog(asanas)
+    photo_meta_map = _build_photo_meta_map(asanas)
     logger.info("AI scan: найдено фото для анализа: %d", len(photos))
 
     existing_pairs = _get_existing_same_as_pairs(asanas) if skip_existing_links else set()
+
+    # Чистим старые мусорные предложения из БД — те, что уже стали «шумом»
+    # (одна книга, одинаковый файл, одинаковый отпечаток).
+    purged_noise = purge_noise_proposals(db, photo_meta_map)
+    if purged_noise:
+        logger.info("AI scan: удалено мусорных предложений из БД: %d", purged_noise)
 
     response = call_network_scan(
         photos,
@@ -188,7 +233,6 @@ def run_ai_scan_and_save(
 
     raw_proposals = response.get("proposals") or []
 
-    # Достаём уже существующие pair_key, чтобы не плодить дубли модерации.
     seen_keys = {
         row[0]
         for row in db.query(AISimilarityProposal.pair_key).all()
@@ -197,6 +241,8 @@ def run_ai_scan_and_save(
     inserted = 0
     skipped_existing_link = 0
     skipped_dup = 0
+    skipped_same_source = 0
+    skipped_identical_photo = 0
 
     for proposal in raw_proposals:
         asana_a = proposal.get("asana_a_id")
@@ -204,6 +250,20 @@ def run_ai_scan_and_save(
         reason = proposal.get("reason") or "unknown"
         if not asana_a or not asana_b or asana_a == asana_b:
             continue
+
+        photo_a_id = proposal.get("photo_a_id")
+        photo_b_id = proposal.get("photo_b_id")
+        noise = _pair_is_noise(
+            photo_meta_map.get(photo_a_id or "", {}),
+            photo_meta_map.get(photo_b_id or "", {}),
+        )
+        if noise == "same_source":
+            skipped_same_source += 1
+            continue
+        if noise in ("identical_file", "identical_image"):
+            skipped_identical_photo += 1
+            continue
+
         pair_sorted = tuple(sorted([asana_a, asana_b]))
         if skip_existing_links and pair_sorted in existing_pairs:
             skipped_existing_link += 1
@@ -216,8 +276,8 @@ def run_ai_scan_and_save(
         item = AISimilarityProposal(
             asana_a_id=pair_sorted[0],
             asana_b_id=pair_sorted[1],
-            photo_a_id=proposal.get("photo_a_id"),
-            photo_b_id=proposal.get("photo_b_id"),
+            photo_a_id=photo_a_id,
+            photo_b_id=photo_b_id,
             score=float(proposal.get("score") or 0.0),
             reason=reason,
             detail=proposal.get("detail"),
@@ -236,9 +296,42 @@ def run_ai_scan_and_save(
         "photos_failed": response.get("photos_failed", 0),
         "proposals_returned": len(raw_proposals),
         "proposals_inserted": inserted,
+        "purged_noise": purged_noise,
         "skipped_existing_link": skipped_existing_link,
         "skipped_duplicate": skipped_dup,
+        "skipped_same_source": skipped_same_source,
+        "skipped_identical_photo": skipped_identical_photo,
     }
+
+
+def purge_noise_proposals(
+    db: Session,
+    photo_meta_map: Optional[Dict[str, Dict[str, str]]] = None,
+) -> int:
+    """Удаляет из БД pending-предложения, которые стали «шумом»:
+    одна книга, одинаковый файл, одинаковый визуальный отпечаток.
+
+    Возвращает количество удалённых записей. Не коммитит — это делает caller
+    (например, `run_ai_scan_and_save` коммитит весь батч одной транзакцией).
+    """
+    if photo_meta_map is None:
+        photo_meta_map = _build_photo_meta_map(load_asanas())
+
+    rows = (
+        db.query(AISimilarityProposal)
+        .filter(AISimilarityProposal.status == "pending")
+        .all()
+    )
+    purged = 0
+    for row in rows:
+        noise = _pair_is_noise(
+            photo_meta_map.get(row.photo_a_id or "", {}),
+            photo_meta_map.get(row.photo_b_id or "", {}),
+        )
+        if noise:
+            db.delete(row)
+            purged += 1
+    return purged
 
 
 def asana_short_id(uri: Optional[str]) -> str:

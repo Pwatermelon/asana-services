@@ -224,3 +224,64 @@
   box-shadow: var(--shadow-sm);
 }
 
+@media (max-width: 640px) {
+  .moderation-container {
+    padding: 0.75rem 0.6rem 1.5rem;
+  }
+
+  .moderation-title {
+    font-size: 1.25rem;
+  }
+
+  .moderation-filters {
+    padding: 0.5em 0.75em;
+  }
+
+  .moderation-toolbar-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .moderation-toolbar-actions > .btn-primary,
+  .moderation-toolbar-actions > .btn-secondary {
+    flex: 1 1 auto;
+  }
+
+  .moderation-item {
+    padding: 0.65rem 0.7rem;
+  }
+
+  .moderation-item-header {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: flex-start;
+  }
+
+  .moderation-item-field {
+    font-size: 0.88rem;
+    word-break: break-word;
+  }
+
+  .moderation-item-field strong {
+    display: inline;
+  }
+
+  .mod-field-sub {
+    display: inline-block;
+  }
+
+  .moderation-item-footer {
+    align-items: stretch;
+  }
+
+  .moderation-item-footer .btn-primary,
+  .moderation-item-footer .btn-secondary {
+    width: 100%;
+  }
+
+  .moderation-item-import-data .moderation-photo-preview img {
+    max-width: 100% !important;
+    max-height: 280px !important;
+  }
+}
+

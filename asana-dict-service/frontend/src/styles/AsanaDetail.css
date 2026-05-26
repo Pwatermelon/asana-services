@@ -1116,6 +1116,9 @@
   position: relative;
   width: 100%;
   min-width: 0;
+  /* Фиксированная высота сцены: при перелистывании стрелки не «прыгают»
+     вверх-вниз, даже если у соседних фото разные пропорции. */
+  height: min(62vh, 720px);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1124,7 +1127,7 @@
 
 .user-photo-lightbox-imgwrap {
   position: relative;
-  max-height: min(62vh, 720px);
+  height: 100%;
   max-width: 100%;
   display: flex;
   align-items: center;
@@ -1132,7 +1135,7 @@
 }
 
 .user-photo-lightbox-imgwrap img {
-  max-height: min(62vh, 720px);
+  max-height: 100%;
   max-width: 100%;
   object-fit: contain;
   border-radius: 8px;
@@ -1766,6 +1769,10 @@
   .asana-catalog-step-btn {
     font-size: 0.78rem;
     padding: 0.35rem 0.4rem;
+  }
+
+  .user-photo-lightbox-stage {
+    height: min(50vh, 480px);
   }
 
   .user-photo-lightbox-nav--prev {

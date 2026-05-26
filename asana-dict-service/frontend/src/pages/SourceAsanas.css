@@ -1,5 +1,76 @@
+/* Только отступы/зазоры — шрифты и размеры кнопок как на остальных страницах (index.css, AsanasList, AsanaDetail). */
+
+.source-asanas-page {
+  padding-bottom: 0.85rem;
+}
+
+.source-asanas-page .page-header.source-asanas-header {
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.45rem;
+}
+
+.source-asanas-page .page-title {
+  margin-bottom: 0.2em;
+}
+
 .source-asanas-annotation {
-  margin-top: 0.35em;
+  margin-top: 0.25em;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.source-asanas-page .search-form-container.source-asanas-search {
+  margin: 0.45rem 0 0;
+  padding: 0.65rem 0.85rem;
+}
+
+.source-asanas-page .search-form {
+  gap: 0.5rem;
+}
+
+.source-asanas-page .search-input-container {
+  margin-bottom: 0;
+}
+
+.source-asanas-gallery {
+  margin-top: 0.35rem;
+}
+
+.source-asanas-page .letter-heading {
+  padding-bottom: 0.35em;
+  margin-bottom: 0.5em;
+}
+
+.source-asanas-page .alphabet-nav {
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.source-asanas-letter-section {
+  margin-bottom: 0.75rem;
+}
+
+.source-asanas-letter-section .letter-heading {
+  margin-bottom: 0.4rem;
+}
+
+.source-asanas-page .user-photo-grid {
+  gap: 0.75rem 0.9rem;
+  margin-top: 0.25rem;
+}
+
+.source-asanas-page .user-photo-cell {
+  gap: 0.35rem;
+}
+
+.source-asanas-page .user-gallery-empty {
+  margin: 0.35rem 0;
+}
+
+@media (max-width: 640px) {
+  .source-asanas-page {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
 }

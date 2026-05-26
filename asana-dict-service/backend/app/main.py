@@ -26,6 +26,7 @@ from app.ontology import (
     add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
     delete_source_from_ontology, update_source_in_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology,
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
+    search_sources,
     get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object,
     update_asana_name,
     collect_photo_hash_dedup_pairs_for_source,
@@ -1300,6 +1301,16 @@ async def get_sources():
     sources = load_sources()
     logger.info(f"Retrieved {len(sources)} sources")
     return sources
+
+
+@app.get("/api/sources/search")
+async def search_sources_api(query: str = Query(..., min_length=1)):
+    """Поиск источников по названию, автору, издательству, аннотации и году."""
+    logger.info("Searching sources with query: %r", query)
+    results = search_sources(query)
+    logger.info("Found %s sources for query: %r", len(results), query)
+    return results
+
 
 @app.post("/api/sources")
 async def post_source(source: SourceCreate, user: str = Depends(is_expert_or_admin)):

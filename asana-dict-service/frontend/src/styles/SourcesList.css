@@ -2,6 +2,19 @@
   margin-top: 0.5rem;
 }
 
+.sources-search-hint {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+
+.sources-empty {
+  margin: 0;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
 .search-form-container {
   margin: 0.75em 0 1em 0;
   background: var(--card-background);
