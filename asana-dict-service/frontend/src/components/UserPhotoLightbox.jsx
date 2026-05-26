@@ -8,6 +8,7 @@ import {
   combinedSameAsForOwner,
   filterGuestSameAsDifferentGroupName,
   catalogRecordSecondaryParts,
+  catalogRepresentativeByNameRu,
   groupLightboxOtherNamesByDisplayRu,
   galleryImageUrl,
   getPhotoSrc,
@@ -64,6 +65,7 @@ export default function UserPhotoLightbox({
 
   const [showSameAsLinksModal, setShowSameAsLinksModal] = useState(false);
   const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
+  const [sameAsLinksSearchQuery, setSameAsLinksSearchQuery] = useState('');
 
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [addPhotoTarget, setAddPhotoTarget] = useState(null);
@@ -245,22 +247,31 @@ export default function UserPhotoLightbox({
         (a) => canonicalAsanaId(a.id) === canonicalAsanaId(sameAsLinksSubjectId)
       );
     if (!owner) return [];
-    return combinedSameAsForOwner(
+    const pageForLinks =
+      catalogRepresentativeByNameRu(allAsanas, owner.name?.name_ru) || owner;
+    const links = combinedSameAsForOwner(
       owner,
-      effectivePageAsana,
+      pageForLinks,
       allAsanas,
       similarAsanas
     );
-  }, [
-    showSameAsLinksModal,
-    sameAsLinksSubjectId,
-    allAsanas,
-    effectivePageAsana,
-    similarAsanas,
-    getPageAsana,
-    lbSlide,
-    lbSlideOwnerFull,
-  ]);
+    return links.map((sim) => {
+      const k = canonicalAsanaId(sim.id);
+      const full = allAsanas.find((a) => canonicalAsanaId(a.id) === k);
+      return full ? { ...sim, ...full, id: full.id ?? sim.id } : sim;
+    });
+  }, [showSameAsLinksModal, sameAsLinksSubjectId, allAsanas, similarAsanas]);
+
+  const filteredSameAsLinksForModal = useMemo(() => {
+    const q = sameAsLinksSearchQuery.trim().toLowerCase();
+    if (!q) return sameAsLinksForModal;
+    return sameAsLinksForModal.filter((sim) => {
+      const nameRu = sim.name?.name_ru?.toLowerCase() || '';
+      const nameSa = sim.name?.name_sanskrit?.toLowerCase() || '';
+      const edition = catalogRecordSecondaryParts(sim).secondary.toLowerCase();
+      return nameRu.includes(q) || nameSa.includes(q) || edition.includes(q);
+    });
+  }, [sameAsLinksForModal, sameAsLinksSearchQuery]);
 
   const filteredAsanasForMatch = useMemo(() => {
     if (!allAsanas.length) return [];
@@ -704,6 +715,7 @@ export default function UserPhotoLightbox({
                     e.stopPropagation();
                     if (!lbSlideOwnerFull) return;
                     setSameAsLinksSubjectId(lbSlideOwnerFull.id);
+                    setSameAsLinksSearchQuery('');
                     setShowSameAsLinksModal(true);
                   }}
                 >
@@ -1018,9 +1030,9 @@ export default function UserPhotoLightbox({
                     }`}
                     onClick={() => setSelectedMatchAsana(a)}
                   >
-                    {a.photo ? (
+                    {similarPreviewSrc(a) ? (
                       <img
-                        src={getPhotoSrc(a.photo)}
+                        src={similarPreviewSrc(a)}
                         alt={a.name?.name_ru}
                         className="modal-asana-thumb"
                       />
@@ -1073,6 +1085,7 @@ export default function UserPhotoLightbox({
           onClick={() => {
             setShowSameAsLinksModal(false);
             setSameAsLinksSubjectId(null);
+            setSameAsLinksSearchQuery('');
           }}
         >
           <div
@@ -1087,6 +1100,7 @@ export default function UserPhotoLightbox({
                 onClick={() => {
                   setShowSameAsLinksModal(false);
                   setSameAsLinksSubjectId(null);
+                  setSameAsLinksSearchQuery('');
                 }}
               >
                 ×
@@ -1094,9 +1108,36 @@ export default function UserPhotoLightbox({
             </div>
             <div className="modal-body">
               {sameAsLinksForModal.length > 0 ? (
+                <>
+                  <div className="modal-search">
+                    <input
+                      type="search"
+                      placeholder="Поиск по названию или изданию…"
+                      value={sameAsLinksSearchQuery}
+                      onChange={(e) => setSameAsLinksSearchQuery(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                  {filteredSameAsLinksForModal.length > 0 ? (
                 <ul className="asana-sameas-links-list">
-                  {sameAsLinksForModal.map((sim) => (
+                  {filteredSameAsLinksForModal.map((sim) => {
+                    const thumbSrc = similarPreviewSrc(sim);
+                    return (
                     <li key={sim.id} className="asana-sameas-links-item">
+                      <div className="asana-sameas-links-thumb-wrap">
+                        {thumbSrc ? (
+                          <img
+                            src={thumbSrc}
+                            alt=""
+                            className="asana-sameas-links-thumb"
+                          />
+                        ) : (
+                          <span className="asana-sameas-links-thumb-empty" aria-hidden>
+                            —
+                          </span>
+                        )}
+                      </div>
                       <div className="asana-sameas-links-item-info">
                         <div className="asana-sameas-links-name">
                           {sim.name?.name_ru || '—'}
@@ -1117,6 +1158,7 @@ export default function UserPhotoLightbox({
                           onClick={() => {
                             setShowSameAsLinksModal(false);
                             setSameAsLinksSubjectId(null);
+                            setSameAsLinksSearchQuery('');
                           }}
                         >
                           Открыть
@@ -1132,8 +1174,15 @@ export default function UserPhotoLightbox({
                         </button>
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
+                  ) : (
+                    <p className="asana-sameas-links-empty">
+                      По запросу «{sameAsLinksSearchQuery.trim()}» ничего не найдено
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="asana-sameas-links-empty">Соответствий не найдено.</p>
               )}
@@ -1145,6 +1194,7 @@ export default function UserPhotoLightbox({
                 onClick={() => {
                   setShowSameAsLinksModal(false);
                   setSameAsLinksSubjectId(null);
+                  setSameAsLinksSearchQuery('');
                 }}
               >
                 Закрыть
