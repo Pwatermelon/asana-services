@@ -4,6 +4,7 @@ python-multipart==0.0.6
 pydantic==1.10.7
 email-validator==2.0.0
 rdflib==6.3.2
+owlrl==6.0.2
 psycopg2-binary==2.9.6
 SQLAlchemy==2.0.12
 python-jose==3.3.0

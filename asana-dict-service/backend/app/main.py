@@ -28,6 +28,7 @@ from app.ontology import (
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
     search_sources,
     get_photo_of_asana_from_source, get_similar_asanas, add_same_as_object, remove_same_as_object,
+    reconcile_same_as_transitivity,
     update_asana_name,
     collect_photo_hash_dedup_pairs_for_source,
     rotate_photo_in_asana,
@@ -743,6 +744,28 @@ def run_application_startup() -> None:
                 run_sync_with_new_session()
             except Exception as sync_err:
                 logger.warning("Синхронизация зеркала после очистки асан без фото: %s", sync_err)
+
+    # OWL: isSameAsObject Transitive+Symmetric в файле + проверка owlrl (без ручного правления онтологии).
+    if os.getenv("OWL_UPGRADE_SAME_AS_ON_START", "true").lower() in ("1", "true", "yes"):
+        try:
+            from app.ontology import run_same_as_ontology_startup_upgrade
+
+            same_as_stats = run_same_as_ontology_startup_upgrade()
+            if same_as_stats.get("owl_file_patched"):
+                logger.info(
+                    "Старт: ontology_updated.owl дополнен аксиомами isSameAsObject (деплой)"
+                )
+            if same_as_stats.get("owlrl_ok"):
+                logger.info(
+                    "Старт: OWL 2 RL готов, выведено %s триплетов поверх asserted sameAs",
+                    same_as_stats.get("inferred_triples", 0),
+                )
+        except Exception as same_as_err:
+            logger.warning(
+                "Стартовое обновление OWL sameAs пропущено из-за ошибки: %s",
+                same_as_err,
+                exc_info=True,
+            )
 
     # Перенос s3PhotoPath из import-staging в images/asans/ при старте (только asana-backend;
     # у asana-import в compose OWL_MIGRATE_STAGING_PHOTOS_ON_START=false).
@@ -2002,6 +2025,27 @@ async def remove_asana_same_as(
             raise HTTPException(status_code=400, detail="Не удалось удалить связь")
     except Exception as e:
         logger.error(f"Error removing same as object: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/reconcile-same-as", tags=["asana", "admin"])
+async def admin_reconcile_same_as(user: str = Depends(is_admin)):
+    """
+    Проверка OWL 2 RL: сколько триплетов выводится из asserted sameAs
+    (1~2 и 1~3 → 2~3 и т.д.). Asserted-данные в БД не меняются.
+    """
+    from app.ontology import get_graph
+
+    logger.info("reconcile-same-as requested by %s", user)
+    try:
+        g = get_graph()
+        inferred = reconcile_same_as_transitivity(g)
+        return {
+            "message": "OWL 2 RL reasoning выполнен (asserted-граф не изменён)",
+            "inferred_triples": inferred,
+        }
+    except Exception as e:
+        logger.error("reconcile-same-as failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -77,6 +77,7 @@ if rclone sync "${GDRIVE_STAGING}/" "${GDRIVE_REMOTE}/" \
   GDRIVE_SUCCESS=1
 else
   GDRIVE_SUCCESS=0
+  echo "[${NOW_UTC}] backup ERROR: Google Drive upload failed (local archive kept: ${ARCHIVE_PATH}). Cron will retry — timestamp успеха не обновлён."
 fi
 
 # Локально оставляем только последние N архивов
@@ -88,9 +89,19 @@ if [[ -n "${OLD_ARCHIVES}" ]]; then
 fi
 find /backup-data/current -mindepth 1 -maxdepth 1 -type d -mtime +2 -exec rm -rf {} + 2>/dev/null || true
 
-BACKUP_SUCCESS=1
-LAST_SUCCESS_TS="$(date +%s)"
-echo "${LAST_SUCCESS_TS}" > "${LAST_RUN_FILE}"
+# Успех = архив на Drive. Иначе cron не должен «думать», что бэкап уже был (см. skip по LAST_RUN_FILE).
+if (( GDRIVE_SUCCESS == 1 )); then
+  BACKUP_SUCCESS=1
+  LAST_SUCCESS_TS="$(date +%s)"
+  echo "${LAST_SUCCESS_TS}" > "${LAST_RUN_FILE}"
+else
+  BACKUP_SUCCESS=0
+  if [[ -f "${LAST_RUN_FILE}" ]]; then
+    LAST_SUCCESS_TS="$(cat "${LAST_RUN_FILE}" 2>/dev/null || echo 0)"
+  else
+    LAST_SUCCESS_TS=0
+  fi
+fi
 
 cat > "${PROM_FILE}" <<EOF
 # HELP backup_last_success Backup success status.
@@ -107,4 +118,4 @@ backup_last_size_bytes{component="archive"} ${ARCHIVE_SIZE}
 backup_last_success_timestamp{component="all"} ${LAST_SUCCESS_TS}
 EOF
 
-echo "[${NOW_UTC}] backup finished: archive=${ARCHIVE_PATH} size=${ARCHIVE_SIZE} gdrive=${GDRIVE_SUCCESS}"
+echo "[${NOW_UTC}] backup finished: success=${BACKUP_SUCCESS} archive=${ARCHIVE_PATH} size=${ARCHIVE_SIZE} gdrive=${GDRIVE_SUCCESS}"

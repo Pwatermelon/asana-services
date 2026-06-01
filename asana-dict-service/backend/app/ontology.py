@@ -134,6 +134,81 @@ def migrate_staging_s3_photo_paths_in_ontology() -> Dict[str, int]:
     }
 
 
+def patch_ontology_file_tbox_if_needed() -> bool:
+    """
+    Дописывает в ontology_updated.owl аксиомы isSameAsObject (Transitive, Symmetric),
+    если их ещё нет. Вызывается при деплое — ручное редактирование OWL не нужно.
+    """
+    from app.owl_reasoning import inject_is_same_as_owl_axioms, is_same_as_owl_tbox_present
+
+    ensure_ontology_file_exists()
+    g = Graph()
+    g.bind("asana", ASANA)
+    if os.path.exists(config.OWL_FILE_PATH):
+        try:
+            g.parse(config.OWL_FILE_PATH, format="xml")
+        except Exception as e:
+            logger.warning("patch_ontology_file_tbox: parse failed, will merge TBox: %s", e)
+
+    if is_same_as_owl_tbox_present(g, ASANA.isSameAsObject):
+        logger.debug("OWL TBox isSameAsObject already present in %s", config.OWL_FILE_PATH)
+        return False
+
+    for cls in (ASANA.Asana, ASANA.AsanaName, ASANA.AsanaSource, ASANA.AsanaPhoto):
+        if (cls, RDF.type, RDF.Class) not in g:
+            g.add((cls, RDF.type, RDF.Class))
+    inject_is_same_as_owl_axioms(g, ASANA.isSameAsObject)
+    os.makedirs(os.path.dirname(config.OWL_FILE_PATH) or ".", exist_ok=True)
+    g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+    logger.info(
+        "Patched ontology file %s: isSameAsObject → owl:TransitiveProperty + owl:SymmetricProperty",
+        config.OWL_FILE_PATH,
+    )
+    return True
+
+
+def run_same_as_ontology_startup_upgrade() -> dict:
+    """
+    Старт после деплоя: починить OWL-файл и проверить OWL 2 RL на текущем каталоге.
+    Asserted-связи в БД не меняются; транзитивность работает при чтении.
+    """
+    result: Dict[str, Any] = {
+        "owl_file_patched": False,
+        "owlrl_ok": False,
+        "asserted_triples": 0,
+        "inferred_triples": 0,
+    }
+    try:
+        result["owl_file_patched"] = patch_ontology_file_tbox_if_needed()
+    except Exception as e:
+        logger.error("OWL TBox startup patch failed: %s", e, exc_info=True)
+        result["owl_patch_error"] = str(e)
+
+    try:
+        from owlrl import DeductiveClosure  # noqa: F401
+
+        result["owlrl_ok"] = True
+        asserted = _load_asserted_graph()
+        result["asserted_triples"] = len(asserted)
+        result["inferred_triples"] = reconcile_same_as_transitivity(asserted)
+        logger.info(
+            "OWL 2 RL startup check OK: asserted=%s triples, inferred=%s (sameAs closure in memory)",
+            result["asserted_triples"],
+            result["inferred_triples"],
+        )
+    except ImportError:
+        logger.error(
+            "Пакет owlrl не установлен — транзитивный isSameAs не работает. "
+            "Пересоберите образ asana-backend (pip install owlrl)."
+        )
+        result["owlrl_error"] = "owlrl not installed"
+    except Exception as e:
+        logger.warning("OWL 2 RL startup check failed: %s", e, exc_info=True)
+        result["reasoner_error"] = str(e)
+
+    return result
+
+
 def ensure_ontology_file_exists():
     """Создает файл онтологии, если он не существует"""
     try:
@@ -148,7 +223,10 @@ def ensure_ontology_file_exists():
             g.add((ASANA.AsanaName, RDF.type, RDF.Class))
             g.add((ASANA.AsanaSource, RDF.type, RDF.Class))
             g.add((ASANA.AsanaPhoto, RDF.type, RDF.Class))
-            
+            from app.owl_reasoning import inject_is_same_as_owl_axioms
+
+            inject_is_same_as_owl_axioms(g, ASANA.isSameAsObject)
+
             # Создаем директорию, если её нет
             os.makedirs(os.path.dirname(config.OWL_FILE_PATH), exist_ok=True)
 
@@ -161,6 +239,24 @@ def ensure_ontology_file_exists():
 
 
 def get_graph():
+    """
+    Asserted-граф (только явные триплеты из зеркала/OWL), без вывода reasoner.
+    Для запросов с транзитивным sameAs используйте get_reasoned_graph().
+    """
+    return _load_asserted_graph()
+
+
+def get_reasoned_graph() -> Graph:
+    """
+    OWL 2 RL: asserted + TBox (isSameAsObject транзитивно и симметрично) + выведенные триплеты.
+    Вывод не сохраняется в БД — только для чтения (/similar, каталог same_as_ids).
+    """
+    from app.owl_reasoning import build_reasoned_graph
+
+    return build_reasoned_graph(_load_asserted_graph(), ASANA.isSameAsObject)
+
+
+def _load_asserted_graph():
     """
     DB-first: если в БД есть зеркало catalog_mirror_items — граф собирается из него.
     Иначе — загрузка из ontology_updated.owl и первичное заполнение зеркала.
@@ -270,10 +366,9 @@ def load_asanas_from_graph(g: Graph):
         photos = [p["image"] for p in photos_with_sources if p["image"]]
         
         logger.debug(f"Photos count: {len(photos)}, Sources count: {len(sources_list)}")
-        # Исходящие и входящие isSameAsObject — в зеркале нужны оба, чтобы граф из БД совпадал с запросами /similar
-        _out = [str(o) for o in g.objects(asana, ASANA.isSameAsObject)]
-        _inc = [str(s) for s in g.subjects(ASANA.isSameAsObject, asana)]
-        same_as_ids = list(dict.fromkeys(_out + _inc))
+        # Транзитивное замыкание sameAs (свойство онтологии; reasoning в rdflib не включён)
+        _comp = same_as_component(g, asana)
+        same_as_ids = sorted(str(u) for u in _comp if u != asana)
         asana_data = {
             "id": str(asana),
             "name": name_data,
@@ -292,7 +387,7 @@ def load_asanas_from_graph(g: Graph):
 
 
 def load_asanas():
-    return load_asanas_from_graph(get_graph())
+    return load_asanas_from_graph(get_reasoned_graph())
 
 def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
     """
@@ -1471,6 +1566,64 @@ def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:
 
 
 # Функции для работы с isSameAsObject (аналогичные асаны)
+# Транзитивность и симметрия — аксиомы OWL (owl:TransitiveProperty / SymmetricProperty);
+# вывод — OWL 2 RL (owlrl), см. get_reasoned_graph().
+
+
+def make_asana_uri(asana_id: str) -> URIRef:
+    """Короткий id / asana_* / полный URI → URIRef асаны."""
+    aid = str(asana_id or "").strip()
+    if not aid.startswith("http://"):
+        if not aid.startswith("asana_"):
+            aid = f"asana_{aid}"
+        aid = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{aid}"
+    return URIRef(aid)
+
+
+def _same_as_neighbors(g: Graph, asana_uri: URIRef) -> set:
+    """Соседи по isSameAsObject (исходящие и входящие)."""
+    neighbors: set = set()
+    for o in g.objects(asana_uri, ASANA.isSameAsObject):
+        neighbors.add(o)
+    for s in g.subjects(ASANA.isSameAsObject, asana_uri):
+        neighbors.add(s)
+    return neighbors
+
+
+def same_as_component(g: Graph, start_uri: URIRef) -> set:
+    """
+    Компонента связности isSameAsObject на графе g.
+    g должен быть уже обработан OWL 2 RL (get_reasoned_graph).
+    """
+    if (start_uri, RDF.type, ASANA.Asana) not in g:
+        return set()
+    seen: set = set()
+    stack = [start_uri]
+    while stack:
+        u = stack.pop()
+        if u in seen:
+            continue
+        seen.add(u)
+        for v in _same_as_neighbors(g, u):
+            if (v, RDF.type, ASANA.Asana) in g and v not in seen:
+                stack.append(v)
+    return seen
+
+
+def reconcile_same_as_transitivity(g: Graph) -> int:
+    """
+    Прогон OWL 2 RL на asserted-графе (без записи выводов в БД).
+    Возвращает число триплетов, которые reasoner добавил бы к asserted.
+    """
+    from app.owl_reasoning import build_reasoned_graph
+
+    before = len(g)
+    reasoned = build_reasoned_graph(g, ASANA.isSameAsObject)
+    inferred = len(reasoned) - before
+    if inferred:
+        logger.info("OWL 2 RL reconcile: %s inferred triple(s) over asserted", inferred)
+    return inferred
+
 
 def get_similar_asanas(asana_id: str) -> List[Dict]:
     """
@@ -1478,30 +1631,13 @@ def get_similar_asanas(asana_id: str) -> List[Dict]:
     Возвращает данные в том же формате, что и load_asanas().
     """
     logger.info(f"Getting similar asanas for: {asana_id}")
-    g = get_graph()
-    
-    # Формируем полный URI если нужно
-    if not asana_id.startswith('http://'):
-        if not asana_id.startswith('asana_'):
-            asana_id = f"asana_{asana_id}"
-        asana_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{asana_id}"
-    
-    asana_uri = URIRef(asana_id)
+    g = get_reasoned_graph()
+    asana_uri = make_asana_uri(asana_id)
     similar_asanas = []
-    
-    # Ищем связи в обе стороны (asana -> similar и similar -> asana)
-    # isSameAsObject симметричен
-    similar_uris = set()
-    
-    # Асаны, на которые ссылается текущая
-    for similar_uri in g.objects(asana_uri, ASANA.isSameAsObject):
-        similar_uris.add(similar_uri)
-    
-    # Асаны, которые ссылаются на текущую
-    for similar_uri in g.subjects(ASANA.isSameAsObject, asana_uri):
-        similar_uris.add(similar_uri)
-    
-    logger.debug(f"Found {len(similar_uris)} similar asanas")
+
+    component = same_as_component(g, asana_uri)
+    similar_uris = component - {asana_uri}
+    logger.debug(f"Found {len(similar_uris)} similar asanas (OWL 2 RL)")
     
     # Загружаем данные для каждой найденной асаны
     for similar_uri in similar_uris:
@@ -1564,38 +1700,37 @@ def get_similar_asanas(asana_id: str) -> List[Dict]:
 
 def add_same_as_object(asana_id: str, target_asana_id: str) -> bool:
     """
-    Добавляет связь isSameAsObject между двумя асанами.
-    Связь симметрична - добавляется в обе стороны.
+    Добавляет asserted-связь isSameAsObject (одно ребро).
+    Транзитивные и симметричные следствия выводит OWL 2 RL при чтении (get_reasoned_graph).
     """
     logger.info(f"Adding isSameAsObject: {asana_id} <-> {target_asana_id}")
     
     try:
         g = get_graph()
+        asana_uri = make_asana_uri(asana_id)
+        target_uri = make_asana_uri(target_asana_id)
         
-        # Формируем полные URI
-        def make_full_uri(aid):
-            if not aid.startswith('http://'):
-                if not aid.startswith('asana_'):
-                    aid = f"asana_{aid}"
-                return f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{aid}"
-            return aid
-        
-        asana_uri = URIRef(make_full_uri(asana_id))
-        target_uri = URIRef(make_full_uri(target_asana_id))
-        
-        # Проверяем, что обе асаны существуют
         if (asana_uri, RDF.type, ASANA.Asana) not in g:
             logger.error(f"Asana not found: {asana_uri}")
             return False
         if (target_uri, RDF.type, ASANA.Asana) not in g:
             logger.error(f"Target asana not found: {target_uri}")
             return False
-        
-        # Добавляем связь (в одну сторону, при чтении ищем в обе)
+        if asana_uri == target_uri:
+            logger.warning("add_same_as_object: same asana id")
+            return False
+
+        if (asana_uri, ASANA.isSameAsObject, target_uri) in g or (
+            target_uri,
+            ASANA.isSameAsObject,
+            asana_uri,
+        ) in g:
+            logger.info("isSameAsObject already asserted between %s and %s", asana_uri, target_uri)
+            return True
+
         g.add((asana_uri, ASANA.isSameAsObject, target_uri))
-        
         _persist_ontology_graph(g)
-        logger.info(f"Successfully added isSameAsObject relation")
+        logger.info("Successfully added asserted isSameAsObject (OWL 2 RL infers closure on read)")
         return True
     except Exception as e:
         logger.error(f"Error adding isSameAsObject: {str(e)}", exc_info=True)
@@ -1604,24 +1739,15 @@ def add_same_as_object(asana_id: str, target_asana_id: str) -> bool:
 
 def remove_same_as_object(asana_id: str, target_asana_id: str) -> bool:
     """
-    Удаляет связь isSameAsObject между двумя асанами.
+    Удаляет связь isSameAsObject только между двумя указанными асанами (не весь кластер).
     Удаляет связи в обе стороны.
     """
     logger.info(f"Removing isSameAsObject: {asana_id} <-> {target_asana_id}")
     
     try:
         g = get_graph()
-        
-        # Формируем полные URI
-        def make_full_uri(aid):
-            if not aid.startswith('http://'):
-                if not aid.startswith('asana_'):
-                    aid = f"asana_{aid}"
-                return f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{aid}"
-            return aid
-        
-        asana_uri = URIRef(make_full_uri(asana_id))
-        target_uri = URIRef(make_full_uri(target_asana_id))
+        asana_uri = make_asana_uri(asana_id)
+        target_uri = make_asana_uri(target_asana_id)
         
         # Удаляем связи в обе стороны
         g.remove((asana_uri, ASANA.isSameAsObject, target_uri))

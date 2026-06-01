@@ -8,8 +8,7 @@ import {
   combinedSameAsForOwner,
   filterGuestSameAsDifferentGroupName,
   catalogRecordSecondaryParts,
-  catalogRepresentativeByNameRu,
-  groupLightboxOtherNamesByDisplayRu,
+  flattenLightboxOtherNameEntries,
   galleryImageUrl,
   getPhotoSrc,
   buildPhotoSourceMeta,
@@ -238,6 +237,23 @@ export default function UserPhotoLightbox({
         })
     );
   }, [lightboxOwnerSameAsVisible, lbSlide]);
+
+  const lightboxOtherNameRows = useMemo(() => {
+    if (!lightboxOtherSourceVariants.length) return [];
+    const pageTarget = effectivePageAsana || pageAsana;
+    return flattenLightboxOtherNameEntries(
+      lightboxOtherSourceVariants,
+      allAsanas,
+      photoGalleryVersion,
+      pageTarget
+    );
+  }, [
+    lightboxOtherSourceVariants,
+    allAsanas,
+    photoGalleryVersion,
+    effectivePageAsana,
+    pageAsana,
+  ]);
 
   const sameAsLinksForModal = useMemo(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId || !allAsanas.length) return [];
@@ -856,7 +872,7 @@ export default function UserPhotoLightbox({
             </div>
           )}
 
-          {lightboxOtherSourceVariants.length > 0 && (
+          {lightboxOtherNameRows.length > 0 && (
             <div
               className="user-lightbox-other-sources-strip"
               onClick={(e) => e.stopPropagation()}
@@ -865,35 +881,34 @@ export default function UserPhotoLightbox({
                 Данная асана под другими названиями
               </h4>
               <ul className="user-lightbox-other-sources-name-list">
-                {groupLightboxOtherNamesByDisplayRu(lightboxOtherSourceVariants).map((g) => (
-                  <li key={g.key} className="user-lightbox-other-source-row">
+                {lightboxOtherNameRows.map((row) => (
+                  <li key={row.key} className="user-lightbox-other-source-row">
                     <Link
-                      to={asanaPagePath(g.linkTarget)}
+                      to={asanaPagePath(row.linkTarget)}
                       className="user-lightbox-other-source-row-link"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="user-lightbox-other-source-row-inner">
+                      <div className="user-lightbox-other-source-row-inner user-lightbox-other-source-row-inner--with-photo">
+                        <div className="user-lightbox-other-source-photo user-lightbox-other-source-photo--row">
+                          {row.photoSrc ? (
+                            <img src={row.photoSrc} alt="" />
+                          ) : (
+                            <span className="user-lightbox-other-source-photo-empty">—</span>
+                          )}
+                        </div>
                         <div className="user-lightbox-other-source-name-cell">
                           <span className="user-lightbox-other-source-row-title-text">
-                            {g.nameRu}
+                            {row.nameRu}
                           </span>
-                        </div>
-                        <div
-                          className="user-lightbox-other-source-editions-col"
-                          aria-label="Издания"
-                        >
-                          {g.editionLines.map((line, idx) => (
-                            <span
-                              key={`${g.key}-ed-${idx}`}
-                              className={
-                                line.muted
-                                  ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted'
-                                  : 'user-lightbox-other-source-edition'
-                              }
-                            >
-                              {line.secondary}
-                            </span>
-                          ))}
+                          <span
+                            className={
+                              row.sourceMuted
+                                ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted user-lightbox-other-source-edition--under-name'
+                                : 'user-lightbox-other-source-edition user-lightbox-other-source-edition--under-name'
+                            }
+                          >
+                            {row.sourceCaption}
+                          </span>
                         </div>
                       </div>
                     </Link>

@@ -116,45 +116,52 @@ export function catalogRecordSecondaryParts(sim) {
   return { secondary, muted: !edition };
 }
 
-export function groupLightboxOtherNamesByDisplayRu(variants) {
+/**
+ * Строки блока «под другими названиями»: по одной на связанную запись (фото + имя + источник фото).
+ * Без группировки источников по названию. linkTarget — страница каталога (как раньше у группы).
+ */
+export function flattenLightboxOtherNameEntries(
+  variants,
+  allAsanas,
+  photoGalleryVersion,
+  pageLinkTarget = null
+) {
   if (!variants?.length) return [];
-  const map = new Map();
+  const rows = [];
   for (const sim of variants) {
-    const nk = normalizeCatalogNameKey(sim.name?.name_ru || '');
-    const key = nk || `__id_${canonicalAsanaId(sim.id)}`;
-    let g = map.get(key);
-    if (!g) {
-      g = {
-        key,
-        nameRu: (sim.name?.name_ru || '').trim() || 'Асана',
-        items: [],
-      };
-      map.set(key, g);
-    }
-    g.items.push(sim);
-    const nm = (sim.name?.name_ru || '').trim();
-    if (nm && g.nameRu === 'Асана') g.nameRu = nm;
-  }
-  const out = [];
-  for (const g of map.values()) {
-    const seen = new Set();
-    const editionLines = [];
-    for (const sim of g.items) {
+    const nameRu = (sim.name?.name_ru || '').trim() || 'Асана';
+    const linkTarget =
+      pageLinkTarget ||
+      catalogRepresentativeByNameRu(allAsanas, nameRu) ||
+      sim;
+
+    const firstPhoto = sim.photos?.[0];
+    let photoSrc = null;
+    let sourceCaption = '';
+    let sourceMuted = false;
+
+    if (firstPhoto != null) {
+      photoSrc = galleryImageUrl(firstPhoto, photoGalleryVersion);
+      sourceCaption = buildPhotoSourceMeta(firstPhoto, sim).caption;
+    } else {
       const parts = catalogRecordSecondaryParts(sim);
-      if (!seen.has(parts.secondary)) {
-        seen.add(parts.secondary);
-        editionLines.push({ secondary: parts.secondary, muted: parts.muted });
-      }
+      sourceCaption = parts.secondary;
+      sourceMuted = parts.muted;
     }
-    const rep = [...g.items].sort((a, b) =>
-      canonicalAsanaId(a.id).localeCompare(canonicalAsanaId(b.id))
-    )[0];
-    out.push({ ...g, editionLines, linkTarget: rep });
+
+    rows.push({
+      key: canonicalAsanaId(sim.id) || String(sim.id),
+      nameRu,
+      photoSrc,
+      sourceCaption,
+      sourceMuted,
+      linkTarget,
+    });
   }
-  out.sort((a, b) =>
+  rows.sort((a, b) =>
     (a.nameRu || '').localeCompare(b.nameRu || '', 'ru', { sensitivity: 'base' })
   );
-  return out;
+  return rows;
 }
 
 export function getPhotoSrc(photoData) {

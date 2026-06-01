@@ -149,7 +149,16 @@ def persist_ontology_graph(g: Graph) -> None:
         try:
             snapshot_graph_to_mirror(db, g)
             os.makedirs(os.path.dirname(config.OWL_FILE_PATH) or ".", exist_ok=True)
-            g.serialize(destination=config.OWL_FILE_PATH, format="xml")
+            # В OWL-файл всегда включаем TBox (isSameAsObject), даже если в зеркале только ABox
+            from app.ontology import ASANA
+            from app.owl_reasoning import inject_is_same_as_owl_axioms
+
+            export_g = Graph()
+            export_g.bind("asana", ASANA)
+            for triple in g:
+                export_g.add(triple)
+            inject_is_same_as_owl_axioms(export_g, ASANA.isSameAsObject)
+            export_g.serialize(destination=config.OWL_FILE_PATH, format="xml")
             sha = _file_sha256(config.OWL_FILE_PATH)
             ensure_catalog_sync_state_row(db)
             row = db.query(CatalogSyncState).filter(CatalogSyncState.id == SYNC_STATE_ID).one()
