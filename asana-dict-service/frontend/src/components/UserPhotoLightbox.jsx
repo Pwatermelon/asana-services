@@ -8,6 +8,7 @@ import {
   combinedSameAsForOwner,
   filterGuestSameAsDifferentGroupName,
   catalogRecordSecondaryParts,
+  catalogRepresentativeByNameRu,
   flattenLightboxOtherNameEntries,
   galleryImageUrl,
   getPhotoSrc,
