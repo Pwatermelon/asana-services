@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { useAuth } from '../contexts/AuthContext';
 import { asanaPagePath } from './CompactAsanaRow';
@@ -240,20 +240,16 @@ export default function UserPhotoLightbox({
 
   const lightboxOtherNameRows = useMemo(() => {
     if (!lightboxOtherSourceVariants.length) return [];
-    const pageTarget = effectivePageAsana || pageAsana;
+    // Ссылка на страницу группы по русскому названию строки (не на текущую страницу для всех).
     return flattenLightboxOtherNameEntries(
       lightboxOtherSourceVariants,
       allAsanas,
       photoGalleryVersion,
-      pageTarget
+      null
     );
-  }, [
-    lightboxOtherSourceVariants,
-    allAsanas,
-    photoGalleryVersion,
-    effectivePageAsana,
-    pageAsana,
-  ]);
+  }, [lightboxOtherSourceVariants, allAsanas, photoGalleryVersion]);
+
+  const location = useLocation();
 
   const sameAsLinksForModal = useMemo(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId || !allAsanas.length) return [];
@@ -881,15 +877,23 @@ export default function UserPhotoLightbox({
                 Данная асана под другими названиями
               </h4>
               <ul className="user-lightbox-other-sources-name-list">
-                {lightboxOtherNameRows.map((row) => (
+                {lightboxOtherNameRows.map((row) => {
+                  const rowTo = asanaPagePath(row.linkTarget);
+                  return (
                   <li key={row.key} className="user-lightbox-other-source-row">
                     <Link
-                      to={asanaPagePath(row.linkTarget)}
+                      to={rowTo}
                       className="user-lightbox-other-source-row-link"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClose();
+                        if (location.pathname === rowTo) {
+                          e.preventDefault();
+                        }
+                      }}
                     >
                       <div className="user-lightbox-other-source-row-inner user-lightbox-other-source-row-inner--with-photo">
-                        <div className="user-lightbox-other-source-photo user-lightbox-other-source-photo--row">
+                        <div className="user-lightbox-other-source-photo--row">
                           {row.photoSrc ? (
                             <img src={row.photoSrc} alt="" />
                           ) : (
@@ -913,7 +917,8 @@ export default function UserPhotoLightbox({
                       </div>
                     </Link>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           )}
