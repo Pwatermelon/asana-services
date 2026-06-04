@@ -87,7 +87,7 @@ const AsanasList = () => {
 
   const loadAsanas = async () => {
     try {
-      const data = await asanasAPI.getAll();
+      const data = await asanasAPI.getCatalog();
       setAsanas(data);
     } catch (error) {
       console.error('Error loading asanas:', error);

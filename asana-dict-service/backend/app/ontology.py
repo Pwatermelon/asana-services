@@ -94,11 +94,33 @@ ASANA_DEFINITION = ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a
 ASANA.nameCreatedAt = URIRef(f"{ASANA}nameCreatedAt")
 
 
+_asserted_graph_cache: Optional[Graph] = None
+_asanas_list_cache: Optional[List[Dict[str, Any]]] = None
+_catalog_list_cache: Optional[List[Dict[str, Any]]] = None
+
+
+def invalidate_ontology_cache() -> None:
+    """Сброс кэша после изменения онтологии / зеркала."""
+    global _asserted_graph_cache, _asanas_list_cache, _catalog_list_cache
+    from app.same_as_cache import clear_same_as_inference_cache
+
+    _asserted_graph_cache = None
+    _asanas_list_cache = None
+    _catalog_list_cache = None
+    clear_same_as_inference_cache()
+
+
 def _persist_ontology_graph(g: Graph) -> None:
-    """DB-first: зеркало PostgreSQL + экспорт в OWL."""
+    """DB-first: зеркало PostgreSQL + экспорт в OWL + пересчёт кэша OWL RL (sameAs)."""
     from app.catalog_ontology import persist_ontology_graph
+    from app.same_as_cache import rebuild_same_as_inference_cache
 
     persist_ontology_graph(g)
+    global _asserted_graph_cache, _asanas_list_cache, _catalog_list_cache
+    _asserted_graph_cache = g
+    _asanas_list_cache = None
+    _catalog_list_cache = None
+    rebuild_same_as_inference_cache(g)
 
 
 def migrate_staging_s3_photo_paths_in_ontology() -> Dict[str, int]:
@@ -190,9 +212,11 @@ def run_same_as_ontology_startup_upgrade() -> dict:
         result["owlrl_ok"] = True
         asserted = _load_asserted_graph()
         result["asserted_triples"] = len(asserted)
-        result["inferred_triples"] = reconcile_same_as_transitivity(asserted)
+        from app.same_as_cache import rebuild_same_as_inference_cache
+
+        result["inferred_triples"] = rebuild_same_as_inference_cache(asserted)
         logger.info(
-            "OWL 2 RL startup check OK: asserted=%s triples, inferred=%s (sameAs closure in memory)",
+            "OWL 2 RL startup check OK: asserted=%s triples, inferred_edges=%s (sameAs cache)",
             result["asserted_triples"],
             result["inferred_triples"],
         )
@@ -240,20 +264,15 @@ def ensure_ontology_file_exists():
 
 def get_graph():
     """
-    Asserted-граф (только явные триплеты из зеркала/OWL), без вывода reasoner.
-    Для запросов с транзитивным sameAs используйте get_reasoned_graph().
+    Asserted-граф (явные триплеты из зеркала). Транзитивное sameAs — из кэша вывода (same_as_cache).
     """
-    return _load_asserted_graph()
+    global _asserted_graph_cache
+    if _asserted_graph_cache is None:
+        _asserted_graph_cache = _load_asserted_graph()
+        from app.same_as_cache import ensure_same_as_inference_cache
 
-
-def get_reasoned_graph() -> Graph:
-    """
-    OWL 2 RL: asserted + TBox (isSameAsObject транзитивно и симметрично) + выведенные триплеты.
-    Вывод не сохраняется в БД — только для чтения (/similar, каталог same_as_ids).
-    """
-    from app.owl_reasoning import build_reasoned_graph
-
-    return build_reasoned_graph(_load_asserted_graph(), ASANA.isSameAsObject)
+        ensure_same_as_inference_cache(_asserted_graph_cache)
+    return _asserted_graph_cache
 
 
 def _load_asserted_graph():
@@ -300,94 +319,189 @@ def _load_asserted_graph():
         logger.error(f"Failed to load RDF graph: {str(e)}")
         raise
 
+def _build_same_as_component_map(g: Graph) -> Dict[URIRef, frozenset]:
+    """Компоненты связности isSameAsObject (asserted + кэш вывода OWL RL)."""
+    from app.same_as_cache import effective_same_as_neighbors
+
+    asana_nodes = list(g.subjects(RDF.type, ASANA.Asana))
+    parent: Dict[URIRef, URIRef] = {u: u for u in asana_nodes}
+
+    def find(u: URIRef) -> URIRef:
+        root = u
+        while parent[root] != root:
+            root = parent[root]
+        while parent[u] != u:
+            nxt = parent[u]
+            parent[u] = root
+            u = nxt
+        return root
+
+    def union(a: URIRef, b: URIRef) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for u in asana_nodes:
+        for v in effective_same_as_neighbors(g, u):
+            if (v, RDF.type, ASANA.Asana) in g:
+                union(u, v)
+
+    by_root: Dict[URIRef, List[URIRef]] = {}
+    for u in asana_nodes:
+        by_root.setdefault(find(u), []).append(u)
+
+    comp_map: Dict[URIRef, frozenset] = {}
+    for members in by_root.values():
+        fs = frozenset(members)
+        for u in members:
+            comp_map[u] = fs
+    return comp_map
+
+
+def _serialize_asana_from_graph(
+    g: Graph,
+    asana: URIRef,
+    *,
+    same_as_map: Optional[Dict[URIRef, frozenset]] = None,
+) -> Dict[str, Any]:
+    """Одна асана в API-формате."""
+    name_obj = g.value(asana, ASANA.hasName)
+    photo_objs = list(g.objects(asana, ASANA.hasPhoto))
+    name_data = {
+        "id": str(name_obj) if name_obj else "",
+        "name_ru": str(g.value(name_obj, ASANA.nameInRussian)) if name_obj else "",
+        "name_sanskrit": str(g.value(name_obj, ASANA.nameInSanskrit)) if name_obj and g.value(name_obj, ASANA.nameInSanskrit) else "",
+        "transliteration": str(g.value(name_obj, ASANA.nameInTranslit)) if name_obj and g.value(name_obj, ASANA.nameInTranslit) else "",
+        "definition": str(g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a)) if name_obj and g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a) else "",
+    }
+    sources_set = set()
+    photos_with_sources = []
+    for photo in photo_objs:
+        source_obj = g.value(photo, ASANA.hasSource)
+        if source_obj:
+            sources_set.add(source_obj)
+        s3_path = g.value(photo, ASANA.s3PhotoPath)
+        base64_photo = g.value(photo, ASANA.base64Photo)
+        ph_hash = g.value(photo, ASANA.photoHash)
+        ph_dedup = g.value(photo, ASANA.photoDedupFingerprint)
+        photo_data = {
+            "id": str(photo),
+            "s3_path": str(s3_path) if s3_path else None,
+            "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
+            "source": str(source_obj) if source_obj else None,
+            "photo_hash": str(ph_hash) if ph_hash else None,
+            "photo_dedup_fingerprint": str(ph_dedup) if ph_dedup else None,
+        }
+        if photo_data["image"]:
+            photos_with_sources.append(photo_data)
+
+    sources_list = []
+    for source_obj in sources_set:
+        sources_list.append({
+            "id": str(source_obj),
+            "title": str(g.value(source_obj, ASANA.sourseTitle)) if g.value(source_obj, ASANA.sourseTitle) else "",
+            "author": str(g.value(source_obj, ASANA.sourceAuthor)) if g.value(source_obj, ASANA.sourceAuthor) else "",
+            "year": int(g.value(source_obj, ASANA.sourceYear)) if g.value(source_obj, ASANA.sourceYear) else None,
+            "publisher": str(g.value(source_obj, ASANA.sourcePublisher)) if g.value(source_obj, ASANA.sourcePublisher) else "",
+            "pages": int(g.value(source_obj, ASANA.sourcePages)) if g.value(source_obj, ASANA.sourcePages) else 0,
+            "annotation": str(g.value(source_obj, ASANA.sourceAnnotation)) if g.value(source_obj, ASANA.sourceAnnotation) else "",
+        })
+
+    source_data = sources_list[0] if sources_list else {}
+    photos = [p["image"] for p in photos_with_sources if p["image"]]
+    if same_as_map is not None:
+        comp = same_as_map.get(asana, frozenset({asana}))
+    else:
+        comp = same_as_component_effective(g, asana)
+    same_as_ids = sorted(str(u) for u in comp if u != asana)
+    return {
+        "id": str(asana),
+        "name": name_data,
+        "source": source_data,
+        "sources": sources_list,
+        "photos": photos_with_sources,
+        "photo": photos[0] if photos else "",
+        "same_as_ids": same_as_ids,
+    }
+
+
 def load_asanas_from_graph(g: Graph):
     """Сериализуемый снимок асан для зеркала БД (включая URI названия и s3_path фото)."""
     logger.info("Starting to load asanas from graph")
-    asanas = []
     all_asanas = list(g.subjects(RDF.type, ASANA.Asana))
-    logger.info(f"Found {len(all_asanas)} asanas in graph")
-    for asana in all_asanas:
-        logger.debug(f"Processing asana: {asana}")
-        name_obj = g.value(asana, ASANA.hasName)
-        photo_objs = list(g.objects(asana, ASANA.hasPhoto))
-        logger.debug(f"Name object: {name_obj}")
-        logger.debug(f"Photo objects: {photo_objs}")
-        name_data = {
-            "id": str(name_obj) if name_obj else "",
-            "name_ru": str(g.value(name_obj, ASANA.nameInRussian)) if name_obj else "",
-            "name_sanskrit": str(g.value(name_obj, ASANA.nameInSanskrit)) if name_obj and g.value(name_obj, ASANA.nameInSanskrit) else "",
-            "transliteration": str(g.value(name_obj, ASANA.nameInTranslit)) if name_obj and g.value(name_obj, ASANA.nameInTranslit) else "",
-            "definition": str(g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a)) if name_obj and g.value(name_obj, ASANA.OWLDataProperty_c8100b71_09ff_49ec_8fbf_63fa1be3947a) else ""
-        }
-        # Собираем все уникальные источники из всех фото
-        sources_set = set()
-        photos_with_sources = []
-        for photo in photo_objs:
-            source_obj = g.value(photo, ASANA.hasSource)
-            if source_obj:
-                sources_set.add(source_obj)
-            
-            # Получаем фото: сначала пробуем S3 путь, потом base64 (для обратной совместимости)
-            s3_path = g.value(photo, ASANA.s3PhotoPath)
-            base64_photo = g.value(photo, ASANA.base64Photo)
-            ph_hash = g.value(photo, ASANA.photoHash)
-            ph_dedup = g.value(photo, ASANA.photoDedupFingerprint)
-            
-            photo_data = {
-                "id": str(photo),
-                "s3_path": str(s3_path) if s3_path else None,
-                "image": get_s3_url(str(s3_path)) if s3_path else (str(base64_photo) if base64_photo else None),
-                "source": str(source_obj) if source_obj else None,
-                "photo_hash": str(ph_hash) if ph_hash else None,
-                "photo_dedup_fingerprint": str(ph_dedup) if ph_dedup else None,
-            }
-            if photo_data["image"]:
-                photos_with_sources.append(photo_data)
-        
-        # Формируем список источников с полной информацией
-        sources_list = []
-        for source_obj in sources_set:
-            source_id = str(source_obj)
-            source_data = {
-                "id": source_id,
-                "title": str(g.value(source_obj, ASANA.sourseTitle)) if g.value(source_obj, ASANA.sourseTitle) else "",
-                "author": str(g.value(source_obj, ASANA.sourceAuthor)) if g.value(source_obj, ASANA.sourceAuthor) else "",
-                "year": int(g.value(source_obj, ASANA.sourceYear)) if g.value(source_obj, ASANA.sourceYear) else None,
-                "publisher": str(g.value(source_obj, ASANA.sourcePublisher)) if g.value(source_obj, ASANA.sourcePublisher) else "",
-                "pages": int(g.value(source_obj, ASANA.sourcePages)) if g.value(source_obj, ASANA.sourcePages) else 0,
-                "annotation": str(g.value(source_obj, ASANA.sourceAnnotation)) if g.value(source_obj, ASANA.sourceAnnotation) else ""
-            }
-            sources_list.append(source_data)
-        
-        # Для обратной совместимости оставляем первый источник в source
-        source_data = sources_list[0] if sources_list else {}
-        
-        # Формируем список фото (для обратной совместимости)
-        photos = [p["image"] for p in photos_with_sources if p["image"]]
-        
-        logger.debug(f"Photos count: {len(photos)}, Sources count: {len(sources_list)}")
-        # Транзитивное замыкание sameAs (свойство онтологии; reasoning в rdflib не включён)
-        _comp = same_as_component(g, asana)
-        same_as_ids = sorted(str(u) for u in _comp if u != asana)
-        asana_data = {
-            "id": str(asana),
-            "name": name_data,
-            "source": source_data,  # Первый источник для обратной совместимости
-            "sources": sources_list,  # Все источники
-            "photos": photos_with_sources,  # Фото с источниками
-            "photo": photos[0] if photos else "",  # Первое фото для обратной совместимости
-            "same_as_ids": same_as_ids,
-        }
-        logger.debug(f"Adding asana with ID: {asana_data['id']}")
-        asanas.append(asana_data)
-    logger.info(f"Successfully loaded {len(asanas)} asanas")
-    # Сортируем асаны по названию на русском языке
+    logger.info("Found %s asanas in graph", len(all_asanas))
+    same_as_map = _build_same_as_component_map(g)
+    asanas = [
+        _serialize_asana_from_graph(g, asana, same_as_map=same_as_map)
+        for asana in all_asanas
+    ]
+    logger.info("Successfully loaded %s asanas", len(asanas))
     asanas.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
     return asanas
 
 
+def load_catalog_entries_from_graph(g: Graph) -> List[Dict[str, Any]]:
+    """Лёгкий список для главной: id + название, без фото и без OWL RL."""
+    entries = []
+    for asana in g.subjects(RDF.type, ASANA.Asana):
+        name_obj = g.value(asana, ASANA.hasName)
+        if not name_obj:
+            continue
+        entries.append({
+            "id": str(asana),
+            "name": {
+                "id": str(name_obj),
+                "name_ru": str(g.value(name_obj, ASANA.nameInRussian)) if name_obj else "",
+                "name_sanskrit": str(g.value(name_obj, ASANA.nameInSanskrit)) if name_obj and g.value(name_obj, ASANA.nameInSanskrit) else "",
+                "transliteration": str(g.value(name_obj, ASANA.nameInTranslit)) if name_obj and g.value(name_obj, ASANA.nameInTranslit) else "",
+                "definition": "",
+            },
+        })
+    entries.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
+    return entries
+
+
+def load_catalog_entries() -> List[Dict[str, Any]]:
+    global _catalog_list_cache
+    if _catalog_list_cache is None:
+        _catalog_list_cache = load_catalog_entries_from_graph(get_graph())
+    return _catalog_list_cache
+
+
 def load_asanas():
-    return load_asanas_from_graph(get_reasoned_graph())
+    global _asanas_list_cache
+    if _asanas_list_cache is None:
+        _asanas_list_cache = load_asanas_from_graph(get_graph())
+    return _asanas_list_cache
+
+
+def load_asana_by_id(asana_id: str) -> Optional[Dict[str, Any]]:
+    """Одна асана без загрузки всего каталога."""
+    uri = make_asana_uri(asana_id)
+    g = get_graph()
+    if (uri, RDF.type, ASANA.Asana) not in g:
+        return None
+    same_as_map = _build_same_as_component_map(g)
+    return _serialize_asana_from_graph(g, uri, same_as_map=same_as_map)
+
+
+def get_asanas_by_name_ru(name_ru: str) -> List[Dict[str, Any]]:
+    """Все записи каталога с тем же русским названием (полные данные)."""
+    key = (name_ru or "").strip().lower()
+    if not key:
+        return []
+    g = get_graph()
+    same_as_map = _build_same_as_component_map(g)
+    result = []
+    for asana in g.subjects(RDF.type, ASANA.Asana):
+        name_obj = g.value(asana, ASANA.hasName)
+        if not name_obj:
+            continue
+        ru = str(g.value(name_obj, ASANA.nameInRussian) or "").strip().lower()
+        if ru == key:
+            result.append(_serialize_asana_from_graph(g, asana, same_as_map=same_as_map))
+    result.sort(key=lambda a: (a["name"]["name_ru"] or "").lower())
+    return result
 
 def find_existing_asana(name_id: str, source_id: str) -> Optional[str]:
     """
@@ -1567,7 +1681,7 @@ def get_photo_of_asana_from_source(asana_id: str, source_id: str) -> str | None:
 
 # Функции для работы с isSameAsObject (аналогичные асаны)
 # Транзитивность и симметрия — аксиомы OWL (owl:TransitiveProperty / SymmetricProperty);
-# вывод — OWL 2 RL (owlrl), см. get_reasoned_graph().
+# вывод OWL 2 RL — кэш same_as_cache (пересчёт при persist).
 
 
 def make_asana_uri(asana_id: str) -> URIRef:
@@ -1590,11 +1704,10 @@ def _same_as_neighbors(g: Graph, asana_uri: URIRef) -> set:
     return neighbors
 
 
-def same_as_component(g: Graph, start_uri: URIRef) -> set:
-    """
-    Компонента связности isSameAsObject на графе g.
-    g должен быть уже обработан OWL 2 RL (get_reasoned_graph).
-    """
+def same_as_component_effective(g: Graph, start_uri: URIRef) -> set:
+    """Компонента связности: asserted + выведенные связи из кэша."""
+    from app.same_as_cache import effective_same_as_neighbors
+
     if (start_uri, RDF.type, ASANA.Asana) not in g:
         return set()
     seen: set = set()
@@ -1604,25 +1717,22 @@ def same_as_component(g: Graph, start_uri: URIRef) -> set:
         if u in seen:
             continue
         seen.add(u)
-        for v in _same_as_neighbors(g, u):
+        for v in effective_same_as_neighbors(g, u):
             if (v, RDF.type, ASANA.Asana) in g and v not in seen:
                 stack.append(v)
     return seen
 
 
-def reconcile_same_as_transitivity(g: Graph) -> int:
-    """
-    Прогон OWL 2 RL на asserted-графе (без записи выводов в БД).
-    Возвращает число триплетов, которые reasoner добавил бы к asserted.
-    """
-    from app.owl_reasoning import build_reasoned_graph
+def same_as_component(g: Graph, start_uri: URIRef) -> set:
+    """Обратная совместимость: полное замыкание sameAs (asserted + кэш)."""
+    return same_as_component_effective(g, start_uri)
 
-    before = len(g)
-    reasoned = build_reasoned_graph(g, ASANA.isSameAsObject)
-    inferred = len(reasoned) - before
-    if inferred:
-        logger.info("OWL 2 RL reconcile: %s inferred triple(s) over asserted", inferred)
-    return inferred
+
+def reconcile_same_as_transitivity(g: Graph) -> int:
+    """Пересобрать кэш вывода OWL RL; вернуть число выведенных рёбер sameAs."""
+    from app.same_as_cache import rebuild_same_as_inference_cache
+
+    return rebuild_same_as_inference_cache(g)
 
 
 def get_similar_asanas(asana_id: str) -> List[Dict]:
@@ -1630,14 +1740,16 @@ def get_similar_asanas(asana_id: str) -> List[Dict]:
     Получает список асан, которые связаны с указанной через isSameAsObject.
     Возвращает данные в том же формате, что и load_asanas().
     """
+    from app.same_as_cache import is_inferred_same_as_link
+
     logger.info(f"Getting similar asanas for: {asana_id}")
-    g = get_reasoned_graph()
+    g = get_graph()
     asana_uri = make_asana_uri(asana_id)
     similar_asanas = []
 
-    component = same_as_component(g, asana_uri)
+    component = same_as_component_effective(g, asana_uri)
     similar_uris = component - {asana_uri}
-    logger.debug(f"Found {len(similar_uris)} similar asanas (OWL 2 RL)")
+    logger.debug(f"Found {len(similar_uris)} similar asanas (effective closure)")
     
     # Загружаем данные для каждой найденной асаны
     for similar_uri in similar_uris:
@@ -1691,7 +1803,8 @@ def get_similar_asanas(asana_id: str) -> List[Dict]:
             "name": name_data,
             "sources": sources_list,
             "photos": photos_with_sources,
-            "photo": photos[0] if photos else ""
+            "photo": photos[0] if photos else "",
+            "same_as_link_inferred": is_inferred_same_as_link(g, asana_uri, similar_uri),
         })
     
     logger.info(f"Returning {len(similar_asanas)} similar asanas")
@@ -1701,7 +1814,7 @@ def get_similar_asanas(asana_id: str) -> List[Dict]:
 def add_same_as_object(asana_id: str, target_asana_id: str) -> bool:
     """
     Добавляет asserted-связь isSameAsObject (одно ребро).
-    Транзитивные и симметричные следствия выводит OWL 2 RL при чтении (get_reasoned_graph).
+    Транзитивное замыкание пересчитывается в кэше при persist.
     """
     logger.info(f"Adding isSameAsObject: {asana_id} <-> {target_asana_id}")
     
@@ -1730,7 +1843,7 @@ def add_same_as_object(asana_id: str, target_asana_id: str) -> bool:
 
         g.add((asana_uri, ASANA.isSameAsObject, target_uri))
         _persist_ontology_graph(g)
-        logger.info("Successfully added asserted isSameAsObject (OWL 2 RL infers closure on read)")
+        logger.info("Successfully added asserted isSameAsObject (inference cache rebuilt on persist)")
         return True
     except Exception as e:
         logger.error(f"Error adding isSameAsObject: {str(e)}", exc_info=True)

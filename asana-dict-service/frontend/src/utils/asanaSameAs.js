@@ -36,8 +36,19 @@ export function combinedSameAsForOwner(
     const k = canonicalAsanaId(obj.id);
     if (!k || k === my) return;
     const full = byCanon.get(k);
-    const merged = full ? { ...obj, ...full, id: full.id ?? obj.id } : obj;
+    const merged = full
+      ? {
+          ...obj,
+          ...full,
+          id: full.id ?? obj.id,
+          same_as_link_inferred:
+            obj.same_as_link_inferred === true || full.same_as_link_inferred === true,
+        }
+      : obj;
     if (!map.has(k)) map.set(k, merged);
+    else if (obj.same_as_link_inferred === true) {
+      map.set(k, { ...map.get(k), same_as_link_inferred: true });
+    }
   };
 
   const ownerIsPage =

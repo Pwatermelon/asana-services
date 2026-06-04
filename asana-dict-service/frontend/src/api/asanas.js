@@ -18,6 +18,19 @@ export const asanasAPI = {
     return response.data;
   },
 
+  /** Главная каталога: только id и название (быстро). */
+  getCatalog: async () => {
+    const response = await apiClient.get('/api/asanas', { params: { view: 'catalog' } });
+    return response.data;
+  },
+
+  getByNameRu: async (nameRu) => {
+    const response = await apiClient.get('/api/asanas/by-name', {
+      params: { name_ru: nameRu },
+    });
+    return response.data;
+  },
+
   getByLetter: async (letter) => {
     const response = await apiClient.get(`/api/asanas/by-letter/${letter}`);
     return response.data;

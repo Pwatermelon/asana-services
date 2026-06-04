@@ -26,19 +26,18 @@ const AsanaDetail = () => {
   const lastRouteIdRef = useRef(null);
 
   useEffect(() => {
-    loadAsana();
-    loadAllAsanas();
+    loadPage();
   }, [id]);
 
-  const loadAsana = async () => {
+  const loadPage = async () => {
     try {
       setError(null);
       setLoading(true);
+      setAllAsanas([]);
+      setSimilarAsanas([]);
 
       if (!id) {
-        console.error('No asana ID provided in URL');
         setError('ID асаны не указан в URL');
-        setLoading(false);
         return;
       }
 
@@ -47,87 +46,26 @@ const AsanaDetail = () => {
         asanaId = asanaId.replace('-page', '');
       }
 
-      try {
-        const found = await asanasAPI.getById(asanaId);
-        if (found) {
-          setAsana(found);
-          loadSimilarAsanas(found);
-          setLoading(false);
-          return;
-        }
-      } catch (apiError) {
-        console.warn('getById failed, falling back to getAll:', apiError);
+      const found = await asanasAPI.getById(asanaId);
+      if (!found) {
+        setError(`Асана не найдена (ID: ${asanaId.trim()})`);
+        setAsana(null);
+        return;
       }
 
-      const all = await asanasAPI.getAll();
-      const normalized = asanaId.trim();
-      const possibleIds = [
-        normalized,
-        normalized.startsWith('asana_') ? normalized : `asana_${normalized}`,
-        normalized.replace(/^asana_/, ''),
-        `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${normalized}`,
-        `http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#${
-          normalized.startsWith('asana_') ? normalized : `asana_${normalized}`
-        }`,
-      ];
-
-      let foundAsana = null;
-      for (const a of all) {
-        const fullId = a.id;
-        const shortId = fullId.split('#').pop();
-        for (const possibleId of possibleIds) {
-          if (fullId === possibleId || shortId === possibleId) {
-            foundAsana = a;
-            break;
-          }
-          const shortIdNoPrefix = shortId.replace(/^asana_/, '');
-          const possibleIdNoPrefix = possibleId
-            .replace(/^asana_/, '')
-            .replace(/^http.*#/, '');
-          if (
-            shortIdNoPrefix &&
-            possibleIdNoPrefix &&
-            shortIdNoPrefix === possibleIdNoPrefix
-          ) {
-            foundAsana = a;
-            break;
-          }
-        }
-        if (foundAsana) break;
-      }
-
-      setAsana(foundAsana);
-      if (!foundAsana) {
-        setError(`Асана не найдена (ID: ${normalized})`);
-      } else {
-        loadSimilarAsanas(foundAsana);
-        setError(null);
-      }
+      setAsana(found);
+      const nameRu = found.name?.name_ru;
+      const [siblings, similar] = await Promise.all([
+        nameRu ? asanasAPI.getByNameRu(nameRu) : Promise.resolve([found]),
+        asanasAPI.getSimilarAsanas(found.id).catch(() => []),
+      ]);
+      setAllAsanas(Array.isArray(siblings) && siblings.length ? siblings : [found]);
+      setSimilarAsanas(similar || []);
     } catch (err) {
-      console.error('Error loading asana:', err);
+      console.error('Error loading asana page:', err);
       setError(`Ошибка при загрузке асаны: ${err.message || 'Неизвестная ошибка'}`);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadAllAsanas = async () => {
-    try {
-      const data = await asanasAPI.getAll();
-      setAllAsanas(data);
-    } catch (err) {
-      console.error('Error loading all asanas:', err);
-    }
-  };
-
-  const loadSimilarAsanas = async (currentAsana) => {
-    if (!currentAsana) return;
-    try {
-      const similar = await asanasAPI.getSimilarAsanas(currentAsana.id);
-      setSimilarAsanas(similar || []);
-    } catch (err) {
-      console.error('Error loading similar asanas:', err);
-      setSimilarAsanas([]);
     }
   };
 

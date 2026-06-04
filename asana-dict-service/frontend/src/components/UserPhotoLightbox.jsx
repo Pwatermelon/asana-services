@@ -66,6 +66,7 @@ export default function UserPhotoLightbox({
   const [showSameAsLinksModal, setShowSameAsLinksModal] = useState(false);
   const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
   const [sameAsLinksSearchQuery, setSameAsLinksSearchQuery] = useState('');
+  const [modalSimilarLinks, setModalSimilarLinks] = useState([]);
 
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [addPhotoTarget, setAddPhotoTarget] = useState(null);
@@ -252,6 +253,25 @@ export default function UserPhotoLightbox({
 
   const location = useLocation();
 
+  useEffect(() => {
+    if (!showSameAsLinksModal || !sameAsLinksSubjectId) {
+      setModalSimilarLinks([]);
+      return undefined;
+    }
+    let cancelled = false;
+    asanasAPI
+      .getSimilarAsanas(sameAsLinksSubjectId)
+      .then((data) => {
+        if (!cancelled) setModalSimilarLinks(data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setModalSimilarLinks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showSameAsLinksModal, sameAsLinksSubjectId]);
+
   const sameAsLinksForModal = useMemo(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId || !allAsanas.length) return [];
     const owner =
@@ -266,14 +286,15 @@ export default function UserPhotoLightbox({
       owner,
       pageForLinks,
       allAsanas,
-      similarAsanas
+      modalSimilarLinks
     );
     return links.map((sim) => {
       const k = canonicalAsanaId(sim.id);
       const full = allAsanas.find((a) => canonicalAsanaId(a.id) === k);
-      return full ? { ...sim, ...full, id: full.id ?? sim.id } : sim;
+      const merged = full ? { ...sim, ...full, id: full.id ?? sim.id } : sim;
+      return merged;
     });
-  }, [showSameAsLinksModal, sameAsLinksSubjectId, allAsanas, similarAsanas]);
+  }, [showSameAsLinksModal, sameAsLinksSubjectId, allAsanas, modalSimilarLinks]);
 
   const filteredSameAsLinksForModal = useMemo(() => {
     const q = sameAsLinksSearchQuery.trim().toLowerCase();
@@ -1144,8 +1165,12 @@ export default function UserPhotoLightbox({
                 <ul className="asana-sameas-links-list">
                   {filteredSameAsLinksForModal.map((sim) => {
                     const thumbSrc = similarPreviewSrc(sim);
+                    const inferredLink = sim.same_as_link_inferred === true;
                     return (
-                    <li key={sim.id} className="asana-sameas-links-item">
+                    <li
+                      key={sim.id}
+                      className={`asana-sameas-links-item${inferredLink ? ' asana-sameas-links-item--inferred' : ''}`}
+                    >
                       <div className="asana-sameas-links-thumb-wrap">
                         {thumbSrc ? (
                           <img
@@ -1171,6 +1196,12 @@ export default function UserPhotoLightbox({
                         <div className="asana-sameas-links-source">
                           {catalogRecordSecondaryParts(sim).secondary}
                         </div>
+                        {inferredLink && (
+                          <p className="asana-sameas-links-inferred-badge" role="note">
+                            Связь выведена OWL reasoner (транзитивность / симметрия). Удалить нельзя —
+                            исчезнет только при удалении явных соответствий в онтологии.
+                          </p>
+                        )}
                       </div>
                       <div className="asana-sameas-links-item-actions">
                         <Link
@@ -1184,15 +1215,17 @@ export default function UserPhotoLightbox({
                         >
                           Открыть
                         </Link>
-                        <button
-                          type="button"
-                          className="btn-secondary asana-sameas-links-remove"
-                          onClick={() =>
-                            handleRemoveSameAsForOwner(sameAsLinksSubjectId, sim.id)
-                          }
-                        >
-                          Удалить соответствие
-                        </button>
+                        {!inferredLink && (
+                          <button
+                            type="button"
+                            className="btn-secondary asana-sameas-links-remove"
+                            onClick={() =>
+                              handleRemoveSameAsForOwner(sameAsLinksSubjectId, sim.id)
+                            }
+                          >
+                            Удалить соответствие
+                          </button>
+                        )}
                       </div>
                     </li>
                     );

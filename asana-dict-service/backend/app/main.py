@@ -23,7 +23,8 @@ from app.auth import (
     get_current_user, is_admin, is_expert_or_admin, get_user_info_from_token_sync
 )
 from app.ontology import (
-    add_asana_name, add_source, load_asana_names, load_asanas, add_asana, load_sources,
+    add_asana_name, add_source, load_asana_names, load_asanas, load_catalog_entries,
+    load_asana_by_id, get_asanas_by_name_ru, add_asana, load_sources,
     delete_source_from_ontology, update_source_in_ontology, delete_asana_name_from_ontology, delete_asana_from_ontology,
     add_photo_to_asana, get_asanas_by_first_letter, get_asanas_by_source, search_asanas_by_name,
     search_sources,
@@ -907,12 +908,27 @@ def create_default_users():
 
 # Маршруты для асан
 @app.get("/api/asanas", tags=["asana"])
-async def get_asanas():
-    """Получить все асаны (доступно всем)"""
-    logger.info("Getting asanas list for all users")
+async def get_asanas(view: str = "full"):
+    """
+    Список асан. view=catalog — только id и название (главная страница, без OWL RL и фото).
+    view=full (по умолчанию) — полный каталог с фото и same_as_ids.
+    """
+    if view == "catalog":
+        logger.info("Getting catalog index (lite)")
+        entries = load_catalog_entries()
+        logger.info("Retrieved %s catalog entries", len(entries))
+        return entries
+    logger.info("Getting full asanas list")
     asanas = load_asanas()
-    logger.info(f"Retrieved {len(asanas)} asanas")
+    logger.info("Retrieved %s asanas", len(asanas))
     return asanas
+
+
+@app.get("/api/asanas/by-name", tags=["asana"])
+async def get_asanas_by_name(name_ru: str):
+    """Все записи с одним русским названием (страница асаны, галерея по школам)."""
+    logger.info("Getting asanas by name_ru: %r", name_ru)
+    return get_asanas_by_name_ru(name_ru)
 
 @app.get("/api/asana/{asana_id}", tags=["asana"])
 async def get_asana_by_id_endpoint(asana_id: str = Path(...)):
@@ -2382,27 +2398,13 @@ def get_asana_by_id(asana_id: str):
     """
     Получает асану по ID. Поддерживает как полный URI, так и короткий ID.
     """
-    logger.info(f"get_asana_by_id called with ID: {asana_id}")
-    
-    # Если передан не полный URI, добавляем префикс
-    if not asana_id.startswith('http'):
-        # Проверяем, начинается ли ID с 'asana_'
-        if not asana_id.startswith('asana_'):
-            asana_id = f"asana_{asana_id}"
-        asana_id = f"http://www.semanticweb.org/platinum_watermelon/ontologies/Asana#{asana_id}"
-    
-    logger.info(f"Searching for asana with URI: {asana_id}")
-    asanas = load_asanas()
-    logger.info(f"Loaded {len(asanas)} asanas")
-    
-    for asana in asanas:
-        logger.debug(f"Comparing with asana ID: {asana['id']}")
-        if asana["id"] == asana_id:
-            logger.info(f"Found matching asana: {asana['name']['name_ru']}")
-            return asana
-    
-    logger.warning(f"No asana found with ID: {asana_id}")
-    return None
+    logger.info("get_asana_by_id called with ID: %s", asana_id)
+    asana = load_asana_by_id(asana_id)
+    if asana:
+        logger.info("Found asana: %s", asana.get("name", {}).get("name_ru", "Unknown"))
+    else:
+        logger.warning("No asana found with ID: %s", asana_id)
+    return asana
 
 @app.get("/asanas-page")
 def asanas_page(request: Request, search_query: str = '', current_letter: str = ''):
