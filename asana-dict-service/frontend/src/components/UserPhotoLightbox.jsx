@@ -77,6 +77,10 @@ export default function UserPhotoLightbox({
   const [matchExcludeLinkedCanon, setMatchExcludeLinkedCanon] = useState(() => new Set());
   const [matchSearchLoading, setMatchSearchLoading] = useState(false);
 
+  /** Свежий /similar и полный кластер sameAs для лайтбокса (страница часто без всех связей). */
+  const [lightboxSimilarFresh, setLightboxSimilarFresh] = useState([]);
+  const [lightboxAsanasPool, setLightboxAsanasPool] = useState([]);
+
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [addPhotoTarget, setAddPhotoTarget] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
@@ -120,16 +124,88 @@ export default function UserPhotoLightbox({
   }, [open, slides, index, setIndex]);
 
   const lbSlide = slides[index] || null;
+
+  const effectiveSimilarAsanas = useMemo(() => {
+    const byK = new Map();
+    const ingest = (s) => {
+      if (!s?.id) return;
+      const k = canonicalAsanaId(s.id);
+      if (!k) return;
+      const prev = byK.get(k);
+      byK.set(
+        k,
+        prev
+          ? {
+              ...prev,
+              ...s,
+              id: s.id ?? prev.id,
+              same_as_link_inferred:
+                prev.same_as_link_inferred === true || s.same_as_link_inferred === true,
+            }
+          : s
+      );
+    };
+    for (const s of similarAsanas || []) ingest(s);
+    for (const s of lightboxSimilarFresh || []) ingest(s);
+    return [...byK.values()];
+  }, [similarAsanas, lightboxSimilarFresh]);
+
+  const effectiveAllAsanas = useMemo(() => {
+    if (lightboxAsanasPool.length) return lightboxAsanasPool;
+    return allAsanas;
+  }, [lightboxAsanasPool, allAsanas]);
+
   const lbSlideOwnerFull = useMemo(() => {
-    if (!lbSlide || !allAsanas.length) return null;
+    if (!lbSlide || !effectiveAllAsanas.length) return null;
     return (
-      allAsanas.find((a) => a.id === lbSlide.ownerId) ||
-      allAsanas.find(
+      effectiveAllAsanas.find((a) => a.id === lbSlide.ownerId) ||
+      effectiveAllAsanas.find(
         (a) => canonicalAsanaId(a.id) === canonicalAsanaId(lbSlide.ownerId)
       ) ||
       null
     );
-  }, [lbSlide, allAsanas]);
+  }, [lbSlide, effectiveAllAsanas]);
+
+  useEffect(() => {
+    if (!open || !lbSlide?.ownerId) {
+      setLightboxSimilarFresh([]);
+      setLightboxAsanasPool([]);
+      return undefined;
+    }
+    const ownerFromPage =
+      allAsanas.find((a) => a.id === lbSlide.ownerId) ||
+      allAsanas.find(
+        (a) => canonicalAsanaId(a.id) === canonicalAsanaId(lbSlide.ownerId)
+      );
+    if (!ownerFromPage?.id) {
+      setLightboxSimilarFresh([]);
+      setLightboxAsanasPool([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const ownerId = ownerFromPage.id;
+    (async () => {
+      try {
+        const similar = await asanasAPI.getSimilarAsanas(ownerId).catch(() => []);
+        if (cancelled) return;
+        setLightboxSimilarFresh(similar || []);
+        const pool = await mergeSameAsCluster([
+          ...allAsanas,
+          ...(similar || []),
+          ownerFromPage,
+        ]);
+        if (!cancelled) setLightboxAsanasPool(pool);
+      } catch {
+        if (!cancelled) {
+          setLightboxSimilarFresh([]);
+          setLightboxAsanasPool([...allAsanas]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, lbSlide?.ownerId, lbSlide, allAsanas]);
 
   const effectivePageAsana = useMemo(() => {
     if (typeof getPageAsana === 'function' && lbSlide && lbSlideOwnerFull) {
@@ -161,7 +237,7 @@ export default function UserPhotoLightbox({
   }, [getTitleParts, lbSlide, lbSlideOwnerFull, defaultTitle]);
 
   const lightboxSameNameLinkedPhotos = useMemo(() => {
-    if (!open || !lbSlide || !allAsanas.length) return [];
+    if (!open || !lbSlide || !effectiveAllAsanas.length) return [];
     const owner = lbSlideOwnerFull;
     if (!owner) return [];
     const nameLower = owner.name?.name_ru?.toLowerCase().trim();
@@ -170,8 +246,8 @@ export default function UserPhotoLightbox({
     const linked = combinedSameAsForOwner(
       owner,
       effectivePageAsana,
-      allAsanas,
-      similarAsanas
+      effectiveAllAsanas,
+      effectiveSimilarAsanas
     );
     const out = [];
     for (const other of linked) {
@@ -200,9 +276,9 @@ export default function UserPhotoLightbox({
     open,
     lbSlide,
     lbSlideOwnerFull,
-    allAsanas,
+    effectiveAllAsanas,
     effectivePageAsana,
-    similarAsanas,
+    effectiveSimilarAsanas,
     photoGalleryVersion,
   ]);
 
@@ -218,20 +294,27 @@ export default function UserPhotoLightbox({
     return sameAsOtherNameVariantsForOwner(
       lbSlideOwnerFull,
       effectivePageAsana,
-      allAsanas,
-      similarAsanas
+      effectiveAllAsanas,
+      effectiveSimilarAsanas
     );
-  }, [open, lbSlide, lbSlideOwnerFull, effectivePageAsana, allAsanas, similarAsanas]);
+  }, [
+    open,
+    lbSlide,
+    lbSlideOwnerFull,
+    effectivePageAsana,
+    effectiveAllAsanas,
+    effectiveSimilarAsanas,
+  ]);
 
   const lightboxOtherNameRows = useMemo(() => {
     if (!lightboxOtherNameVariants.length) return [];
     return flattenLightboxOtherNameEntries(
       lightboxOtherNameVariants,
-      allAsanas,
+      effectiveAllAsanas,
       photoGalleryVersion,
-      null
+      effectivePageAsana
     );
-  }, [lightboxOtherNameVariants, allAsanas, photoGalleryVersion]);
+  }, [lightboxOtherNameVariants, effectiveAllAsanas, photoGalleryVersion, effectivePageAsana]);
 
   const location = useLocation();
 
@@ -289,14 +372,14 @@ export default function UserPhotoLightbox({
   const sameAsLinksForModal = useMemo(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId) return [];
     const catalog =
-      modalCatalogPool.length > 0 ? modalCatalogPool : allAsanas;
+      modalCatalogPool.length > 0 ? modalCatalogPool : effectiveAllAsanas;
     const owner = findAsanaById(catalog, sameAsLinksSubjectId);
     if (!owner) return [];
 
     const inferredByCanon = new Map();
     const similarUnion = [];
     const seenSimilar = new Set();
-    for (const s of [...similarAsanas, ...modalSimilarLinks]) {
+    for (const s of [...effectiveSimilarAsanas, ...modalSimilarLinks]) {
       const k = canonicalAsanaId(s?.id);
       if (!k || seenSimilar.has(k)) continue;
       seenSimilar.add(k);
@@ -316,10 +399,10 @@ export default function UserPhotoLightbox({
   }, [
     showSameAsLinksModal,
     sameAsLinksSubjectId,
-    allAsanas,
+    effectiveAllAsanas,
     modalCatalogPool,
     modalSimilarLinks,
-    similarAsanas,
+    effectiveSimilarAsanas,
     effectivePageAsana,
   ]);
 

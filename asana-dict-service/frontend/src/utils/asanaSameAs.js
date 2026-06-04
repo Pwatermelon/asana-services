@@ -117,11 +117,14 @@ export function combinedSameAsForOwner(
       const k = canonicalAsanaId(raw);
       if (!k || k === my || map.has(k)) return;
       const full = byCanon.get(k);
+      const fromSimilar = similarByCanon.get(k);
       if (full) {
-        map.set(k, full);
+        put({
+          ...full,
+          same_as_link_inferred: fromSimilar?.same_as_link_inferred === true,
+        });
         return;
       }
-      const fromSimilar = similarByCanon.get(k);
       if (fromSimilar) put(fromSimilar);
     };
     for (const raw of ownerAsana.same_as_ids || []) tryAddRaw(raw);
@@ -134,7 +137,14 @@ export function combinedSameAsForOwner(
   return Array.from(map.values()).map((obj) => {
     const k = canonicalAsanaId(obj.id);
     const full = k ? byCanon.get(k) : null;
-    return full ? { ...obj, ...full, id: full.id ?? obj.id } : obj;
+    if (!full) return obj;
+    return {
+      ...obj,
+      ...full,
+      id: full.id ?? obj.id,
+      same_as_link_inferred:
+        obj.same_as_link_inferred === true || full.same_as_link_inferred === true,
+    };
   });
 }
 

@@ -1547,22 +1547,6 @@
   gap: 0.65rem;
 }
 
-.asana-sameas-links-item--inferred {
-  border-color: #7c3aed;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08) 0%, rgba(167, 139, 250, 0.12) 100%);
-}
-
-.asana-sameas-links-item--inferred .asana-sameas-links-name {
-  color: #5b21b6;
-}
-
-.asana-sameas-links-inferred-badge {
-  margin: 0.35rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.35;
-  color: #6d28d9;
-}
-
 .asana-sameas-links-item {
   display: flex;
   flex-direction: row;
@@ -1573,6 +1557,26 @@
   border: 1px solid var(--border-light);
   border-radius: 10px;
   background: var(--background-alt);
+}
+
+.asana-sameas-links-item.asana-sameas-links-item--inferred {
+  border-color: #7c3aed;
+  background: linear-gradient(
+    135deg,
+    rgba(124, 58, 237, 0.08) 0%,
+    rgba(167, 139, 250, 0.12) 100%
+  );
+}
+
+.asana-sameas-links-item.asana-sameas-links-item--inferred .asana-sameas-links-name {
+  color: #5b21b6;
+}
+
+.asana-sameas-links-inferred-badge {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #6d28d9;
 }
 
 .asana-sameas-links-thumb-wrap {
