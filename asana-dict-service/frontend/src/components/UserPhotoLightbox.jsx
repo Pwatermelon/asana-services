@@ -10,6 +10,7 @@ import {
   catalogRecordSecondaryParts,
   catalogRepresentativeByNameRu,
   flattenLightboxOtherNameEntries,
+  sameAsOtherNameVariantsForOwner,
   galleryImageUrl,
   getPhotoSrc,
   buildPhotoSourceMeta,
@@ -67,6 +68,7 @@ export default function UserPhotoLightbox({
   const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
   const [sameAsLinksSearchQuery, setSameAsLinksSearchQuery] = useState('');
   const [modalSimilarLinks, setModalSimilarLinks] = useState([]);
+  const [modalSimilarLoading, setModalSimilarLoading] = useState(false);
 
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [addPhotoTarget, setAddPhotoTarget] = useState(null);
@@ -220,45 +222,37 @@ export default function UserPhotoLightbox({
       .filter(({ slide }) => slide.linkId === lbSlide.linkId);
   }, [slides, lbSlide]);
 
-  const lightboxLinkedForSource = useMemo(() => {
-    if (!lbSlide || !lbSlide.linkId) return [];
-    return lightboxOwnerSameAsVisible.filter((sim) =>
-      (sim.sources || []).some(
-        (src) => (src.id?.split('#').pop() || src.id) === lbSlide.linkId
-      )
+  const lightboxOtherNameVariants = useMemo(() => {
+    if (!open || !lbSlide || !lbSlideOwnerFull) return [];
+    return sameAsOtherNameVariantsForOwner(
+      lbSlideOwnerFull,
+      effectivePageAsana,
+      allAsanas,
+      similarAsanas,
+      lbSlide.linkId || null
     );
-  }, [lightboxOwnerSameAsVisible, lbSlide]);
-
-  const lightboxOtherSourceVariants = useMemo(() => {
-    if (!lbSlide?.linkId) return lightboxOwnerSameAsVisible;
-    return lightboxOwnerSameAsVisible.filter(
-      (s) =>
-        !(s.sources || []).some((src) => {
-          const sid = src.id?.split('#').pop() || src.id;
-          return sid && sid === lbSlide.linkId;
-        })
-    );
-  }, [lightboxOwnerSameAsVisible, lbSlide]);
+  }, [open, lbSlide, lbSlideOwnerFull, effectivePageAsana, allAsanas, similarAsanas]);
 
   const lightboxOtherNameRows = useMemo(() => {
-    if (!lightboxOtherSourceVariants.length) return [];
-    // Ссылка на страницу группы по русскому названию строки (не на текущую страницу для всех).
+    if (!lightboxOtherNameVariants.length) return [];
     return flattenLightboxOtherNameEntries(
-      lightboxOtherSourceVariants,
+      lightboxOtherNameVariants,
       allAsanas,
       photoGalleryVersion,
       null
     );
-  }, [lightboxOtherSourceVariants, allAsanas, photoGalleryVersion]);
+  }, [lightboxOtherNameVariants, allAsanas, photoGalleryVersion]);
 
   const location = useLocation();
 
   useEffect(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId) {
       setModalSimilarLinks([]);
+      setModalSimilarLoading(false);
       return undefined;
     }
     let cancelled = false;
+    setModalSimilarLoading(true);
     asanasAPI
       .getSimilarAsanas(sameAsLinksSubjectId)
       .then((data) => {
@@ -266,6 +260,9 @@ export default function UserPhotoLightbox({
       })
       .catch(() => {
         if (!cancelled) setModalSimilarLinks([]);
+      })
+      .finally(() => {
+        if (!cancelled) setModalSimilarLoading(false);
       });
     return () => {
       cancelled = true;
@@ -273,28 +270,49 @@ export default function UserPhotoLightbox({
   }, [showSameAsLinksModal, sameAsLinksSubjectId]);
 
   const sameAsLinksForModal = useMemo(() => {
-    if (!showSameAsLinksModal || !sameAsLinksSubjectId || !allAsanas.length) return [];
+    if (!showSameAsLinksModal || !sameAsLinksSubjectId) return [];
+    const subjectCanon = canonicalAsanaId(sameAsLinksSubjectId);
     const owner =
       allAsanas.find((a) => a.id === sameAsLinksSubjectId) ||
-      allAsanas.find(
-        (a) => canonicalAsanaId(a.id) === canonicalAsanaId(sameAsLinksSubjectId)
-      );
+      allAsanas.find((a) => canonicalAsanaId(a.id) === subjectCanon);
     if (!owner) return [];
-    const pageForLinks =
-      catalogRepresentativeByNameRu(allAsanas, owner.name?.name_ru) || owner;
-    const links = combinedSameAsForOwner(
+
+    const similarSource =
+      modalSimilarLinks.length > 0 ? modalSimilarLinks : similarAsanas;
+    const variants = sameAsOtherNameVariantsForOwner(
       owner,
-      pageForLinks,
+      effectivePageAsana,
       allAsanas,
-      modalSimilarLinks
+      similarSource,
+      sameAsLinksContextLinkId
     );
-    return links.map((sim) => {
+
+    const inferredByCanon = new Map();
+    for (const s of modalSimilarLinks) {
+      if (s?.id && s.same_as_link_inferred) {
+        inferredByCanon.set(canonicalAsanaId(s.id), true);
+      }
+    }
+
+    return variants.map((sim) => {
       const k = canonicalAsanaId(sim.id);
       const full = allAsanas.find((a) => canonicalAsanaId(a.id) === k);
       const merged = full ? { ...sim, ...full, id: full.id ?? sim.id } : sim;
-      return merged;
+      return {
+        ...merged,
+        same_as_link_inferred:
+          merged.same_as_link_inferred === true || inferredByCanon.get(k) === true,
+      };
     });
-  }, [showSameAsLinksModal, sameAsLinksSubjectId, allAsanas, modalSimilarLinks]);
+  }, [
+    showSameAsLinksModal,
+    sameAsLinksSubjectId,
+    sameAsLinksContextLinkId,
+    allAsanas,
+    modalSimilarLinks,
+    similarAsanas,
+    effectivePageAsana,
+  ]);
 
   const filteredSameAsLinksForModal = useMemo(() => {
     const q = sameAsLinksSearchQuery.trim().toLowerCase();
@@ -749,6 +767,7 @@ export default function UserPhotoLightbox({
                     e.stopPropagation();
                     if (!lbSlideOwnerFull) return;
                     setSameAsLinksSubjectId(lbSlideOwnerFull.id);
+                    setSameAsLinksContextLinkId(lbSlide.linkId || null);
                     setSameAsLinksSearchQuery('');
                     setShowSameAsLinksModal(true);
                   }}
@@ -822,44 +841,6 @@ export default function UserPhotoLightbox({
               </div>
             )}
 
-            {lightboxLinkedForSource.length > 0 && (
-              <>
-                <h4 className="user-lightbox-source-strip-subtitle">
-                  {lightboxSameSourceSiblings.length > 1
-                    ? 'Другое название в каталоге для этого издания'
-                    : 'Другое название в каталоге'}
-                </h4>
-                <div className="user-lightbox-source-linked">
-                  {lightboxLinkedForSource.map((sim) => {
-                    const prev = similarPreviewSrc(sim);
-                    const { secondary, muted } = catalogRecordSecondaryParts(sim);
-                    const subCls = muted
-                      ? 'user-lightbox-linked-card-source user-lightbox-linked-card-source--muted'
-                      : 'user-lightbox-linked-card-source';
-                    return (
-                      <Link
-                        key={sim.id}
-                        to={asanaPagePath(sim)}
-                        className="user-lightbox-linked-card"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="user-lightbox-linked-card-photo">
-                          {prev ? (
-                            <img src={prev} alt="" />
-                          ) : (
-                            <span className="user-lightbox-linked-card-empty">—</span>
-                          )}
-                        </div>
-                        <span className="user-lightbox-linked-card-name">
-                          {sim.name?.name_ru || 'Асана'}
-                        </span>
-                        <span className={subCls}>{secondary}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </>
-            )}
           </div>
 
           {lightboxSameNameLinkedPhotos.length > 0 && (
@@ -902,48 +883,49 @@ export default function UserPhotoLightbox({
                 {lightboxOtherNameRows.map((row) => {
                   const rowTo = asanaPagePath(row.linkTarget);
                   return (
-                  <li key={row.key} className="user-lightbox-other-source-row">
-                    <Link
-                      to={rowTo}
-                      className="user-lightbox-other-source-row-link"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onClose();
-                        if (location.pathname === rowTo) {
-                          e.preventDefault();
-                        }
-                      }}
-                    >
-                      <div className="user-lightbox-other-source-row-inner user-lightbox-other-source-row-inner--with-photo">
-                        <div className="user-lightbox-other-source-photo--row">
-                          {row.photoSrc ? (
-                            <img src={row.photoSrc} alt="" />
-                          ) : (
-                            <span className="user-lightbox-other-source-photo-empty">—</span>
-                          )}
+                    <li key={row.key} className="user-lightbox-other-source-row">
+                      <Link
+                        to={rowTo}
+                        className="user-lightbox-other-source-row-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClose();
+                          if (location.pathname === rowTo) {
+                            e.preventDefault();
+                          }
+                        }}
+                      >
+                        <div className="user-lightbox-other-source-row-inner user-lightbox-other-source-row-inner--with-photo">
+                          <div className="user-lightbox-other-source-photo--row">
+                            {row.photoSrc ? (
+                              <img src={row.photoSrc} alt="" />
+                            ) : (
+                              <span className="user-lightbox-other-source-photo-empty">—</span>
+                            )}
+                          </div>
+                          <div className="user-lightbox-other-source-name-cell">
+                            <span className="user-lightbox-other-source-row-title-text">
+                              {row.nameRu}
+                            </span>
+                            <span
+                              className={
+                                row.sourceMuted
+                                  ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted user-lightbox-other-source-edition--under-name'
+                                  : 'user-lightbox-other-source-edition user-lightbox-other-source-edition--under-name'
+                              }
+                            >
+                              {row.sourceCaption}
+                            </span>
+                          </div>
                         </div>
-                        <div className="user-lightbox-other-source-name-cell">
-                          <span className="user-lightbox-other-source-row-title-text">
-                            {row.nameRu}
-                          </span>
-                          <span
-                            className={
-                              row.sourceMuted
-                                ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted user-lightbox-other-source-edition--under-name'
-                                : 'user-lightbox-other-source-edition user-lightbox-other-source-edition--under-name'
-                            }
-                          >
-                            {row.sourceCaption}
-                          </span>
-                        </div>
-                      </div>
-                    </Link>
-                  </li>
+                      </Link>
+                    </li>
                   );
                 })}
               </ul>
             </div>
           )}
+
         </div>
       </div>
 
@@ -1127,6 +1109,7 @@ export default function UserPhotoLightbox({
           onClick={() => {
             setShowSameAsLinksModal(false);
             setSameAsLinksSubjectId(null);
+            setSameAsLinksContextLinkId(null);
             setSameAsLinksSearchQuery('');
           }}
         >
@@ -1142,6 +1125,7 @@ export default function UserPhotoLightbox({
                 onClick={() => {
                   setShowSameAsLinksModal(false);
                   setSameAsLinksSubjectId(null);
+                  setSameAsLinksContextLinkId(null);
                   setSameAsLinksSearchQuery('');
                 }}
               >
@@ -1149,7 +1133,9 @@ export default function UserPhotoLightbox({
               </button>
             </div>
             <div className="modal-body">
-              {sameAsLinksForModal.length > 0 ? (
+              {modalSimilarLoading && sameAsLinksForModal.length === 0 ? (
+                <p className="asana-sameas-links-empty">Загрузка соответствий…</p>
+              ) : sameAsLinksForModal.length > 0 ? (
                 <>
                   <div className="modal-search">
                     <input
@@ -1210,6 +1196,7 @@ export default function UserPhotoLightbox({
                           onClick={() => {
                             setShowSameAsLinksModal(false);
                             setSameAsLinksSubjectId(null);
+                            setSameAsLinksContextLinkId(null);
                             setSameAsLinksSearchQuery('');
                           }}
                         >
@@ -1248,6 +1235,7 @@ export default function UserPhotoLightbox({
                 onClick={() => {
                   setShowSameAsLinksModal(false);
                   setSameAsLinksSubjectId(null);
+                  setSameAsLinksContextLinkId(null);
                   setSameAsLinksSearchQuery('');
                 }}
               >

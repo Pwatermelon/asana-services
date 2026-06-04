@@ -12,13 +12,15 @@ export function canonicalAsanaId(raw) {
   return s ? `asana_${s}` : '';
 }
 
-/** sameAs для конкретного объекта (owner): /similar только если это страница, иначе same_as_ids из каталога. */
+/** sameAs для конкретного объекта (owner). */
 export function combinedSameAsForOwner(
   ownerAsana,
   pageAsana,
   allAsanas,
-  similarAsanasFromApi
+  similarAsanasFromApi,
+  options = {}
 ) {
+  const { alwaysUseSimilarApi = false } = options;
   if (!ownerAsana?.id) return [];
   const my = canonicalAsanaId(ownerAsana.id);
   const map = new Map();
@@ -53,7 +55,7 @@ export function combinedSameAsForOwner(
 
   const ownerIsPage =
     pageAsana && canonicalAsanaId(ownerAsana.id) === canonicalAsanaId(pageAsana.id);
-  if (ownerIsPage) {
+  if (ownerIsPage || alwaysUseSimilarApi) {
     for (const s of similarAsanasFromApi || []) put(s);
   }
 
@@ -76,6 +78,41 @@ export function combinedSameAsForOwner(
     const full = k ? byCanon.get(k) : null;
     return full ? { ...obj, ...full, id: full.id ?? obj.id } : obj;
   });
+}
+
+/**
+ * Те же записи, что в блоке «Данная асана под другими названиями» в лайтбоксе
+ * (и в модалке «Посмотреть соответствия»).
+ */
+export function sameAsOtherNameVariantsForOwner(
+  ownerAsana,
+  pageAsana,
+  allAsanas,
+  similarAsanasFromApi,
+  linkId = null
+) {
+  if (!ownerAsana?.id) return [];
+  const combined = combinedSameAsForOwner(
+    ownerAsana,
+    pageAsana,
+    allAsanas,
+    similarAsanasFromApi,
+    { alwaysUseSimilarApi: true }
+  );
+  const groupNameKey = normalizeCatalogNameKey(
+    pageAsana?.name?.name_ru || ownerAsana?.name?.name_ru || ''
+  );
+  let variants = filterGuestSameAsDifferentGroupName(combined, groupNameKey);
+  if (linkId) {
+    variants = variants.filter(
+      (s) =>
+        !(s.sources || []).some((src) => {
+          const sid = src.id?.split('#').pop() || src.id;
+          return sid && sid === linkId;
+        })
+    );
+  }
+  return variants;
 }
 
 /** Гость: только связи, у которых русское название отличается от названия группы. */

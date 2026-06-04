@@ -59,8 +59,17 @@ const AsanaDetail = () => {
         nameRu ? asanasAPI.getByNameRu(nameRu) : Promise.resolve([found]),
         asanasAPI.getSimilarAsanas(found.id).catch(() => []),
       ]);
-      setAllAsanas(Array.isArray(siblings) && siblings.length ? siblings : [found]);
-      setSimilarAsanas(similar || []);
+      const siblingList = Array.isArray(siblings) && siblings.length ? siblings : [found];
+      const similarList = similar || [];
+      const merged = new Map();
+      for (const a of [...siblingList, ...similarList, found]) {
+        if (!a?.id) continue;
+        const k = canonicalAsanaId(a.id);
+        if (!k) continue;
+        merged.set(k, merged.has(k) ? { ...merged.get(k), ...a, id: a.id } : a);
+      }
+      setAllAsanas([...merged.values()]);
+      setSimilarAsanas(similarList);
     } catch (err) {
       console.error('Error loading asana page:', err);
       setError(`Ошибка при загрузке асаны: ${err.message || 'Неизвестная ошибка'}`);
@@ -156,7 +165,7 @@ const AsanaDetail = () => {
 
   const handleMutation = async () => {
     setPhotoGalleryVersion((v) => v + 1);
-    await Promise.all([loadAllAsanas(), loadAsana()]);
+    await loadPage();
   };
 
   const handleAsanaDeleted = () => {

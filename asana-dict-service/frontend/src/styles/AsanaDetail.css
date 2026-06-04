@@ -1650,6 +1650,10 @@
   background: rgba(239, 68, 68, 0.08);
 }
 
+.asana-detail-other-names {
+  margin-top: 2rem;
+}
+
 .asana-sameas-links-empty {
   margin: 0;
   text-align: center;
