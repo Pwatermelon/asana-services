@@ -992,9 +992,8 @@
   align-self: center;
   padding: 0.2rem 0 0.45rem;
   margin-bottom: 0;
-  background: rgba(15, 23, 42, 0.96);
+  background: transparent;
   box-sizing: border-box;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
 }
 
 .user-photo-lightbox-topbar-side {

@@ -183,6 +183,12 @@ export function buildCorrespondencesListForOwner(
     if (k) byCanonRef.set(k, a);
   }
 
+  for (const s of similarFromApi || []) {
+    if (s?.id && s.same_as_link_inferred === true) {
+      inferredByCanon.set(canonicalAsanaId(s.id), true);
+    }
+  }
+
   const add = (sim, kind, forceInferred = false) => {
     if (!sim?.id) return;
     const k = canonicalAsanaId(sim.id);

@@ -73,7 +73,8 @@ export default function UserPhotoLightbox({
   const [modalCatalogPool, setModalCatalogPool] = useState([]);
   const [modalSimilarLoading, setModalSimilarLoading] = useState(false);
 
-  const [matchCatalogPool, setMatchCatalogPool] = useState([]);
+  const [matchAllCatalog, setMatchAllCatalog] = useState([]);
+  const [matchExcludeLinkedCanon, setMatchExcludeLinkedCanon] = useState(() => new Set());
   const [matchSearchLoading, setMatchSearchLoading] = useState(false);
 
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
@@ -293,12 +294,6 @@ export default function UserPhotoLightbox({
     if (!owner) return [];
 
     const inferredByCanon = new Map();
-    for (const s of modalSimilarLinks) {
-      if (s?.id && s.same_as_link_inferred) {
-        inferredByCanon.set(canonicalAsanaId(s.id), true);
-      }
-    }
-
     const similarUnion = [];
     const seenSimilar = new Set();
     for (const s of [...similarAsanas, ...modalSimilarLinks]) {
@@ -306,6 +301,9 @@ export default function UserPhotoLightbox({
       if (!k || seenSimilar.has(k)) continue;
       seenSimilar.add(k);
       similarUnion.push(s);
+      if (s.same_as_link_inferred === true) {
+        inferredByCanon.set(k, true);
+      }
     }
 
     return buildCorrespondencesListForOwner(
@@ -327,45 +325,40 @@ export default function UserPhotoLightbox({
 
   useEffect(() => {
     if (!showMatchModal || !matchSubjectAsanaId) {
-      setMatchCatalogPool([]);
+      setMatchAllCatalog([]);
+      setMatchExcludeLinkedCanon(new Set());
       setMatchSearchLoading(false);
       return undefined;
     }
     let cancelled = false;
-    const q = matchSearchQuery.trim();
-    const owner = findAsanaById(allAsanas, matchSubjectAsanaId);
-    const timer = window.setTimeout(
-      async () => {
-        setMatchSearchLoading(true);
-        try {
-          let found = [];
-          if (q.length >= 1) {
-            found = await asanasAPI.search(q);
-          } else if (owner?.name?.name_ru) {
-            found = await asanasAPI.getByNameRu(owner.name.name_ru);
-          }
-          const similar = await asanasAPI
-            .getSimilarAsanas(matchSubjectAsanaId)
-            .catch(() => []);
-          const pool = await mergeSameAsCluster([
-            ...allAsanas,
-            ...(found || []),
-            ...(similar || []),
-          ]);
-          if (!cancelled) setMatchCatalogPool(pool);
-        } catch {
-          if (!cancelled) setMatchCatalogPool([...allAsanas]);
-        } finally {
-          if (!cancelled) setMatchSearchLoading(false);
+    setMatchSearchLoading(true);
+    (async () => {
+      try {
+        const [all, similar] = await Promise.all([
+          asanasAPI.getAll(),
+          asanasAPI.getSimilarAsanas(matchSubjectAsanaId).catch(() => []),
+        ]);
+        if (cancelled) return;
+        setMatchAllCatalog(Array.isArray(all) ? all : []);
+        const linked = new Set();
+        for (const s of similar || []) {
+          const k = canonicalAsanaId(s?.id);
+          if (k) linked.add(k);
         }
-      },
-      q.length >= 1 ? 280 : 0
-    );
+        setMatchExcludeLinkedCanon(linked);
+      } catch {
+        if (!cancelled) {
+          setMatchAllCatalog([]);
+          setMatchExcludeLinkedCanon(new Set());
+        }
+      } finally {
+        if (!cancelled) setMatchSearchLoading(false);
+      }
+    })();
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
-  }, [showMatchModal, matchSubjectAsanaId, matchSearchQuery, allAsanas]);
+  }, [showMatchModal, matchSubjectAsanaId]);
 
   const filteredSameAsLinksForModal = useMemo(() => {
     const q = sameAsLinksSearchQuery.trim().toLowerCase();
@@ -379,21 +372,26 @@ export default function UserPhotoLightbox({
   }, [sameAsLinksForModal, sameAsLinksSearchQuery]);
 
   const filteredAsanasForMatch = useMemo(() => {
-    const pool = matchCatalogPool.length ? matchCatalogPool : allAsanas;
-    if (!pool.length || !matchSubjectAsanaId) return [];
+    if (!matchAllCatalog.length || !matchSubjectAsanaId) return [];
     const excludeCanon = canonicalAsanaId(matchSubjectAsanaId);
     const q = matchSearchQuery.trim().toLowerCase();
-    return pool
-      .filter((a) => canonicalAsanaId(a.id) !== excludeCanon)
+    return matchAllCatalog
       .filter((a) => {
+        const k = canonicalAsanaId(a.id);
+        if (!k || k === excludeCanon || matchExcludeLinkedCanon.has(k)) return false;
         if (!q) return true;
         const nameRu = a.name?.name_ru?.toLowerCase() || '';
         const nameSa = a.name?.name_sanskrit?.toLowerCase() || '';
         const edition = catalogRecordSecondaryParts(a).secondary.toLowerCase();
         return nameRu.includes(q) || nameSa.includes(q) || edition.includes(q);
       })
-      .slice(0, 100);
-  }, [matchCatalogPool, allAsanas, matchSubjectAsanaId, matchSearchQuery]);
+      .slice(0, 150);
+  }, [
+    matchAllCatalog,
+    matchSubjectAsanaId,
+    matchSearchQuery,
+    matchExcludeLinkedCanon,
+  ]);
 
   const similarPreviewSrc = (similar) => {
     if (similar.photos?.length) {
@@ -825,7 +823,8 @@ export default function UserPhotoLightbox({
                     if (!lbSlideOwnerFull) return;
                     setMatchSubjectAsanaId(lbSlideOwnerFull.id);
                     setMatchSearchQuery('');
-                    setMatchCatalogPool([]);
+                    setMatchAllCatalog([]);
+                    setMatchExcludeLinkedCanon(new Set());
                     setShowMatchModal(true);
                   }}
                 >
@@ -1117,7 +1116,7 @@ export default function UserPhotoLightbox({
               <div className="modal-search">
                 <input
                   type="search"
-                  placeholder="Поиск по всему каталогу (название, издание)…"
+                  placeholder="Поиск по каталогу…"
                   value={matchSearchQuery}
                   onChange={(e) => setMatchSearchQuery(e.target.value)}
                   autoComplete="off"
@@ -1125,13 +1124,7 @@ export default function UserPhotoLightbox({
                 />
               </div>
               {matchSearchLoading && (
-                <p className="asana-sameas-links-empty">Загрузка записей каталога…</p>
-              )}
-              {!matchSearchLoading && !matchSearchQuery.trim() && (
-                <p className="asana-sameas-links-kind-badge" style={{ margin: '0 0 0.75rem' }}>
-                  Показаны записи с тем же названием и текущие связи. Введите запрос, чтобы
-                  найти любую асану из другого источника.
-                </p>
+                <p className="asana-sameas-links-empty">Загрузка каталога…</p>
               )}
               <div className="modal-asanas-list">
                 {filteredAsanasForMatch.map((a) => (

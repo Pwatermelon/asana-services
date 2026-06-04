@@ -16,6 +16,7 @@ from rdflib.namespace import RDF
 logger = logging.getLogger("asana_service.same_as_cache")
 
 REDIS_KEY = "ontology:inferred_same_as:v1"
+REDIS_META_KEY = "ontology:inferred_same_as:meta:v1"
 
 _inferred_pairs: Optional[FrozenSet[Tuple[str, str]]] = None
 _cache_ready = False
@@ -63,17 +64,28 @@ def clear_same_as_inference_cache() -> None:
     if client:
         try:
             client.delete(REDIS_KEY)
+            client.delete(REDIS_META_KEY)
         except Exception as exc:
             logger.debug("Redis clear inferred sameAs failed: %s", exc)
 
 
-def _save_to_redis(pairs: FrozenSet[Tuple[str, str]]) -> None:
+def _asserted_edge_count(asserted: Graph) -> int:
+    from app.ontology import ASANA
+
+    return len(collect_asserted_same_as_pairs(asserted, ASANA.isSameAsObject))
+
+
+def _save_to_redis(pairs: FrozenSet[Tuple[str, str]], asserted_edge_count: int) -> None:
     client = _redis_client()
     if not client:
         return
     try:
         payload = json.dumps([list(p) for p in pairs], ensure_ascii=False)
         client.set(REDIS_KEY, payload)
+        client.set(
+            REDIS_META_KEY,
+            json.dumps({"asserted_edges": asserted_edge_count}, ensure_ascii=False),
+        )
     except Exception as exc:
         logger.warning("Redis save inferred sameAs failed: %s", exc)
 
@@ -93,6 +105,21 @@ def _load_from_redis() -> Optional[FrozenSet[Tuple[str, str]]]:
         return None
 
 
+def _redis_cache_matches_asserted(asserted: Graph) -> bool:
+    """Не использовать устаревший Redis после смены asserted-связей в онтологии."""
+    client = _redis_client()
+    if not client:
+        return False
+    try:
+        raw = client.get(REDIS_META_KEY)
+        if not raw:
+            return False
+        meta = json.loads(raw)
+        return meta.get("asserted_edges") == _asserted_edge_count(asserted)
+    except Exception:
+        return False
+
+
 def rebuild_same_as_inference_cache(asserted: Graph) -> int:
     """
     OWL 2 RL один раз по asserted-графу; в БД пишутся только asserted-триплеты.
@@ -108,7 +135,7 @@ def rebuild_same_as_inference_cache(asserted: Graph) -> int:
     inferred = frozenset(reasoned_pairs - asserted_pairs)
     _inferred_pairs = inferred
     _cache_ready = True
-    _save_to_redis(inferred)
+    _save_to_redis(inferred, len(asserted_pairs))
     logger.info(
         "sameAs inference cache rebuilt: asserted_edges=%s, inferred_edges=%s",
         len(asserted_pairs),
@@ -121,16 +148,20 @@ def ensure_same_as_inference_cache(asserted: Optional[Graph] = None) -> None:
     global _inferred_pairs, _cache_ready
     if _cache_ready and _inferred_pairs is not None:
         return
-    loaded = _load_from_redis()
-    if loaded is not None:
-        _inferred_pairs = loaded
-        _cache_ready = True
-        logger.info("sameAs inference cache loaded from Redis (%s pairs)", len(loaded))
-        return
     if asserted is None:
         from app.ontology import get_graph
 
         asserted = get_graph()
+    loaded = _load_from_redis()
+    if loaded is not None and _redis_cache_matches_asserted(asserted):
+        _inferred_pairs = loaded
+        _cache_ready = True
+        logger.info("sameAs inference cache loaded from Redis (%s pairs)", len(loaded))
+        return
+    if loaded is not None:
+        logger.info(
+            "sameAs Redis cache stale (asserted edges changed) — rebuilding inference cache"
+        )
     rebuild_same_as_inference_cache(asserted)
 
 
