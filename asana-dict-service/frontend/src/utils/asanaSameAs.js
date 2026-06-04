@@ -1,4 +1,51 @@
+import { asanasAPI } from '../api/asanas';
 import { normalizeCatalogNameKey } from './catalogSearch';
+
+export function sameAsIdForApi(raw) {
+  if (raw == null || raw === '') return '';
+  let s = String(raw).trim();
+  const h = s.lastIndexOf('#');
+  if (h !== -1) s = s.slice(h + 1);
+  const sl = s.lastIndexOf('/');
+  if (sl !== -1) s = s.slice(sl + 1);
+  return s.replace(/-page$/i, '');
+}
+
+/** Подгружает все записи из кластера same_as_ids (для модалок и страницы асаны). */
+export async function mergeSameAsCluster(seedRecords) {
+  const merged = new Map();
+  const add = (a) => {
+    if (!a?.id) return;
+    const k = canonicalAsanaId(a.id);
+    if (!k) return;
+    merged.set(k, merged.has(k) ? { ...merged.get(k), ...a, id: a.id } : a);
+  };
+  for (const x of seedRecords || []) add(x);
+
+  for (let round = 0; round < 4; round += 1) {
+    const missing = [];
+    for (const a of merged.values()) {
+      for (const sid of a.same_as_ids || []) {
+        const k = canonicalAsanaId(sid);
+        if (k && !merged.has(k)) missing.push(sameAsIdForApi(sid));
+      }
+    }
+    const unique = [...new Set(missing.filter(Boolean))];
+    if (!unique.length) break;
+    const loaded = await Promise.all(
+      unique.map((id) => asanasAPI.getById(id).catch(() => null))
+    );
+    let added = false;
+    for (const row of loaded) {
+      if (row) {
+        add(row);
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+  return [...merged.values()];
+}
 
 /** Единый ключ id асаны для сравнения (полный URI, #asana_uuid, asana_uuid). */
 export function canonicalAsanaId(raw) {
@@ -81,15 +128,14 @@ export function combinedSameAsForOwner(
 }
 
 /**
- * Те же записи, что в блоке «Данная асана под другими названиями» в лайтбоксе
- * (и в модалке «Посмотреть соответствия»).
+ * Блок «Данная асана под другими названиями»: связи isSameAs, у которых
+ * русское название отличается от названия страницы каталога.
  */
 export function sameAsOtherNameVariantsForOwner(
   ownerAsana,
   pageAsana,
   allAsanas,
-  similarAsanasFromApi,
-  linkId = null
+  similarAsanasFromApi
 ) {
   if (!ownerAsana?.id) return [];
   const combined = combinedSameAsForOwner(
@@ -102,17 +148,84 @@ export function sameAsOtherNameVariantsForOwner(
   const groupNameKey = normalizeCatalogNameKey(
     pageAsana?.name?.name_ru || ownerAsana?.name?.name_ru || ''
   );
-  let variants = filterGuestSameAsDifferentGroupName(combined, groupNameKey);
-  if (linkId) {
-    variants = variants.filter(
-      (s) =>
-        !(s.sources || []).some((src) => {
-          const sid = src.id?.split('#').pop() || src.id;
-          return sid && sid === linkId;
-        })
-    );
+  return filterGuestSameAsDifferentGroupName(combined, groupNameKey);
+}
+
+/**
+ * Модалка «Посмотреть соответствия»: весь кластер sameAs + записи с тем же
+ * русским названием в других источниках (отдельно от блока «другие названия»).
+ */
+export function buildCorrespondencesListForOwner(
+  ownerAsana,
+  pageAsana,
+  allAsanas,
+  similarFromApi,
+  inferredByCanon = new Map()
+) {
+  if (!ownerAsana?.id || !Array.isArray(allAsanas)) return [];
+  const subjectCanon = canonicalAsanaId(ownerAsana.id);
+  const nameLower = (ownerAsana.name?.name_ru || '').toLowerCase().trim();
+
+  const byCanon = new Map();
+  const byCanonRef = new Map();
+  for (const a of allAsanas) {
+    const k = canonicalAsanaId(a.id);
+    if (k) byCanonRef.set(k, a);
   }
-  return variants;
+
+  const add = (sim, kind, forceInferred = false) => {
+    if (!sim?.id) return;
+    const k = canonicalAsanaId(sim.id);
+    if (!k || k === subjectCanon) return;
+    const full = byCanonRef.get(k);
+    const merged = full ? { ...sim, ...full, id: full.id ?? sim.id } : sim;
+    const inferred =
+      forceInferred ||
+      merged.same_as_link_inferred === true ||
+      inferredByCanon.get(k) === true;
+    const row = {
+      ...merged,
+      same_as_link_inferred: inferred,
+      correspondence_kind: kind,
+    };
+    if (!byCanon.has(k)) byCanon.set(k, row);
+    else {
+      const prev = byCanon.get(k);
+      byCanon.set(k, {
+        ...prev,
+        ...row,
+        same_as_link_inferred: prev.same_as_link_inferred || row.same_as_link_inferred,
+        correspondence_kind:
+          prev.correspondence_kind === 'same_as' ? prev.correspondence_kind : kind,
+      });
+    }
+  };
+
+  const cluster = combinedSameAsForOwner(
+    ownerAsana,
+    pageAsana,
+    allAsanas,
+    similarFromApi,
+    { alwaysUseSimilarApi: true }
+  );
+  for (const s of cluster) {
+    add(s, 'same_as', inferredByCanon.get(canonicalAsanaId(s.id)) === true);
+  }
+
+  if (nameLower) {
+    for (const a of allAsanas) {
+      const k = canonicalAsanaId(a.id);
+      if (!k || k === subjectCanon) continue;
+      if ((a.name?.name_ru || '').toLowerCase().trim() !== nameLower) continue;
+      add(a, 'same_name_other_source', false);
+    }
+  }
+
+  return [...byCanon.values()].sort((a, b) =>
+    (a.name?.name_ru || '').localeCompare(b.name?.name_ru || '', 'ru', {
+      sensitivity: 'base',
+    })
+  );
 }
 
 /** Гость: только связи, у которых русское название отличается от названия группы. */

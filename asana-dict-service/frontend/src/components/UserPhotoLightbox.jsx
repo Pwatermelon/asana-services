@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,11 +7,12 @@ import { asanaPagePath } from './CompactAsanaRow';
 import {
   canonicalAsanaId,
   combinedSameAsForOwner,
-  filterGuestSameAsDifferentGroupName,
   catalogRecordSecondaryParts,
   catalogRepresentativeByNameRu,
   flattenLightboxOtherNameEntries,
   sameAsOtherNameVariantsForOwner,
+  buildCorrespondencesListForOwner,
+  mergeSameAsCluster,
   galleryImageUrl,
   getPhotoSrc,
   buildPhotoSourceMeta,
@@ -66,10 +68,13 @@ export default function UserPhotoLightbox({
 
   const [showSameAsLinksModal, setShowSameAsLinksModal] = useState(false);
   const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
-  const [sameAsLinksContextLinkId, setSameAsLinksContextLinkId] = useState(null);
   const [sameAsLinksSearchQuery, setSameAsLinksSearchQuery] = useState('');
   const [modalSimilarLinks, setModalSimilarLinks] = useState([]);
+  const [modalCatalogPool, setModalCatalogPool] = useState([]);
   const [modalSimilarLoading, setModalSimilarLoading] = useState(false);
+
+  const [matchCatalogPool, setMatchCatalogPool] = useState([]);
+  const [matchSearchLoading, setMatchSearchLoading] = useState(false);
 
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [addPhotoTarget, setAddPhotoTarget] = useState(null);
@@ -154,22 +159,6 @@ export default function UserPhotoLightbox({
     return fallback;
   }, [getTitleParts, lbSlide, lbSlideOwnerFull, defaultTitle]);
 
-  const lightboxOwnerSameAsVisible = useMemo(() => {
-    if (!open || !lbSlide || !allAsanas.length) return [];
-    const owner = lbSlideOwnerFull;
-    if (!owner) return [];
-    const combined = combinedSameAsForOwner(
-      owner,
-      effectivePageAsana,
-      allAsanas,
-      similarAsanas
-    );
-    const groupNameKey = normalizeCatalogNameKey(
-      effectivePageAsana?.name?.name_ru || owner?.name?.name_ru || ''
-    );
-    return filterGuestSameAsDifferentGroupName(combined, groupNameKey);
-  }, [open, lbSlide, lbSlideOwnerFull, allAsanas, similarAsanas, effectivePageAsana]);
-
   const lightboxSameNameLinkedPhotos = useMemo(() => {
     if (!open || !lbSlide || !allAsanas.length) return [];
     const owner = lbSlideOwnerFull;
@@ -229,8 +218,7 @@ export default function UserPhotoLightbox({
       lbSlideOwnerFull,
       effectivePageAsana,
       allAsanas,
-      similarAsanas,
-      lbSlide.linkId || null
+      similarAsanas
     );
   }, [open, lbSlide, lbSlideOwnerFull, effectivePageAsana, allAsanas, similarAsanas]);
 
@@ -246,47 +234,66 @@ export default function UserPhotoLightbox({
 
   const location = useLocation();
 
+  const findAsanaById = (list, asanaId) => {
+    if (!asanaId || !list?.length) return null;
+    const canon = canonicalAsanaId(asanaId);
+    return (
+      list.find((a) => a.id === asanaId) ||
+      list.find((a) => canonicalAsanaId(a.id) === canon) ||
+      null
+    );
+  };
+
   useEffect(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId) {
       setModalSimilarLinks([]);
+      setModalCatalogPool([]);
       setModalSimilarLoading(false);
       return undefined;
     }
     let cancelled = false;
     setModalSimilarLoading(true);
-    asanasAPI
-      .getSimilarAsanas(sameAsLinksSubjectId)
-      .then((data) => {
-        if (!cancelled) setModalSimilarLinks(data || []);
-      })
-      .catch(() => {
-        if (!cancelled) setModalSimilarLinks([]);
-      })
-      .finally(() => {
+    (async () => {
+      try {
+        let owner = findAsanaById(allAsanas, sameAsLinksSubjectId);
+        if (!owner) {
+          owner = await asanasAPI.getById(sameAsLinksSubjectId).catch(() => null);
+        }
+        const nameRu = owner?.name?.name_ru;
+        const [similar, byName] = await Promise.all([
+          asanasAPI.getSimilarAsanas(sameAsLinksSubjectId).catch(() => []),
+          nameRu ? asanasAPI.getByNameRu(nameRu).catch(() => []) : Promise.resolve([]),
+        ]);
+        if (cancelled) return;
+        setModalSimilarLinks(similar || []);
+        const pool = await mergeSameAsCluster([
+          ...allAsanas,
+          ...(owner ? [owner] : []),
+          ...(byName || []),
+          ...(similar || []),
+        ]);
+        if (!cancelled) setModalCatalogPool(pool);
+      } catch {
+        if (!cancelled) {
+          setModalSimilarLinks([]);
+          setModalCatalogPool([...allAsanas]);
+        }
+      } finally {
         if (!cancelled) setModalSimilarLoading(false);
-      });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [showSameAsLinksModal, sameAsLinksSubjectId]);
+  }, [showSameAsLinksModal, sameAsLinksSubjectId, allAsanas]);
 
   const sameAsLinksForModal = useMemo(() => {
     if (!showSameAsLinksModal || !sameAsLinksSubjectId) return [];
-    const subjectCanon = canonicalAsanaId(sameAsLinksSubjectId);
-    const owner =
-      allAsanas.find((a) => a.id === sameAsLinksSubjectId) ||
-      allAsanas.find((a) => canonicalAsanaId(a.id) === subjectCanon);
+    const catalog =
+      modalCatalogPool.length > 0 ? modalCatalogPool : allAsanas;
+    const owner = findAsanaById(catalog, sameAsLinksSubjectId);
     if (!owner) return [];
-
-    const similarSource =
-      modalSimilarLinks.length > 0 ? modalSimilarLinks : similarAsanas;
-    const variants = sameAsOtherNameVariantsForOwner(
-      owner,
-      effectivePageAsana,
-      allAsanas,
-      similarSource,
-      sameAsLinksContextLinkId
-    );
 
     const inferredByCanon = new Map();
     for (const s of modalSimilarLinks) {
@@ -295,25 +302,73 @@ export default function UserPhotoLightbox({
       }
     }
 
-    return variants.map((sim) => {
-      const k = canonicalAsanaId(sim.id);
-      const full = allAsanas.find((a) => canonicalAsanaId(a.id) === k);
-      const merged = full ? { ...sim, ...full, id: full.id ?? sim.id } : sim;
-      return {
-        ...merged,
-        same_as_link_inferred:
-          merged.same_as_link_inferred === true || inferredByCanon.get(k) === true,
-      };
-    });
+    const similarUnion = [];
+    const seenSimilar = new Set();
+    for (const s of [...similarAsanas, ...modalSimilarLinks]) {
+      const k = canonicalAsanaId(s?.id);
+      if (!k || seenSimilar.has(k)) continue;
+      seenSimilar.add(k);
+      similarUnion.push(s);
+    }
+
+    return buildCorrespondencesListForOwner(
+      owner,
+      effectivePageAsana,
+      catalog,
+      similarUnion,
+      inferredByCanon
+    );
   }, [
     showSameAsLinksModal,
     sameAsLinksSubjectId,
-    sameAsLinksContextLinkId,
     allAsanas,
+    modalCatalogPool,
     modalSimilarLinks,
     similarAsanas,
     effectivePageAsana,
   ]);
+
+  useEffect(() => {
+    if (!showMatchModal || !matchSubjectAsanaId) {
+      setMatchCatalogPool([]);
+      setMatchSearchLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const q = matchSearchQuery.trim();
+    const owner = findAsanaById(allAsanas, matchSubjectAsanaId);
+    const timer = window.setTimeout(
+      async () => {
+        setMatchSearchLoading(true);
+        try {
+          let found = [];
+          if (q.length >= 1) {
+            found = await asanasAPI.search(q);
+          } else if (owner?.name?.name_ru) {
+            found = await asanasAPI.getByNameRu(owner.name.name_ru);
+          }
+          const similar = await asanasAPI
+            .getSimilarAsanas(matchSubjectAsanaId)
+            .catch(() => []);
+          const pool = await mergeSameAsCluster([
+            ...allAsanas,
+            ...(found || []),
+            ...(similar || []),
+          ]);
+          if (!cancelled) setMatchCatalogPool(pool);
+        } catch {
+          if (!cancelled) setMatchCatalogPool([...allAsanas]);
+        } finally {
+          if (!cancelled) setMatchSearchLoading(false);
+        }
+      },
+      q.length >= 1 ? 280 : 0
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [showMatchModal, matchSubjectAsanaId, matchSearchQuery, allAsanas]);
 
   const filteredSameAsLinksForModal = useMemo(() => {
     const q = sameAsLinksSearchQuery.trim().toLowerCase();
@@ -327,20 +382,21 @@ export default function UserPhotoLightbox({
   }, [sameAsLinksForModal, sameAsLinksSearchQuery]);
 
   const filteredAsanasForMatch = useMemo(() => {
-    if (!allAsanas.length) return [];
-    const excludeId = matchSubjectAsanaId;
-    return allAsanas
-      .filter((a) => canonicalAsanaId(a.id) !== canonicalAsanaId(excludeId))
+    const pool = matchCatalogPool.length ? matchCatalogPool : allAsanas;
+    if (!pool.length || !matchSubjectAsanaId) return [];
+    const excludeCanon = canonicalAsanaId(matchSubjectAsanaId);
+    const q = matchSearchQuery.trim().toLowerCase();
+    return pool
+      .filter((a) => canonicalAsanaId(a.id) !== excludeCanon)
       .filter((a) => {
-        if (!matchSearchQuery) return true;
-        const query = matchSearchQuery.toLowerCase();
-        return (
-          a.name?.name_ru?.toLowerCase().includes(query) ||
-          a.name?.name_sanskrit?.toLowerCase().includes(query)
-        );
+        if (!q) return true;
+        const nameRu = a.name?.name_ru?.toLowerCase() || '';
+        const nameSa = a.name?.name_sanskrit?.toLowerCase() || '';
+        const edition = catalogRecordSecondaryParts(a).secondary.toLowerCase();
+        return nameRu.includes(q) || nameSa.includes(q) || edition.includes(q);
       })
-      .slice(0, 20);
-  }, [allAsanas, matchSubjectAsanaId, matchSearchQuery]);
+      .slice(0, 100);
+  }, [matchCatalogPool, allAsanas, matchSubjectAsanaId, matchSearchQuery]);
 
   const similarPreviewSrc = (similar) => {
     if (similar.photos?.length) {
@@ -554,6 +610,19 @@ export default function UserPhotoLightbox({
     }
   };
 
+  const handleAssertExplicitSameAs = async (subjectId, targetId) => {
+    if (!subjectId || !targetId) return;
+    try {
+      await asanasAPI.setSameAsObject(subjectId, targetId);
+      const fresh = await asanasAPI.getSimilarAsanas(subjectId).catch(() => []);
+      setModalSimilarLinks(fresh || []);
+      await onMutation?.();
+    } catch (error) {
+      console.error('Error asserting sameAs:', error);
+      alert('Не удалось сохранить явную связь в онтологии');
+    }
+  };
+
   const handlePhotoSubmit = async (e) => {
     e.preventDefault();
     if (!photoFile || !addPhotoTarget?.ownerId || !addPhotoTarget?.sourceId) return;
@@ -575,8 +644,7 @@ export default function UserPhotoLightbox({
 
   if (!open || !slides.length || !lbSlide) return null;
 
-  return (
-    <>
+  const lightboxOverlay = (
       <div
         className="user-photo-lightbox"
         role="dialog"
@@ -585,7 +653,7 @@ export default function UserPhotoLightbox({
         onClick={onClose}
       >
         <div
-          className="user-photo-lightbox-inner"
+          className="user-photo-lightbox-topbar"
           onClick={(e) => {
             e.stopPropagation();
             if (!e.target.closest('.user-lightbox-more-wrap')) {
@@ -593,7 +661,6 @@ export default function UserPhotoLightbox({
             }
           }}
         >
-          <div className="user-photo-lightbox-topbar">
             <div
               className="user-photo-lightbox-topbar-side user-photo-lightbox-topbar-side--left"
               aria-hidden="true"
@@ -685,6 +752,10 @@ export default function UserPhotoLightbox({
             </div>
           </div>
 
+        <div
+          className="user-photo-lightbox-inner"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="user-photo-lightbox-stage">
             {slides.length > 1 && (
               <>
@@ -756,6 +827,8 @@ export default function UserPhotoLightbox({
                     e.stopPropagation();
                     if (!lbSlideOwnerFull) return;
                     setMatchSubjectAsanaId(lbSlideOwnerFull.id);
+                    setMatchSearchQuery('');
+                    setMatchCatalogPool([]);
                     setShowMatchModal(true);
                   }}
                 >
@@ -768,7 +841,6 @@ export default function UserPhotoLightbox({
                     e.stopPropagation();
                     if (!lbSlideOwnerFull) return;
                     setSameAsLinksSubjectId(lbSlideOwnerFull.id);
-                    setSameAsLinksContextLinkId(lbSlide.linkId || null);
                     setSameAsLinksSearchQuery('');
                     setShowSameAsLinksModal(true);
                   }}
@@ -929,6 +1001,13 @@ export default function UserPhotoLightbox({
 
         </div>
       </div>
+  );
+
+  return (
+    <>
+      {typeof document !== 'undefined'
+        ? createPortal(lightboxOverlay, document.body)
+        : lightboxOverlay}
 
       {/* Модалка добавления фото к конкретному источнику-владельцу */}
       {isExpertOrAdmin && showAddPhotoForm && (
@@ -1040,12 +1119,23 @@ export default function UserPhotoLightbox({
             <div className="modal-body">
               <div className="modal-search">
                 <input
-                  type="text"
-                  placeholder="Поиск асаны..."
+                  type="search"
+                  placeholder="Поиск по всему каталогу (название, издание)…"
                   value={matchSearchQuery}
                   onChange={(e) => setMatchSearchQuery(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
                 />
               </div>
+              {matchSearchLoading && (
+                <p className="asana-sameas-links-empty">Загрузка записей каталога…</p>
+              )}
+              {!matchSearchLoading && !matchSearchQuery.trim() && (
+                <p className="asana-sameas-links-kind-badge" style={{ margin: '0 0 0.75rem' }}>
+                  Показаны записи с тем же названием и текущие связи. Введите запрос, чтобы
+                  найти любую асану из другого источника.
+                </p>
+              )}
               <div className="modal-asanas-list">
                 {filteredAsanasForMatch.map((a) => (
                   <div
@@ -1066,12 +1156,9 @@ export default function UserPhotoLightbox({
                     )}
                     <div className="modal-asana-info">
                       <div className="modal-asana-name">{a.name?.name_ru}</div>
-                      {a.sources?.[0] && (
-                        <div className="modal-asana-source">
-                          {a.sources[0].author}
-                          {a.sources[0].year && ` (${a.sources[0].year})`}
-                        </div>
-                      )}
+                      <div className="modal-asana-source">
+                        {catalogRecordSecondaryParts(a).secondary}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1110,7 +1197,6 @@ export default function UserPhotoLightbox({
           onClick={() => {
             setShowSameAsLinksModal(false);
             setSameAsLinksSubjectId(null);
-            setSameAsLinksContextLinkId(null);
             setSameAsLinksSearchQuery('');
           }}
         >
@@ -1126,7 +1212,6 @@ export default function UserPhotoLightbox({
                 onClick={() => {
                   setShowSameAsLinksModal(false);
                   setSameAsLinksSubjectId(null);
-                  setSameAsLinksContextLinkId(null);
                   setSameAsLinksSearchQuery('');
                 }}
               >
@@ -1185,8 +1270,13 @@ export default function UserPhotoLightbox({
                         </div>
                         {inferredLink && (
                           <p className="asana-sameas-links-inferred-badge" role="note">
-                            Связь выведена OWL reasoner (транзитивность / симметрия). Удалить нельзя —
-                            исчезнет только при удалении явных соответствий в онтологии.
+                            Связь выведена OWL reasoner. Сохраните явно, чтобы записать в
+                            онтологию.
+                          </p>
+                        )}
+                        {sim.correspondence_kind === 'same_name_other_source' && (
+                          <p className="asana-sameas-links-kind-badge" role="note">
+                            То же русское название, другой источник в каталоге
                           </p>
                         )}
                       </div>
@@ -1197,13 +1287,22 @@ export default function UserPhotoLightbox({
                           onClick={() => {
                             setShowSameAsLinksModal(false);
                             setSameAsLinksSubjectId(null);
-                            setSameAsLinksContextLinkId(null);
                             setSameAsLinksSearchQuery('');
                           }}
                         >
                           Открыть
                         </Link>
-                        {!inferredLink && (
+                        {inferredLink ? (
+                          <button
+                            type="button"
+                            className="btn-primary asana-sameas-links-assert"
+                            onClick={() =>
+                              handleAssertExplicitSameAs(sameAsLinksSubjectId, sim.id)
+                            }
+                          >
+                            Добавить явно
+                          </button>
+                        ) : sim.correspondence_kind === 'same_as' ? (
                           <button
                             type="button"
                             className="btn-secondary asana-sameas-links-remove"
@@ -1212,6 +1311,16 @@ export default function UserPhotoLightbox({
                             }
                           >
                             Удалить соответствие
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-primary asana-sameas-links-assert"
+                            onClick={() =>
+                              handleAssertExplicitSameAs(sameAsLinksSubjectId, sim.id)
+                            }
+                          >
+                            Добавить соответствие
                           </button>
                         )}
                       </div>
@@ -1236,7 +1345,6 @@ export default function UserPhotoLightbox({
                 onClick={() => {
                   setShowSameAsLinksModal(false);
                   setSameAsLinksSubjectId(null);
-                  setSameAsLinksContextLinkId(null);
                   setSameAsLinksSearchQuery('');
                 }}
               >

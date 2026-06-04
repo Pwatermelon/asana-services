@@ -4,7 +4,11 @@ import { asanasAPI } from '../api/asanas';
 import { asanaPagePath } from '../components/CompactAsanaRow';
 import UserPhotoLightbox from '../components/UserPhotoLightbox';
 import { normalizeCatalogNameKey } from '../utils/catalogSearch';
-import { buildSlidesFromAsanas, canonicalAsanaId } from '../utils/asanaSameAs';
+import {
+  buildSlidesFromAsanas,
+  canonicalAsanaId,
+  mergeSameAsCluster,
+} from '../utils/asanaSameAs';
 import '../styles/AsanaDetail.css';
 
 const AsanaDetail = () => {
@@ -295,7 +299,8 @@ const AsanaDetail = () => {
         setIndex={setLightboxIndex}
         allAsanas={allAsanas}
         similarAsanas={similarAsanas}
-        pageAsana={asana}
+        pageAsana={firstAsana || asana}
+        getPageAsana={() => firstAsana || asana}
         photoGalleryVersion={photoGalleryVersion}
         onMutation={handleMutation}
         onAsanaDeleted={handleAsanaDeleted}

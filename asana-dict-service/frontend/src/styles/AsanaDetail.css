@@ -978,9 +978,10 @@
 }
 
 .user-photo-lightbox-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 8;
+  position: relative;
+  z-index: 12;
+  flex: 0 0 auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -988,12 +989,12 @@
   gap: 0.35rem;
   width: 100%;
   max-width: min(96vw, 1100px);
-  flex-shrink: 0;
-  align-self: stretch;
+  align-self: center;
   padding: 0.2rem 0 0.45rem;
   margin-bottom: 0;
-  /* Без отдельной заливки — иначе визуально «вторая» синяя полоса над фото */
-  background: transparent;
+  background: rgba(15, 23, 42, 0.96);
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
 }
 
 .user-photo-lightbox-topbar-side {
@@ -1652,6 +1653,17 @@
 
 .asana-detail-other-names {
   margin-top: 2rem;
+}
+
+.asana-sameas-links-kind-badge {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #475569;
+}
+
+.asana-sameas-links-assert {
+  white-space: nowrap;
 }
 
 .asana-sameas-links-empty {
