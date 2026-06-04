@@ -66,6 +66,7 @@ export default function UserPhotoLightbox({
 
   const [showSameAsLinksModal, setShowSameAsLinksModal] = useState(false);
   const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
+  const [sameAsLinksContextLinkId, setSameAsLinksContextLinkId] = useState(null);
   const [sameAsLinksSearchQuery, setSameAsLinksSearchQuery] = useState('');
   const [modalSimilarLinks, setModalSimilarLinks] = useState([]);
   const [modalSimilarLoading, setModalSimilarLoading] = useState(false);
