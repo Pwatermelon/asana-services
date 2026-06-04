@@ -106,12 +106,23 @@ export function combinedSameAsForOwner(
     for (const s of similarAsanasFromApi || []) put(s);
   }
 
+  const similarByCanon = new Map();
+  for (const s of similarAsanasFromApi || []) {
+    const k = canonicalAsanaId(s?.id);
+    if (k) similarByCanon.set(k, s);
+  }
+
   if (allAsanas?.length) {
     const tryAddRaw = (raw) => {
       const k = canonicalAsanaId(raw);
       if (!k || k === my || map.has(k)) return;
       const full = byCanon.get(k);
-      if (full) map.set(k, full);
+      if (full) {
+        map.set(k, full);
+        return;
+      }
+      const fromSimilar = similarByCanon.get(k);
+      if (fromSimilar) put(fromSimilar);
     };
     for (const raw of ownerAsana.same_as_ids || []) tryAddRaw(raw);
     for (const o of allAsanas) {
@@ -152,8 +163,8 @@ export function sameAsOtherNameVariantsForOwner(
 }
 
 /**
- * Модалка «Посмотреть соответствия»: весь кластер sameAs + записи с тем же
- * русским названием в других источниках (отдельно от блока «другие названия»).
+ * Модалка «Посмотреть соответствия»: только реальные связи isSameAs (явные и
+ * выведенные reasoner), в том числе с записями с тем же русским названием.
  */
 export function buildCorrespondencesListForOwner(
   ownerAsana,
@@ -164,7 +175,6 @@ export function buildCorrespondencesListForOwner(
 ) {
   if (!ownerAsana?.id || !Array.isArray(allAsanas)) return [];
   const subjectCanon = canonicalAsanaId(ownerAsana.id);
-  const nameLower = (ownerAsana.name?.name_ru || '').toLowerCase().trim();
 
   const byCanon = new Map();
   const byCanonRef = new Map();
@@ -210,15 +220,6 @@ export function buildCorrespondencesListForOwner(
   );
   for (const s of cluster) {
     add(s, 'same_as', inferredByCanon.get(canonicalAsanaId(s.id)) === true);
-  }
-
-  if (nameLower) {
-    for (const a of allAsanas) {
-      const k = canonicalAsanaId(a.id);
-      if (!k || k === subjectCanon) continue;
-      if ((a.name?.name_ru || '').toLowerCase().trim() !== nameLower) continue;
-      add(a, 'same_name_other_source', false);
-    }
   }
 
   return [...byCanon.values()].sort((a, b) =>

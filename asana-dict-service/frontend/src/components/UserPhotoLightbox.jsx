@@ -259,17 +259,14 @@ export default function UserPhotoLightbox({
         if (!owner) {
           owner = await asanasAPI.getById(sameAsLinksSubjectId).catch(() => null);
         }
-        const nameRu = owner?.name?.name_ru;
-        const [similar, byName] = await Promise.all([
-          asanasAPI.getSimilarAsanas(sameAsLinksSubjectId).catch(() => []),
-          nameRu ? asanasAPI.getByNameRu(nameRu).catch(() => []) : Promise.resolve([]),
-        ]);
+        const similar = await asanasAPI
+          .getSimilarAsanas(sameAsLinksSubjectId)
+          .catch(() => []);
         if (cancelled) return;
         setModalSimilarLinks(similar || []);
         const pool = await mergeSameAsCluster([
           ...allAsanas,
           ...(owner ? [owner] : []),
-          ...(byName || []),
           ...(similar || []),
         ]);
         if (!cancelled) setModalCatalogPool(pool);
@@ -1274,11 +1271,6 @@ export default function UserPhotoLightbox({
                             онтологию.
                           </p>
                         )}
-                        {sim.correspondence_kind === 'same_name_other_source' && (
-                          <p className="asana-sameas-links-kind-badge" role="note">
-                            То же русское название, другой источник в каталоге
-                          </p>
-                        )}
                       </div>
                       <div className="asana-sameas-links-item-actions">
                         <Link
@@ -1312,17 +1304,7 @@ export default function UserPhotoLightbox({
                           >
                             Удалить соответствие
                           </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-primary asana-sameas-links-assert"
-                            onClick={() =>
-                              handleAssertExplicitSameAs(sameAsLinksSubjectId, sim.id)
-                            }
-                          >
-                            Добавить соответствие
-                          </button>
-                        )}
+                        ) : null}
                       </div>
                     </li>
                     );
