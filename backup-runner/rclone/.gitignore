@@ -1,0 +1,2 @@
+# Локальная авторизация rclone → Google Drive (OAuth token). Не коммитить.
+rclone.conf
