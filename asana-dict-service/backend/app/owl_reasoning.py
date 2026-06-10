@@ -28,6 +28,12 @@ def inject_is_same_as_owl_axioms(g: Graph, is_same_as_property) -> None:
     g.add((is_same_as_property, RDF.type, OWL.TransitiveProperty))
 
 
+def inject_not_same_as_owl_axioms(g: Graph, not_same_as_property) -> None:
+    """TBox: notSameAsObject — симметричное, не транзитивное."""
+    g.add((not_same_as_property, RDF.type, OWL.ObjectProperty))
+    g.add((not_same_as_property, RDF.type, OWL.SymmetricProperty))
+
+
 def apply_owl2_rl_inference(g: Graph) -> int:
     """
     Расширяет граф g выведенными триплетами по OWL 2 RL.

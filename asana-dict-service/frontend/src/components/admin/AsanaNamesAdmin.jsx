@@ -17,9 +17,10 @@ const AsanaNamesAdmin = () => {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  /** name_asc | name_desc */
+  /** name_asc | name_desc | created_desc */
   const [sortBy, setSortBy] = useState('name_asc');
   const [nameSearch, setNameSearch] = useState('');
+  const [onlyRecentFilter, setOnlyRecentFilter] = useState(false);
 
   const loadNames = useCallback(async () => {
     try {
@@ -121,10 +122,23 @@ const AsanaNamesAdmin = () => {
     }
   };
 
+  const latestImportBatchId = useMemo(() => {
+    const ids = names.map((n) => n.import_batch_id).filter((id) => id != null);
+    if (!ids.length) return null;
+    return Math.max(...ids);
+  }, [names]);
+
+  const lastImportNameIds = useMemo(() => {
+    if (latestImportBatchId == null) return new Set();
+    return new Set(
+      names.filter((n) => n.import_batch_id === latestImportBatchId).map((n) => n.id)
+    );
+  }, [names, latestImportBatchId]);
+
   const displayedNames = useMemo(() => {
     const list = Array.isArray(names) ? [...names] : [];
     const q = nameSearch.trim().toLowerCase();
-    const filtered = q
+    let filtered = q
       ? list.filter((row) => {
           const blob = [row.name_ru, row.name_sanskrit, row.transliteration, row.definition]
             .filter(Boolean)
@@ -133,14 +147,24 @@ const AsanaNamesAdmin = () => {
           return blob.includes(q);
         })
       : list;
+    if (onlyRecentFilter) {
+      filtered = filtered.filter((row) => lastImportNameIds.has(row.id));
+    }
     const collator = new Intl.Collator('ru', { sensitivity: 'base' });
-    if (sortBy === 'name_asc') {
+    if (sortBy === 'created_desc') {
+      filtered.sort((a, b) => {
+        const ta = a.name_created_at ? new Date(a.name_created_at).getTime() : 0;
+        const tb = b.name_created_at ? new Date(b.name_created_at).getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        return collator.compare(a.name_ru || '', b.name_ru || '');
+      });
+    } else if (sortBy === 'name_asc') {
       filtered.sort((a, b) => collator.compare(a.name_ru || '', b.name_ru || ''));
     } else {
       filtered.sort((a, b) => collator.compare(b.name_ru || '', a.name_ru || ''));
     }
     return filtered;
-  }, [names, sortBy, nameSearch]);
+  }, [names, sortBy, nameSearch, onlyRecentFilter, lastImportNameIds]);
 
   if (loading) {
     return <div className="loading">Загрузка названий...</div>;
@@ -171,6 +195,15 @@ const AsanaNamesAdmin = () => {
             spellCheck={false}
           />
         </div>
+            <label className="admin-names-recent-filter" title="Показать только названия из последнего импорта Excel">
+              <input
+                type="checkbox"
+                checked={onlyRecentFilter}
+                onChange={(e) => setOnlyRecentFilter(e.target.checked)}
+                disabled={!lastImportNameIds.size}
+              />
+              Только из последнего импорта
+            </label>
         <div className="admin-names-sort-wrap">
           <label htmlFor="asana-names-sort" className="admin-names-sort-label">
             Сортировка
@@ -183,12 +216,18 @@ const AsanaNamesAdmin = () => {
           >
             <option value="name_asc">По алфавиту (А → Я)</option>
             <option value="name_desc">По алфавиту (Я → А)</option>
+            <option value="created_desc">Сначала новые</option>
           </select>
         </div>
         <button type="button" className="btn-primary" onClick={openCreate}>
           Добавить название
         </button>
       </div>
+
+      <p className="admin-names-recent-hint">
+        Оранжевым выделены все названия из последнего импорта Excel. Галочка оставляет в
+        таблице только их.
+      </p>
 
       {error && (
         <div className="error-message admin-error-dismissible">
@@ -214,15 +253,23 @@ const AsanaNamesAdmin = () => {
             {displayedNames.length === 0 && (
               <tr>
                 <td colSpan={5} className="admin-names-empty-row">
-                  {nameSearch.trim()
-                    ? 'Ничего не найдено — измените запрос поиска.'
-                    : 'Нет записей.'}
+                  {onlyRecentFilter
+                    ? 'В последнем импорте названий не найдено. Снимите фильтр или выполните импорт.'
+                    : nameSearch.trim()
+                      ? 'Ничего не найдено — измените запрос поиска.'
+                      : 'Нет записей.'}
                 </td>
               </tr>
             )}
-            {displayedNames.map((row) => (
-              <tr key={row.id}>
-                <td>{row.name_ru}</td>
+            {displayedNames.map((row) => {
+              const isRecent = lastImportNameIds.has(row.id);
+              return (
+              <tr key={row.id} className={isRecent ? 'admin-names-row--recent' : undefined}>
+                <td>
+                  <span className={isRecent ? 'admin-names-cell--recent' : undefined}>
+                    {row.name_ru}
+                  </span>
+                </td>
                 <td>{row.name_sanskrit || '—'}</td>
                 <td>{row.transliteration || '—'}</td>
                 <td
@@ -244,7 +291,8 @@ const AsanaNamesAdmin = () => {
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>

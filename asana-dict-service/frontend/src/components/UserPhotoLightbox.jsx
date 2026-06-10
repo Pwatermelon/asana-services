@@ -1,23 +1,32 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { useAuth } from '../contexts/AuthContext';
-import { asanaPagePath } from './CompactAsanaRow';
+import { asanaPagePath, asanaPagePathSafe } from './CompactAsanaRow';
 import {
   canonicalAsanaId,
-  combinedSameAsForOwner,
-  catalogRecordSecondaryParts,
   catalogRepresentativeByNameRu,
-  flattenLightboxOtherNameEntries,
-  sameAsOtherNameVariantsForOwner,
-  buildCorrespondencesListForOwner,
-  mergeSameAsCluster,
   galleryImageUrl,
-  getPhotoSrc,
   buildPhotoSourceMeta,
 } from '../utils/asanaSameAs';
-import { normalizeCatalogNameKey } from '../utils/catalogSearch';
+import {
+  buildCorrespondencesListForPhoto,
+  buildNotSameAsListForPhoto,
+  canonicalPhotoId,
+  decidedPhotoIdsForSubject,
+  flattenCatalogPhotos,
+  linkedPhotosOtherNames,
+  linkedPhotosSameName,
+  normalizeMatchCatalogRows,
+  photoRowSecondaryParts,
+  resolvePhotoId,
+} from '../utils/photoSameAs';
+import {
+  buildFocusPhotoQuery,
+  stashFocusPhoto,
+  findSlideIndexByPhoto,
+} from '../utils/catalogFocus';
 
 const normRotation = (d) => ((d % 360) + 360) % 360;
 
@@ -62,24 +71,24 @@ export default function UserPhotoLightbox({
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMatchModal, setShowMatchModal] = useState(false);
-  const [matchSubjectAsanaId, setMatchSubjectAsanaId] = useState(null);
+  const [matchSubjectPhotoId, setMatchSubjectPhotoId] = useState(null);
   const [matchSearchQuery, setMatchSearchQuery] = useState('');
-  const [selectedMatchAsana, setSelectedMatchAsana] = useState(null);
-
-  const [showSameAsLinksModal, setShowSameAsLinksModal] = useState(false);
-  const [sameAsLinksSubjectId, setSameAsLinksSubjectId] = useState(null);
-  const [sameAsLinksSearchQuery, setSameAsLinksSearchQuery] = useState('');
-  const [modalSimilarLinks, setModalSimilarLinks] = useState([]);
-  const [modalCatalogPool, setModalCatalogPool] = useState([]);
-  const [modalSimilarLoading, setModalSimilarLoading] = useState(false);
-
-  const [matchAllCatalog, setMatchAllCatalog] = useState([]);
-  const [matchExcludeLinkedCanon, setMatchExcludeLinkedCanon] = useState(() => new Set());
+  const [matchAllPhotos, setMatchAllPhotos] = useState([]);
+  const [matchExcludePhotoIds, setMatchExcludePhotoIds] = useState(() => new Set());
   const [matchSearchLoading, setMatchSearchLoading] = useState(false);
+  const [matchCatalogLoaded, setMatchCatalogLoaded] = useState(false);
 
-  /** Свежий /similar и полный кластер sameAs для лайтбокса (страница часто без всех связей). */
+  const [showViewLinksModal, setShowViewLinksModal] = useState(false);
+  const [viewLinksSubjectPhotoId, setViewLinksSubjectPhotoId] = useState(null);
+  /** same | not_same — вкладки только в модалке просмотра */
+  const [viewLinksTab, setViewLinksTab] = useState('same');
+  const [viewLinksSearchQuery, setViewLinksSearchQuery] = useState('');
+  const [modalSimilarLinks, setModalSimilarLinks] = useState([]);
+  const [modalNotSameLinks, setModalNotSameLinks] = useState([]);
+  const [viewLinksLoading, setViewLinksLoading] = useState(false);
+
+  /** Свежий /api/photo/{id}/similar для текущего слайда. */
   const [lightboxSimilarFresh, setLightboxSimilarFresh] = useState([]);
-  const [lightboxAsanasPool, setLightboxAsanasPool] = useState([]);
 
   const [showAddPhotoForm, setShowAddPhotoForm] = useState(false);
   const [addPhotoTarget, setAddPhotoTarget] = useState(null);
@@ -89,15 +98,53 @@ export default function UserPhotoLightbox({
   const [photoEditorContext, setPhotoEditorContext] = useState(null);
   const [editorRotationDeg, setEditorRotationDeg] = useState(0);
   const [editorSaving, setEditorSaving] = useState(false);
+  const [linksRefreshTick, setLinksRefreshTick] = useState(0);
+
+  const stableSlidesRef = useRef([]);
+  const lastGoodSlideRef = useRef(null);
+  const displaySlides = useMemo(() => {
+    if (slides.length > 0) {
+      stableSlidesRef.current = slides;
+      return slides;
+    }
+    if (open && stableSlidesRef.current.length > 0) {
+      return stableSlidesRef.current;
+    }
+    return slides;
+  }, [slides, open]);
+
+  useEffect(() => {
+    if (!open) {
+      stableSlidesRef.current = [];
+      lastGoodSlideRef.current = null;
+    }
+  }, [open]);
+
+  useEffect(() => () => {
+    document.body.style.overflow = '';
+  }, []);
 
   useEffect(() => {
     setMenuOpen(false);
   }, [index, open]);
 
   useEffect(() => {
-    if (!open) return undefined;
-    const len = slides.length;
-    if (len === 0) return undefined;
+    if (!open) {
+      document.body.style.overflow = '';
+      return undefined;
+    }
+    const len = displaySlides.length;
+    if (len === 0) {
+      document.body.style.overflow = 'hidden';
+      const onKey = (e) => {
+        if (e.key === 'Escape') onClose?.();
+      };
+      window.addEventListener('keydown', onKey);
+      return () => {
+        document.body.style.overflow = '';
+        window.removeEventListener('keydown', onKey);
+      };
+    }
     const onKey = (e) => {
       if (e.key === 'Escape') onClose?.();
       if (e.key === 'ArrowLeft') {
@@ -115,21 +162,42 @@ export default function UserPhotoLightbox({
       document.body.style.overflow = '';
       window.removeEventListener('keydown', onKey);
     };
-  }, [open, slides, onClose, setIndex]);
+  }, [open, displaySlides, onClose, setIndex]);
 
   useEffect(() => {
     if (!open) return;
-    if (!slides.length) return;
-    if (index >= slides.length) setIndex(slides.length - 1);
-  }, [open, slides, index, setIndex]);
+    if (!displaySlides.length) return;
+    if (index >= displaySlides.length) setIndex(displaySlides.length - 1);
+    else if (index < 0) setIndex(0);
+  }, [open, displaySlides, index, setIndex]);
 
-  const lbSlide = slides[index] || null;
+  const safeIndex =
+    displaySlides.length > 0
+      ? Math.max(0, Math.min(index, displaySlides.length - 1))
+      : 0;
+  const lbSlideFromArray =
+    displaySlides.length > 0 ? displaySlides[safeIndex] : null;
 
-  const effectiveSimilarAsanas = useMemo(() => {
+  if (open && lbSlideFromArray) {
+    lastGoodSlideRef.current = lbSlideFromArray;
+  }
+
+  const lbSlide =
+    lbSlideFromArray || (open ? lastGoodSlideRef.current : null);
+  const lbSlideSrc = lbSlide
+    ? galleryImageUrl(lbSlide.photo, photoGalleryVersion) || lbSlide.src || ''
+    : '';
+  const lbSubjectPhotoId = useMemo(() => {
+    if (!lbSlide) return null;
+    return resolvePhotoId(lbSlide.photo, lbSlide.photoIndexInOwner);
+  }, [lbSlide]);
+
+  const effectiveSimilarPhotos = useMemo(() => {
     const byK = new Map();
     const ingest = (s) => {
-      if (!s?.id) return;
-      const k = canonicalAsanaId(s.id);
+      const pid = s?.photo_id || s?.id;
+      if (!pid) return;
+      const k = canonicalPhotoId(pid);
       if (!k) return;
       const prev = byK.get(k);
       byK.set(
@@ -138,74 +206,46 @@ export default function UserPhotoLightbox({
           ? {
               ...prev,
               ...s,
-              id: s.id ?? prev.id,
+              photo_id: pid,
               same_as_link_inferred:
                 prev.same_as_link_inferred === true || s.same_as_link_inferred === true,
             }
-          : s
+          : { ...s, photo_id: pid }
       );
     };
-    for (const s of similarAsanas || []) ingest(s);
     for (const s of lightboxSimilarFresh || []) ingest(s);
     return [...byK.values()];
-  }, [similarAsanas, lightboxSimilarFresh]);
-
-  const effectiveAllAsanas = useMemo(() => {
-    if (lightboxAsanasPool.length) return lightboxAsanasPool;
-    return allAsanas;
-  }, [lightboxAsanasPool, allAsanas]);
+  }, [lightboxSimilarFresh]);
 
   const lbSlideOwnerFull = useMemo(() => {
-    if (!lbSlide || !effectiveAllAsanas.length) return null;
+    if (!lbSlide || !allAsanas.length) return null;
     return (
-      effectiveAllAsanas.find((a) => a.id === lbSlide.ownerId) ||
-      effectiveAllAsanas.find(
+      allAsanas.find((a) => a.id === lbSlide.ownerId) ||
+      allAsanas.find(
         (a) => canonicalAsanaId(a.id) === canonicalAsanaId(lbSlide.ownerId)
       ) ||
       null
     );
-  }, [lbSlide, effectiveAllAsanas]);
+  }, [lbSlide, allAsanas]);
 
   useEffect(() => {
-    if (!open || !lbSlide?.ownerId) {
+    if (!open || !lbSubjectPhotoId) {
       setLightboxSimilarFresh([]);
-      setLightboxAsanasPool([]);
-      return undefined;
-    }
-    const ownerFromPage =
-      allAsanas.find((a) => a.id === lbSlide.ownerId) ||
-      allAsanas.find(
-        (a) => canonicalAsanaId(a.id) === canonicalAsanaId(lbSlide.ownerId)
-      );
-    if (!ownerFromPage?.id) {
-      setLightboxSimilarFresh([]);
-      setLightboxAsanasPool([]);
       return undefined;
     }
     let cancelled = false;
-    const ownerId = ownerFromPage.id;
     (async () => {
       try {
-        const similar = await asanasAPI.getSimilarAsanas(ownerId).catch(() => []);
-        if (cancelled) return;
-        setLightboxSimilarFresh(similar || []);
-        const pool = await mergeSameAsCluster([
-          ...allAsanas,
-          ...(similar || []),
-          ownerFromPage,
-        ]);
-        if (!cancelled) setLightboxAsanasPool(pool);
+        const similar = await asanasAPI.getSimilarPhotos(lbSubjectPhotoId).catch(() => []);
+        if (!cancelled) setLightboxSimilarFresh(similar || []);
       } catch {
-        if (!cancelled) {
-          setLightboxSimilarFresh([]);
-          setLightboxAsanasPool([...allAsanas]);
-        }
+        if (!cancelled) setLightboxSimilarFresh([]);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, lbSlide?.ownerId, lbSlide, allAsanas]);
+  }, [open, lbSubjectPhotoId, photoGalleryVersion, linksRefreshTick]);
 
   const effectivePageAsana = useMemo(() => {
     if (typeof getPageAsana === 'function' && lbSlide && lbSlideOwnerFull) {
@@ -237,202 +277,179 @@ export default function UserPhotoLightbox({
   }, [getTitleParts, lbSlide, lbSlideOwnerFull, defaultTitle]);
 
   const lightboxSameNameLinkedPhotos = useMemo(() => {
-    if (!open || !lbSlide || !effectiveAllAsanas.length) return [];
-    const owner = lbSlideOwnerFull;
-    if (!owner) return [];
-    const nameLower = owner.name?.name_ru?.toLowerCase().trim();
-    if (!nameLower) return [];
-    const lid = lbSlide.linkId;
-    const linked = combinedSameAsForOwner(
-      owner,
-      effectivePageAsana,
-      effectiveAllAsanas,
-      effectiveSimilarAsanas
+    if (!open || !lbSlideOwnerFull || !lbSubjectPhotoId) return [];
+    const linked = linkedPhotosSameName(
+      lbSlideOwnerFull,
+      effectiveSimilarPhotos,
+      lbSubjectPhotoId
     );
-    const out = [];
-    for (const other of linked) {
-      if (canonicalAsanaId(other.id) === canonicalAsanaId(owner.id)) continue;
-      if (other.name?.name_ru?.toLowerCase().trim() !== nameLower) continue;
-      if (!other.photos?.length) continue;
-      other.photos.forEach((photo, idx) => {
-        const { caption, linkId: pLid } = buildPhotoSourceMeta(photo, other);
-        if (lid && pLid === lid) return;
-        const img = galleryImageUrl(photo, photoGalleryVersion);
-        const key =
-          typeof photo === 'object' && photo.id ? String(photo.id) : `${other.id}#photo_${idx}`;
-        out.push({
-          key,
-          src: img,
-          caption,
-          linkId: pLid,
-          ownerId: other.id,
-          photo,
-          photoIndexInOwner: idx,
-        });
-      });
-    }
-    return out;
-  }, [
-    open,
-    lbSlide,
-    lbSlideOwnerFull,
-    effectiveAllAsanas,
-    effectivePageAsana,
-    effectiveSimilarAsanas,
-    photoGalleryVersion,
-  ]);
+    return linked.map((p) => {
+      const pid = p.photo_id || p.id;
+      const thumb =
+        p.image != null
+          ? galleryImageUrl({ image: p.image }, photoGalleryVersion)
+          : galleryImageUrl(p.photo || p, photoGalleryVersion);
+      const srcCaption =
+        p.source && typeof p.source === 'object'
+          ? [p.source.author, p.source.title].filter(Boolean).join(' — ')
+          : buildPhotoSourceMeta(p.photo, lbSlideOwnerFull).caption;
+      return {
+        key: canonicalPhotoId(pid) || String(pid),
+        photo_id: pid,
+        src: thumb,
+        caption: srcCaption,
+        asana_id: p.asana_id,
+        nameRu: p.name?.name_ru || '',
+      };
+    });
+  }, [open, lbSlideOwnerFull, lbSubjectPhotoId, effectiveSimilarPhotos, photoGalleryVersion]);
 
   const lightboxSameSourceSiblings = useMemo(() => {
     if (!lbSlide || !lbSlide.linkId) return [];
-    return slides
+    return displaySlides
       .map((slide, i) => ({ slide, i }))
       .filter(({ slide }) => slide.linkId === lbSlide.linkId);
-  }, [slides, lbSlide]);
-
-  const lightboxOtherNameVariants = useMemo(() => {
-    if (!open || !lbSlide || !lbSlideOwnerFull) return [];
-    return sameAsOtherNameVariantsForOwner(
-      lbSlideOwnerFull,
-      effectivePageAsana,
-      effectiveAllAsanas,
-      effectiveSimilarAsanas
-    );
-  }, [
-    open,
-    lbSlide,
-    lbSlideOwnerFull,
-    effectivePageAsana,
-    effectiveAllAsanas,
-    effectiveSimilarAsanas,
-  ]);
+  }, [displaySlides, lbSlide]);
 
   const lightboxOtherNameRows = useMemo(() => {
-    if (!lightboxOtherNameVariants.length) return [];
-    return flattenLightboxOtherNameEntries(
-      lightboxOtherNameVariants,
-      effectiveAllAsanas,
-      photoGalleryVersion,
-      effectivePageAsana
+    if (!open || !lbSlideOwnerFull || !lbSubjectPhotoId) return [];
+    const linked = linkedPhotosOtherNames(
+      lbSlideOwnerFull,
+      effectiveSimilarPhotos,
+      lbSubjectPhotoId
     );
-  }, [lightboxOtherNameVariants, effectiveAllAsanas, photoGalleryVersion, effectivePageAsana]);
+    return linked
+      .map((p) => {
+        const nameRu = (p.name?.name_ru || '').trim() || 'Асана';
+        const linkTarget =
+          catalogRepresentativeByNameRu(allAsanas, nameRu) ||
+          allAsanas.find((a) => a.id === p.asana_id) ||
+          null;
+        const thumb =
+          p.image != null
+            ? galleryImageUrl({ image: p.image }, photoGalleryVersion)
+            : galleryImageUrl(p.photo || p, photoGalleryVersion);
+        const sourceCaption =
+          p.source && typeof p.source === 'object'
+            ? [p.source.author, p.source.title].filter(Boolean).join(' — ') ||
+              'Источник не указан'
+            : 'Источник не указан';
+        return {
+          key: canonicalPhotoId(p.photo_id || p.id) || String(p.photo_id),
+          nameRu,
+          photoSrc: thumb,
+          sourceCaption,
+          sourceMuted: false,
+          linkTarget,
+        };
+      })
+      .sort((a, b) =>
+        (a.nameRu || '').localeCompare(b.nameRu || '', 'ru', { sensitivity: 'base' })
+      );
+  }, [
+    open,
+    lbSlideOwnerFull,
+    lbSubjectPhotoId,
+    effectiveSimilarPhotos,
+    allAsanas,
+    photoGalleryVersion,
+  ]);
 
   const location = useLocation();
+  const navigate = useNavigate();
 
-  const findAsanaById = (list, asanaId) => {
-    if (!asanaId || !list?.length) return null;
-    const canon = canonicalAsanaId(asanaId);
-    return (
-      list.find((a) => a.id === asanaId) ||
-      list.find((a) => canonicalAsanaId(a.id) === canon) ||
-      null
+  const closeMatchModal = () => {
+    setShowMatchModal(false);
+    setMatchSubjectPhotoId(null);
+    setMatchSearchQuery('');
+    setMatchCatalogLoaded(false);
+  };
+
+  const loadMatchCatalogRows = async () => {
+    try {
+      const index = await asanasAPI.getPhotosForMatch();
+      const normalized = normalizeMatchCatalogRows(index, photoGalleryVersion);
+      if (normalized.length) return normalized;
+    } catch (err) {
+      console.warn('getPhotosForMatch failed, falling back to getAll:', err);
+    }
+    try {
+      const all = await asanasAPI.getAll();
+      const normalized = normalizeMatchCatalogRows(all, photoGalleryVersion);
+      if (normalized.length) return normalized;
+    } catch (err) {
+      console.warn('getAll for match modal failed:', err);
+    }
+    return normalizeMatchCatalogRows(allAsanas, photoGalleryVersion);
+  };
+
+  const closeViewLinksModal = () => {
+    setShowViewLinksModal(false);
+    setViewLinksSubjectPhotoId(null);
+    setViewLinksSearchQuery('');
+    setViewLinksTab('same');
+  };
+
+  const refreshMatchExclude = async (subjectPhotoId) => {
+    if (!subjectPhotoId) return;
+    const [similar, notSame] = await Promise.all([
+      asanasAPI.getSimilarPhotos(subjectPhotoId).catch(() => []),
+      asanasAPI.getNotSameAsPhotos(subjectPhotoId).catch(() => []),
+    ]);
+    let flat = matchAllPhotos;
+    if (!flat.length) {
+      flat = await loadMatchCatalogRows();
+      if (flat.length) setMatchAllPhotos(flat);
+    }
+    setMatchExcludePhotoIds(
+      decidedPhotoIdsForSubject(subjectPhotoId, similar, flat, notSame)
     );
   };
 
-  useEffect(() => {
-    if (!showSameAsLinksModal || !sameAsLinksSubjectId) {
-      setModalSimilarLinks([]);
-      setModalCatalogPool([]);
-      setModalSimilarLoading(false);
-      return undefined;
-    }
-    let cancelled = false;
-    setModalSimilarLoading(true);
-    (async () => {
-      try {
-        let owner = findAsanaById(allAsanas, sameAsLinksSubjectId);
-        if (!owner) {
-          owner = await asanasAPI.getById(sameAsLinksSubjectId).catch(() => null);
-        }
-        const similar = await asanasAPI
-          .getSimilarAsanas(sameAsLinksSubjectId)
-          .catch(() => []);
-        if (cancelled) return;
-        setModalSimilarLinks(similar || []);
-        const pool = await mergeSameAsCluster([
-          ...allAsanas,
-          ...(owner ? [owner] : []),
-          ...(similar || []),
-        ]);
-        if (!cancelled) setModalCatalogPool(pool);
-      } catch {
-        if (!cancelled) {
-          setModalSimilarLinks([]);
-          setModalCatalogPool([...allAsanas]);
-        }
-      } finally {
-        if (!cancelled) setModalSimilarLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [showSameAsLinksModal, sameAsLinksSubjectId, allAsanas]);
-
-  const sameAsLinksForModal = useMemo(() => {
-    if (!showSameAsLinksModal || !sameAsLinksSubjectId) return [];
-    const catalog =
-      modalCatalogPool.length > 0 ? modalCatalogPool : effectiveAllAsanas;
-    const owner = findAsanaById(catalog, sameAsLinksSubjectId);
-    if (!owner) return [];
-
-    const inferredByCanon = new Map();
-    const similarUnion = [];
-    const seenSimilar = new Set();
-    for (const s of [...effectiveSimilarAsanas, ...modalSimilarLinks]) {
-      const k = canonicalAsanaId(s?.id);
-      if (!k || seenSimilar.has(k)) continue;
-      seenSimilar.add(k);
-      similarUnion.push(s);
-      if (s.same_as_link_inferred === true) {
-        inferredByCanon.set(k, true);
-      }
-    }
-
-    return buildCorrespondencesListForOwner(
-      owner,
-      effectivePageAsana,
-      catalog,
-      similarUnion,
-      inferredByCanon
-    );
-  }, [
-    showSameAsLinksModal,
-    sameAsLinksSubjectId,
-    effectiveAllAsanas,
-    modalCatalogPool,
-    modalSimilarLinks,
-    effectiveSimilarAsanas,
-    effectivePageAsana,
-  ]);
+  const refreshViewLinkLists = async (subjectPhotoId) => {
+    if (!subjectPhotoId) return;
+    const [similar, notSame] = await Promise.all([
+      asanasAPI.getSimilarPhotos(subjectPhotoId).catch(() => []),
+      asanasAPI.getNotSameAsPhotos(subjectPhotoId).catch(() => []),
+    ]);
+    setModalSimilarLinks(similar || []);
+    setModalNotSameLinks(notSame || []);
+  };
 
   useEffect(() => {
-    if (!showMatchModal || !matchSubjectAsanaId) {
-      setMatchAllCatalog([]);
-      setMatchExcludeLinkedCanon(new Set());
+    if (!showMatchModal || !matchSubjectPhotoId) {
+      setMatchAllPhotos([]);
+      setMatchExcludePhotoIds(new Set());
       setMatchSearchLoading(false);
+      setMatchCatalogLoaded(false);
       return undefined;
     }
     let cancelled = false;
+    const seedFlat = normalizeMatchCatalogRows(allAsanas, photoGalleryVersion);
+    if (seedFlat.length) {
+      setMatchAllPhotos(seedFlat);
+    }
     setMatchSearchLoading(true);
+    setMatchCatalogLoaded(false);
     (async () => {
       try {
-        const [all, similar] = await Promise.all([
-          asanasAPI.getAll(),
-          asanasAPI.getSimilarAsanas(matchSubjectAsanaId).catch(() => []),
+        const [flat, similar, notSame] = await Promise.all([
+          loadMatchCatalogRows(),
+          asanasAPI.getSimilarPhotos(matchSubjectPhotoId).catch(() => []),
+          asanasAPI.getNotSameAsPhotos(matchSubjectPhotoId).catch(() => []),
         ]);
         if (cancelled) return;
-        setMatchAllCatalog(Array.isArray(all) ? all : []);
-        const linked = new Set();
-        for (const s of similar || []) {
-          const k = canonicalAsanaId(s?.id);
-          if (k) linked.add(k);
-        }
-        setMatchExcludeLinkedCanon(linked);
+        setMatchAllPhotos(flat);
+        setMatchCatalogLoaded(true);
+        setMatchExcludePhotoIds(
+          decidedPhotoIdsForSubject(matchSubjectPhotoId, similar, flat, notSame)
+        );
       } catch {
         if (!cancelled) {
-          setMatchAllCatalog([]);
-          setMatchExcludeLinkedCanon(new Set());
+          const fallback = normalizeMatchCatalogRows(allAsanas, photoGalleryVersion);
+          setMatchAllPhotos(fallback);
+          setMatchCatalogLoaded(true);
+          setMatchExcludePhotoIds(new Set([canonicalPhotoId(matchSubjectPhotoId)].filter(Boolean)));
         }
       } finally {
         if (!cancelled) setMatchSearchLoading(false);
@@ -441,59 +458,115 @@ export default function UserPhotoLightbox({
     return () => {
       cancelled = true;
     };
-  }, [showMatchModal, matchSubjectAsanaId]);
+  }, [showMatchModal, matchSubjectPhotoId, photoGalleryVersion, allAsanas]);
+
+  useEffect(() => {
+    if (!showViewLinksModal || !viewLinksSubjectPhotoId) {
+      setModalSimilarLinks([]);
+      setModalNotSameLinks([]);
+      setViewLinksLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setViewLinksLoading(true);
+    (async () => {
+      try {
+        const [similar, notSame] = await Promise.all([
+          asanasAPI.getSimilarPhotos(viewLinksSubjectPhotoId).catch(() => []),
+          asanasAPI.getNotSameAsPhotos(viewLinksSubjectPhotoId).catch(() => []),
+        ]);
+        if (!cancelled) {
+          setModalSimilarLinks(similar || []);
+          setModalNotSameLinks(notSame || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setModalSimilarLinks([]);
+          setModalNotSameLinks([]);
+        }
+      } finally {
+        if (!cancelled) setViewLinksLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showViewLinksModal, viewLinksSubjectPhotoId, photoGalleryVersion, linksRefreshTick]);
+
+  const sameAsLinksForModal = useMemo(() => {
+    if (!showViewLinksModal || !viewLinksSubjectPhotoId) return [];
+    return buildCorrespondencesListForPhoto(viewLinksSubjectPhotoId, modalSimilarLinks);
+  }, [showViewLinksModal, viewLinksSubjectPhotoId, modalSimilarLinks]);
+
+  const notSameAsLinksForModal = useMemo(() => {
+    if (!showViewLinksModal || !viewLinksSubjectPhotoId) return [];
+    return buildNotSameAsListForPhoto(viewLinksSubjectPhotoId, modalNotSameLinks);
+  }, [showViewLinksModal, viewLinksSubjectPhotoId, modalNotSameLinks]);
 
   const filteredSameAsLinksForModal = useMemo(() => {
-    const q = sameAsLinksSearchQuery.trim().toLowerCase();
+    const q = viewLinksSearchQuery.trim().toLowerCase();
     if (!q) return sameAsLinksForModal;
-    return sameAsLinksForModal.filter((sim) => {
-      const nameRu = sim.name?.name_ru?.toLowerCase() || '';
-      const nameSa = sim.name?.name_sanskrit?.toLowerCase() || '';
-      const edition = catalogRecordSecondaryParts(sim).secondary.toLowerCase();
-      return nameRu.includes(q) || nameSa.includes(q) || edition.includes(q);
+    return sameAsLinksForModal.filter((row) => {
+      const parts = photoRowSecondaryParts(row);
+      const nameSa = row.name?.name_sanskrit?.toLowerCase() || '';
+      return (
+        parts.nameRu.toLowerCase().includes(q) ||
+        nameSa.includes(q) ||
+        parts.sourceCaption.toLowerCase().includes(q)
+      );
     });
-  }, [sameAsLinksForModal, sameAsLinksSearchQuery]);
+  }, [sameAsLinksForModal, viewLinksSearchQuery]);
 
-  const filteredAsanasForMatch = useMemo(() => {
-    if (!matchAllCatalog.length || !matchSubjectAsanaId) return [];
-    const excludeCanon = canonicalAsanaId(matchSubjectAsanaId);
-    const q = matchSearchQuery.trim().toLowerCase();
-    return matchAllCatalog
-      .filter((a) => {
-        const k = canonicalAsanaId(a.id);
-        if (!k || k === excludeCanon || matchExcludeLinkedCanon.has(k)) return false;
+  const filteredNotSameAsLinksForModal = useMemo(() => {
+    const q = viewLinksSearchQuery.trim().toLowerCase();
+    if (!q) return notSameAsLinksForModal;
+    return notSameAsLinksForModal.filter((row) => {
+      const parts = photoRowSecondaryParts(row);
+      const nameSa = row.name?.name_sanskrit?.toLowerCase() || '';
+      return (
+        parts.nameRu.toLowerCase().includes(q) ||
+        nameSa.includes(q) ||
+        parts.sourceCaption.toLowerCase().includes(q)
+      );
+    });
+  }, [notSameAsLinksForModal, viewLinksSearchQuery]);
+
+  const filteredPhotosForMatch = useMemo(() => {
+    if (!matchAllPhotos.length || !matchSubjectPhotoId) return [];
+    return matchAllPhotos
+      .filter((row) => {
+        const k = canonicalPhotoId(row.photo_id);
+        if (!k || matchExcludePhotoIds.has(k)) return false;
+        const q = matchSearchQuery.trim().toLowerCase();
         if (!q) return true;
-        const nameRu = a.name?.name_ru?.toLowerCase() || '';
-        const nameSa = a.name?.name_sanskrit?.toLowerCase() || '';
-        const edition = catalogRecordSecondaryParts(a).secondary.toLowerCase();
-        return nameRu.includes(q) || nameSa.includes(q) || edition.includes(q);
+        const nameRu = row.nameRu?.toLowerCase() || '';
+        const nameSa = row.nameSanskrit?.toLowerCase() || '';
+        const src = row.sourceCaption?.toLowerCase() || '';
+        return nameRu.includes(q) || nameSa.includes(q) || src.includes(q);
       })
       .slice(0, 150);
-  }, [
-    matchAllCatalog,
-    matchSubjectAsanaId,
-    matchSearchQuery,
-    matchExcludeLinkedCanon,
-  ]);
+  }, [matchAllPhotos, matchSubjectPhotoId, matchSearchQuery, matchExcludePhotoIds]);
 
-  const similarPreviewSrc = (similar) => {
-    if (similar.photos?.length) {
-      const p = similar.photos[0];
-      return typeof p === 'object'
-        ? galleryImageUrl(p, photoGalleryVersion)
-        : galleryImageUrl({ image: p }, photoGalleryVersion);
-    }
-    if (similar.photo) {
-      const ph = similar.photo;
-      return typeof ph === 'object' && ph.image
-        ? galleryImageUrl(ph, photoGalleryVersion)
-        : galleryImageUrl({ image: ph }, photoGalleryVersion);
-    }
+  const photoPreviewSrc = (row) => {
+    if (row?.thumbSrc) return row.thumbSrc;
+    if (row?.image) return galleryImageUrl({ image: row.image }, photoGalleryVersion);
     return null;
   };
 
+  const refreshLinksOnly = async () => {
+    setLinksRefreshTick((n) => n + 1);
+    if (lbSubjectPhotoId) {
+      try {
+        const similar = await asanasAPI.getSimilarPhotos(lbSubjectPhotoId);
+        setLightboxSimilarFresh(similar || []);
+      } catch {
+        /* keep previous */
+      }
+    }
+  };
+
   const handleDownloadPhoto = async () => {
-    if (!lbSlide?.src) return;
+    if (!lbSlideSrc) return;
     setMenuOpen(false);
     const baseName = titleParts.title || 'asana';
     const raw = baseName
@@ -502,7 +575,7 @@ export default function UserPhotoLightbox({
       .replace(/\s+/g, '_')
       .slice(0, 72);
     const filename = `${raw || 'asana'}_${index + 1}.jpg`;
-    const url = lbSlide.src;
+    const url = lbSlideSrc;
     try {
       if (url.startsWith('data:') || url.startsWith('blob:')) {
         const a = document.createElement('a');
@@ -540,10 +613,7 @@ export default function UserPhotoLightbox({
     }
   };
 
-  const resolvePhotoIdForApi = (photo, photoIndex) => {
-    if (typeof photo === 'object' && photo?.id) return photo.id;
-    return `photo_${photoIndex}`;
-  };
+  const resolvePhotoIdForApi = (photo, photoIndex) => resolvePhotoId(photo, photoIndex);
 
   const openPhotoEditor = (photo, photoIndex, ownerAsanaId) => {
     const photoId = resolvePhotoIdForApi(photo, photoIndex);
@@ -660,45 +730,171 @@ export default function UserPhotoLightbox({
     }
   };
 
-  const handleMatchAsana = async () => {
-    if (!selectedMatchAsana || !matchSubjectAsanaId) return;
+  const enrichAsanasFromMatchRow = (targetPhotoId) => {
+    const targetCanon = canonicalPhotoId(targetPhotoId);
+    if (!targetCanon) return [];
+    const row = matchAllPhotos.find(
+      (r) => canonicalPhotoId(r.photo_id) === targetCanon
+    );
+    if (!row) return [];
+    return [row.ownerId, row.ownerAsana?.id, row.asana_id].filter(Boolean);
+  };
+
+  const handleSameAsPhoto = async (targetPhotoId) => {
+    if (!matchSubjectPhotoId || !targetPhotoId) return;
+    const enrichIds = enrichAsanasFromMatchRow(targetPhotoId);
     try {
-      await asanasAPI.setSameAsObject(matchSubjectAsanaId, selectedMatchAsana.id);
-      setShowMatchModal(false);
-      setSelectedMatchAsana(null);
-      setMatchSearchQuery('');
-      setMatchSubjectAsanaId(null);
-      onMutation?.();
-      alert('Совпадение успешно указано!');
+      await asanasAPI.setSameAsPhoto(matchSubjectPhotoId, targetPhotoId);
+      await refreshMatchExclude(matchSubjectPhotoId);
+      closeMatchModal();
+      if (enrichIds.length) {
+        onMutation?.({ bumpGallery: false, enrichAsanaIds: enrichIds });
+      }
+      await refreshLinksOnly();
     } catch (error) {
-      alert('Ошибка при указании совпадения');
-      console.error('Error setting same as object:', error);
+      const detail = error.response?.data?.detail;
+      alert(detail || 'Ошибка при указании совпадения');
+      console.error('Error setting same as photo:', error);
     }
   };
 
-  const handleRemoveSameAsForOwner = async (subjectOwnerId, targetAsanaId) => {
-    if (!subjectOwnerId || !targetAsanaId) return;
-    if (!window.confirm('Удалить соответствие с этой записью?')) return;
+  const openMatchRowAsanaPage = (row) => {
+    const ownerId = row.ownerId || row.ownerAsana?.id;
+    if (!ownerId) return;
+    const photoCanon = canonicalPhotoId(row.photo_id);
+    if (!photoCanon) return;
+
+    closeMatchModal();
+
+    /* Та же страница / та же группа по имени — переключить кадр в текущем лайтбоксе. */
+    if (open && displaySlides.length) {
+      const idx = findSlideIndexByPhoto(displaySlides, photoCanon);
+      if (idx >= 0) {
+        setIndex(idx);
+        return;
+      }
+    }
+
+    const target =
+      catalogRepresentativeByNameRu(allAsanas, row.nameRu) ||
+      row.ownerAsana ||
+      allAsanas.find((a) => canonicalAsanaId(a.id) === canonicalAsanaId(ownerId)) ||
+      { id: ownerId, name: { name_ru: row.nameRu || 'Асана' } };
+
+    stashFocusPhoto(photoCanon, ownerId);
+    const path = asanaPagePath(target);
+    const query = buildFocusPhotoQuery(photoCanon, ownerId);
+    onClose();
+    navigate(`${path}?${query}`, { state: { focusPhoto: photoCanon, focusOwner: ownerId } });
+  };
+
+  const handleNotSameAsPhoto = async (targetPhotoId) => {
+    if (!matchSubjectPhotoId || !targetPhotoId) return;
+    if (!window.confirm('Пометить эти фото как «не соответствуют»?')) return;
     try {
-      await asanasAPI.removeSameAsObject(subjectOwnerId, targetAsanaId);
-      onMutation?.();
+      await asanasAPI.setNotSameAsPhoto(matchSubjectPhotoId, targetPhotoId);
+      await refreshMatchExclude(matchSubjectPhotoId);
+      closeMatchModal();
+      await refreshLinksOnly();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      alert(detail || 'Ошибка при добавлении «не соответствует»');
+      console.error('Error setting notSameAs photo:', error);
+    }
+  };
+
+  const handleRemoveSameAsForPhoto = async (subjectPhotoId, targetPhotoId) => {
+    if (!subjectPhotoId || !targetPhotoId) return;
+    if (!window.confirm('Удалить соответствие с этим фото?')) return;
+    try {
+      await asanasAPI.removeSameAsPhoto(subjectPhotoId, targetPhotoId);
+      await refreshViewLinkLists(subjectPhotoId);
+      await refreshLinksOnly();
     } catch (error) {
       alert('Ошибка при удалении соответствия');
-      console.error('Error removing same as object:', error);
+      console.error('Error removing same as photo:', error);
     }
   };
 
-  const handleAssertExplicitSameAs = async (subjectId, targetId) => {
-    if (!subjectId || !targetId) return;
+  const handleRemoveNotSameAsForPhoto = async (subjectPhotoId, targetPhotoId) => {
+    if (!subjectPhotoId || !targetPhotoId) return;
+    if (!window.confirm('Удалить пометку «не соответствует» для этой пары фото?')) return;
     try {
-      await asanasAPI.setSameAsObject(subjectId, targetId);
-      const fresh = await asanasAPI.getSimilarAsanas(subjectId).catch(() => []);
-      setModalSimilarLinks(fresh || []);
-      await onMutation?.();
+      await asanasAPI.removeNotSameAsPhoto(subjectPhotoId, targetPhotoId);
+      await refreshViewLinkLists(subjectPhotoId);
+      await refreshLinksOnly();
+    } catch (error) {
+      alert('Ошибка при удалении «не соответствует»');
+      console.error('Error removing notSameAs photo:', error);
+    }
+  };
+
+  const handleAssertExplicitSameAs = async (subjectPhotoId, targetPhotoId) => {
+    if (!subjectPhotoId || !targetPhotoId) return;
+    try {
+      await asanasAPI.setSameAsPhoto(subjectPhotoId, targetPhotoId);
+      await refreshViewLinkLists(subjectPhotoId);
+      await refreshLinksOnly();
     } catch (error) {
       console.error('Error asserting sameAs:', error);
-      alert('Не удалось сохранить явную связь в онтологии');
+      const detail = error.response?.data?.detail;
+      alert(detail || 'Не удалось сохранить явную связь в онтологии');
     }
+  };
+
+  const renderPhotoLinkRow = (row, actions) => {
+    const parts = photoRowSecondaryParts(row);
+    const targetPhotoId = row.photo_id || row.id;
+    const thumbSrc =
+      row.image != null
+        ? galleryImageUrl({ image: row.image }, photoGalleryVersion)
+        : photoPreviewSrc(row);
+    const inferredLink = row.same_as_link_inferred === true;
+    const linkTarget =
+      catalogRepresentativeByNameRu(allAsanas, parts.nameRu) ||
+      allAsanas.find((a) => a.id === row.asana_id);
+    return (
+      <li
+        key={canonicalPhotoId(targetPhotoId)}
+        className={`asana-sameas-links-item${
+          inferredLink ? ' asana-sameas-links-item--inferred' : ''
+        }${row.correspondence_kind === 'not_same_as' ? ' asana-sameas-links-item--not-same' : ''}`}
+      >
+        <div className="asana-sameas-links-thumb-wrap">
+          {thumbSrc ? (
+            <img src={thumbSrc} alt="" className="asana-sameas-links-thumb" />
+          ) : (
+            <span className="asana-sameas-links-thumb-empty" aria-hidden>
+              —
+            </span>
+          )}
+        </div>
+        <div className="asana-sameas-links-item-info">
+          <div className="asana-sameas-links-name">{parts.nameRu}</div>
+          {row.name?.name_sanskrit && (
+            <div className="asana-sameas-links-sa">{row.name.name_sanskrit}</div>
+          )}
+          <div className="asana-sameas-links-source">{parts.sourceCaption}</div>
+          {inferredLink && (
+            <p className="asana-sameas-links-inferred-badge" role="note">
+              Связь выведена OWL reasoner. Сохраните явно, чтобы записать в онтологию.
+            </p>
+          )}
+        </div>
+        <div className="asana-sameas-links-item-actions">
+          {linkTarget && (
+            <Link
+              className="btn-secondary asana-sameas-links-open"
+              to={asanaPagePath(linkTarget)}
+              onClick={closeViewLinksModal}
+            >
+              Открыть
+            </Link>
+          )}
+          {actions}
+        </div>
+      </li>
+    );
   };
 
   const handlePhotoSubmit = async (e) => {
@@ -720,9 +916,26 @@ export default function UserPhotoLightbox({
     }
   };
 
-  if (!open || !slides.length || !lbSlide) return null;
+  if (!open) return null;
 
-  const lightboxOverlay = (
+  const waitingOverlay = !lbSlide ? (
+    <div
+      className="user-photo-lightbox user-photo-lightbox--waiting"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Загрузка фотографии"
+      onClick={onClose}
+    >
+      <div className="user-photo-lightbox-waiting-inner" onClick={(e) => e.stopPropagation()}>
+        <p>Загрузка фото…</p>
+        <button type="button" className="btn-secondary" onClick={onClose}>
+          Закрыть
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  const lightboxOverlay = lbSlide ? (
       <div
         className="user-photo-lightbox"
         role="dialog"
@@ -835,7 +1048,7 @@ export default function UserPhotoLightbox({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="user-photo-lightbox-stage">
-            {slides.length > 1 && (
+            {displaySlides.length > 1 && (
               <>
                 <button
                   type="button"
@@ -843,7 +1056,9 @@ export default function UserPhotoLightbox({
                   aria-label="Предыдущее фото"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setIndex((i) => (i - 1 + slides.length) % slides.length);
+                    setIndex(
+                      (i) => (i - 1 + displaySlides.length) % displaySlides.length
+                    );
                   }}
                 >
                   ‹
@@ -854,7 +1069,7 @@ export default function UserPhotoLightbox({
                   aria-label="Следующее фото"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setIndex((i) => (i + 1) % slides.length);
+                    setIndex((i) => (i + 1) % displaySlides.length);
                   }}
                 >
                   ›
@@ -862,13 +1077,21 @@ export default function UserPhotoLightbox({
               </>
             )}
             <div className="user-photo-lightbox-imgwrap">
-              <img src={lbSlide.src} alt="" />
+              {lbSlideSrc ? (
+                <img
+                  key={`${lbSlide.key}-${photoGalleryVersion}`}
+                  src={lbSlideSrc}
+                  alt=""
+                />
+              ) : (
+                <p className="user-photo-lightbox-img-missing">Не удалось загрузить изображение</p>
+              )}
             </div>
           </div>
 
-          {slides.length > 1 && (
+          {displaySlides.length > 1 && (
             <p className="user-photo-lightbox-counter">
-              {index + 1} / {slides.length}
+              {safeIndex + 1} / {displaySlides.length}
             </p>
           )}
 
@@ -903,11 +1126,9 @@ export default function UserPhotoLightbox({
                   className="btn-secondary user-lightbox-expert-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!lbSlideOwnerFull) return;
-                    setMatchSubjectAsanaId(lbSlideOwnerFull.id);
+                    if (!lbSlideOwnerFull || !lbSubjectPhotoId) return;
+                    setMatchSubjectPhotoId(lbSubjectPhotoId);
                     setMatchSearchQuery('');
-                    setMatchAllCatalog([]);
-                    setMatchExcludeLinkedCanon(new Set());
                     setShowMatchModal(true);
                   }}
                 >
@@ -918,10 +1139,12 @@ export default function UserPhotoLightbox({
                   className="btn-secondary user-lightbox-expert-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!lbSlideOwnerFull) return;
-                    setSameAsLinksSubjectId(lbSlideOwnerFull.id);
-                    setSameAsLinksSearchQuery('');
-                    setShowSameAsLinksModal(true);
+                    if (!lbSubjectPhotoId) return;
+                    if (!lbSubjectPhotoId) return;
+                    setViewLinksSubjectPhotoId(lbSubjectPhotoId);
+                    setViewLinksTab('same');
+                    setViewLinksSearchQuery('');
+                    setShowViewLinksModal(true);
                   }}
                 >
                   Посмотреть соответствия
@@ -1004,7 +1227,12 @@ export default function UserPhotoLightbox({
                 Асана с тем же названием но в других источниках
               </h4>
               <div className="user-lightbox-same-name-linked-scroll">
-                {lightboxSameNameLinkedPhotos.map((ph) => (
+                {lightboxSameNameLinkedPhotos.map((ph) => {
+                  const target =
+                    catalogRepresentativeByNameRu(allAsanas, ph.nameRu) ||
+                    allAsanas.find((a) => a.id === ph.asana_id);
+                  const to = target ? asanaPagePath(target) : null;
+                  return (
                   <button
                     key={ph.key}
                     type="button"
@@ -1012,13 +1240,16 @@ export default function UserPhotoLightbox({
                     title={ph.caption}
                     onClick={(e) => {
                       e.stopPropagation();
-                      const idx = slides.findIndex((s) => s.key === ph.key);
-                      if (idx >= 0) setIndex(idx);
+                      if (to) {
+                        onClose();
+                        navigate(to);
+                      }
                     }}
                   >
                     <img src={ph.src} alt="" />
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1033,44 +1264,52 @@ export default function UserPhotoLightbox({
               </h4>
               <ul className="user-lightbox-other-sources-name-list">
                 {lightboxOtherNameRows.map((row) => {
-                  const rowTo = asanaPagePath(row.linkTarget);
+                  const rowTo =
+                    asanaPagePathSafe(row.linkTarget) || asanaPagePathSafe(row.asanaId);
+                  const rowInner = (
+                    <div className="user-lightbox-other-source-row-inner user-lightbox-other-source-row-inner--with-photo">
+                      <div className="user-lightbox-other-source-photo--row">
+                        {row.photoSrc ? (
+                          <img src={row.photoSrc} alt="" />
+                        ) : (
+                          <span className="user-lightbox-other-source-photo-empty">—</span>
+                        )}
+                      </div>
+                      <div className="user-lightbox-other-source-name-cell">
+                        <span className="user-lightbox-other-source-row-title-text">
+                          {row.nameRu}
+                        </span>
+                        <span
+                          className={
+                            row.sourceMuted
+                              ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted user-lightbox-other-source-edition--under-name'
+                              : 'user-lightbox-other-source-edition user-lightbox-other-source-edition--under-name'
+                          }
+                        >
+                          {row.sourceCaption}
+                        </span>
+                      </div>
+                    </div>
+                  );
                   return (
                     <li key={row.key} className="user-lightbox-other-source-row">
-                      <Link
-                        to={rowTo}
-                        className="user-lightbox-other-source-row-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClose();
-                          if (location.pathname === rowTo) {
-                            e.preventDefault();
-                          }
-                        }}
-                      >
-                        <div className="user-lightbox-other-source-row-inner user-lightbox-other-source-row-inner--with-photo">
-                          <div className="user-lightbox-other-source-photo--row">
-                            {row.photoSrc ? (
-                              <img src={row.photoSrc} alt="" />
-                            ) : (
-                              <span className="user-lightbox-other-source-photo-empty">—</span>
-                            )}
-                          </div>
-                          <div className="user-lightbox-other-source-name-cell">
-                            <span className="user-lightbox-other-source-row-title-text">
-                              {row.nameRu}
-                            </span>
-                            <span
-                              className={
-                                row.sourceMuted
-                                  ? 'user-lightbox-other-source-edition user-lightbox-other-source-edition--muted user-lightbox-other-source-edition--under-name'
-                                  : 'user-lightbox-other-source-edition user-lightbox-other-source-edition--under-name'
-                              }
-                            >
-                              {row.sourceCaption}
-                            </span>
-                          </div>
-                        </div>
-                      </Link>
+                      {rowTo ? (
+                        <Link
+                          to={rowTo}
+                          className="user-lightbox-other-source-row-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClose();
+                            if (location.pathname === rowTo) {
+                              e.preventDefault();
+                            }
+                          }}
+                        >
+                          {rowInner}
+                        </Link>
+                      ) : (
+                        <div className="user-lightbox-other-source-row-link">{rowInner}</div>
+                      )}
                     </li>
                   );
                 })}
@@ -1080,13 +1319,18 @@ export default function UserPhotoLightbox({
 
         </div>
       </div>
-  );
+  ) : null;
 
   return (
     <>
-      {typeof document !== 'undefined'
-        ? createPortal(lightboxOverlay, document.body)
-        : lightboxOverlay}
+      {waitingOverlay &&
+        (typeof document !== 'undefined'
+          ? createPortal(waitingOverlay, document.body)
+          : waitingOverlay)}
+      {lightboxOverlay &&
+        (typeof document !== 'undefined'
+          ? createPortal(lightboxOverlay, document.body)
+          : lightboxOverlay)}
 
       {/* Модалка добавления фото к конкретному источнику-владельцу */}
       {isExpertOrAdmin && showAddPhotoForm && (
@@ -1173,25 +1417,16 @@ export default function UserPhotoLightbox({
         </div>
       )}
 
-      {/* Модалка «Указать совпадение» */}
-      {isExpertOrAdmin && showMatchModal && (
+      {/* Модалка «Указать соответствие» */}
+      {isExpertOrAdmin && showMatchModal && matchSubjectPhotoId && (
         <div
           className="modal-overlay asana-detail-overlay-top"
-          onClick={() => {
-            setShowMatchModal(false);
-            setMatchSubjectAsanaId(null);
-          }}
+          onClick={closeMatchModal}
         >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Указать совпадение</h3>
-              <button
-                className="modal-close"
-                onClick={() => {
-                  setShowMatchModal(false);
-                  setMatchSubjectAsanaId(null);
-                }}
-              >
+              <h3 className="modal-title">Указать соответствие</h3>
+              <button type="button" className="modal-close" onClick={closeMatchModal}>
                 ×
               </button>
             </div>
@@ -1199,7 +1434,7 @@ export default function UserPhotoLightbox({
               <div className="modal-search">
                 <input
                   type="search"
-                  placeholder="Поиск по каталогу…"
+                  placeholder="Поиск по названию или источнику…"
                   value={matchSearchQuery}
                   onChange={(e) => setMatchSearchQuery(e.target.value)}
                   autoComplete="off"
@@ -1210,204 +1445,240 @@ export default function UserPhotoLightbox({
                 <p className="asana-sameas-links-empty">Загрузка каталога…</p>
               )}
               <div className="modal-asanas-list">
-                {filteredAsanasForMatch.map((a) => (
-                  <div
-                    key={a.id}
-                    className={`modal-asana-item ${
-                      selectedMatchAsana?.id === a.id ? 'selected' : ''
-                    }`}
-                    onClick={() => setSelectedMatchAsana(a)}
-                  >
-                    {similarPreviewSrc(a) ? (
-                      <img
-                        src={similarPreviewSrc(a)}
-                        alt={a.name?.name_ru}
-                        className="modal-asana-thumb"
-                      />
-                    ) : (
-                      <div className="modal-asana-thumb" style={{ background: '#eee' }} />
-                    )}
-                    <div className="modal-asana-info">
-                      <div className="modal-asana-name">{a.name?.name_ru}</div>
-                      <div className="modal-asana-source">
-                        {catalogRecordSecondaryParts(a).secondary}
+                {filteredPhotosForMatch.map((row) => {
+                  const parts = photoRowSecondaryParts(row);
+                  return (
+                    <div key={row.photo_id} className="modal-asana-item">
+                      <button
+                        type="button"
+                        className="modal-asana-item-open"
+                        title={`Открыть страницу асаны: ${parts.nameRu}`}
+                        onClick={() => openMatchRowAsanaPage(row)}
+                      >
+                        {photoPreviewSrc(row) ? (
+                          <img
+                            src={photoPreviewSrc(row)}
+                            alt={parts.nameRu}
+                            className="modal-asana-thumb"
+                          />
+                        ) : (
+                          <div className="modal-asana-thumb" style={{ background: '#eee' }} />
+                        )}
+                        <div className="modal-asana-info">
+                          <div className="modal-asana-name">{parts.nameRu}</div>
+                          <div className="modal-asana-source">{parts.sourceCaption}</div>
+                        </div>
+                      </button>
+                      <div className="modal-asana-item-actions">
+                        <button
+                          type="button"
+                          className="btn-primary modal-asana-item-action-same"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSameAsPhoto(row.photo_id);
+                          }}
+                        >
+                          Соответствует
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary asana-sameas-links-not-same"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleNotSameAsPhoto(row.photo_id);
+                          }}
+                        >
+                          Не соответствует
+                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
-                {filteredAsanasForMatch.length === 0 && (
-                  <p style={{ textAlign: 'center', color: '#666' }}>Асаны не найдены</p>
+                  );
+                })}
+                {filteredPhotosForMatch.length === 0 && !matchSearchLoading && matchCatalogLoaded && (
+                  <p style={{ textAlign: 'center', color: '#666' }}>
+                    {matchAllPhotos.length === 0
+                      ? 'Не удалось загрузить каталог фото. Обновите страницу и попробуйте снова.'
+                      : matchSearchQuery.trim()
+                        ? 'Ничего не найдено по запросу'
+                        : 'Нет других фото для указания соответствия (все уже связаны или помечены «не соответствует»)'}
+                  </p>
                 )}
               </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  setShowMatchModal(false);
-                  setMatchSubjectAsanaId(null);
-                }}
-              >
-                Отмена
-              </button>
-              <button
-                className="btn-primary"
-                onClick={handleMatchAsana}
-                disabled={!selectedMatchAsana}
-              >
-                Указать совпадение
-              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Модалка «Соответствия» */}
-      {isExpertOrAdmin && showSameAsLinksModal && sameAsLinksSubjectId && (
+      {/* Модалка «Посмотреть соответствия» — вкладки isSameAs / notSameAs */}
+      {isExpertOrAdmin && showViewLinksModal && viewLinksSubjectPhotoId && (
         <div
           className="modal-overlay asana-detail-overlay-top"
           role="presentation"
-          onClick={() => {
-            setShowSameAsLinksModal(false);
-            setSameAsLinksSubjectId(null);
-            setSameAsLinksSearchQuery('');
-          }}
+          onClick={closeViewLinksModal}
         >
           <div
             className="modal-content asana-sameas-links-modal"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3 className="modal-title">Соответствия</h3>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => {
-                  setShowSameAsLinksModal(false);
-                  setSameAsLinksSubjectId(null);
-                  setSameAsLinksSearchQuery('');
-                }}
-              >
+              <h3 className="modal-title">Посмотреть соответствия</h3>
+              <button type="button" className="modal-close" onClick={closeViewLinksModal}>
                 ×
               </button>
             </div>
+
+            <div className="photo-links-view-tabs" role="tablist" aria-label="Тип связи">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewLinksTab === 'same'}
+                className={`photo-links-view-tab${
+                  viewLinksTab === 'same' ? ' photo-links-view-tab--active' : ''
+                }`}
+                onClick={() => setViewLinksTab('same')}
+              >
+                Соответствует ({sameAsLinksForModal.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewLinksTab === 'not_same'}
+                className={`photo-links-view-tab${
+                  viewLinksTab === 'not_same' ? ' photo-links-view-tab--active' : ''
+                }`}
+                onClick={() => setViewLinksTab('not_same')}
+              >
+                Не соответствует ({notSameAsLinksForModal.length})
+              </button>
+            </div>
+
             <div className="modal-body">
-              {modalSimilarLoading && sameAsLinksForModal.length === 0 ? (
-                <p className="asana-sameas-links-empty">Загрузка соответствий…</p>
-              ) : sameAsLinksForModal.length > 0 ? (
+              {viewLinksLoading ? (
+                <p className="asana-sameas-links-empty">Загрузка…</p>
+              ) : (
                 <>
                   <div className="modal-search">
                     <input
                       type="search"
-                      placeholder="Поиск по названию или изданию…"
-                      value={sameAsLinksSearchQuery}
-                      onChange={(e) => setSameAsLinksSearchQuery(e.target.value)}
+                      placeholder="Поиск по названию или источнику…"
+                      value={viewLinksSearchQuery}
+                      onChange={(e) => setViewLinksSearchQuery(e.target.value)}
                       autoComplete="off"
                       spellCheck={false}
                     />
                   </div>
-                  {filteredSameAsLinksForModal.length > 0 ? (
-                <ul className="asana-sameas-links-list">
-                  {filteredSameAsLinksForModal.map((sim) => {
-                    const thumbSrc = similarPreviewSrc(sim);
-                    const inferredLink = sim.same_as_link_inferred === true;
-                    return (
-                    <li
-                      key={sim.id}
-                      className={`asana-sameas-links-item${inferredLink ? ' asana-sameas-links-item--inferred' : ''}`}
-                    >
-                      <div className="asana-sameas-links-thumb-wrap">
-                        {thumbSrc ? (
-                          <img
-                            src={thumbSrc}
-                            alt=""
-                            className="asana-sameas-links-thumb"
-                          />
-                        ) : (
-                          <span className="asana-sameas-links-thumb-empty" aria-hidden>
-                            —
-                          </span>
-                        )}
-                      </div>
-                      <div className="asana-sameas-links-item-info">
-                        <div className="asana-sameas-links-name">
-                          {sim.name?.name_ru || '—'}
-                        </div>
-                        {sim.name?.name_sanskrit && (
-                          <div className="asana-sameas-links-sa">
-                            {sim.name.name_sanskrit}
-                          </div>
-                        )}
-                        <div className="asana-sameas-links-source">
-                          {catalogRecordSecondaryParts(sim).secondary}
-                        </div>
-                        {inferredLink && (
-                          <p className="asana-sameas-links-inferred-badge" role="note">
-                            Связь выведена OWL reasoner. Сохраните явно, чтобы записать в
-                            онтологию.
-                          </p>
-                        )}
-                      </div>
-                      <div className="asana-sameas-links-item-actions">
-                        <Link
-                          className="btn-secondary asana-sameas-links-open"
-                          to={asanaPagePath(sim)}
-                          onClick={() => {
-                            setShowSameAsLinksModal(false);
-                            setSameAsLinksSubjectId(null);
-                            setSameAsLinksSearchQuery('');
-                          }}
-                        >
-                          Открыть
-                        </Link>
-                        {inferredLink ? (
-                          <button
-                            type="button"
-                            className="btn-primary asana-sameas-links-assert"
-                            onClick={() =>
-                              handleAssertExplicitSameAs(sameAsLinksSubjectId, sim.id)
-                            }
-                          >
-                            Добавить явно
-                          </button>
-                        ) : sim.correspondence_kind === 'same_as' ? (
-                          <button
-                            type="button"
-                            className="btn-secondary asana-sameas-links-remove"
-                            onClick={() =>
-                              handleRemoveSameAsForOwner(sameAsLinksSubjectId, sim.id)
-                            }
-                          >
-                            Удалить соответствие
-                          </button>
-                        ) : null}
-                      </div>
-                    </li>
-                    );
-                  })}
-                </ul>
-                  ) : (
-                    <p className="asana-sameas-links-empty">
-                      По запросу «{sameAsLinksSearchQuery.trim()}» ничего не найдено
-                    </p>
+                  {viewLinksTab === 'same' && (
+                    <>
+                      {filteredSameAsLinksForModal.length > 0 ? (
+                        <ul className="asana-sameas-links-list">
+                          {filteredSameAsLinksForModal.map((row) => {
+                            const targetPhotoId = row.photo_id || row.id;
+                            const inferredLink = row.same_as_link_inferred === true;
+                            return renderPhotoLinkRow(
+                              row,
+                              inferredLink ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn-primary asana-sameas-links-assert"
+                                    onClick={() =>
+                                      handleAssertExplicitSameAs(
+                                        viewLinksSubjectPhotoId,
+                                        targetPhotoId
+                                      )
+                                    }
+                                  >
+                                    Добавить явно
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-secondary asana-sameas-links-not-same"
+                                    onClick={async () => {
+                                      if (
+                                        !window.confirm(
+                                          'Пометить эти фото как «не соответствуют»? Выведенная reasoner связь isSameAs будет отменена.'
+                                        )
+                                      ) {
+                                        return;
+                                      }
+                                      try {
+                                        await asanasAPI.setNotSameAsPhoto(
+                                          viewLinksSubjectPhotoId,
+                                          targetPhotoId
+                                        );
+                                        await refreshViewLinkLists(viewLinksSubjectPhotoId);
+                                        await refreshLinksOnly();
+                                      } catch (error) {
+                                        const detail = error.response?.data?.detail;
+                                        alert(
+                                          detail || 'Ошибка при добавлении «не соответствует»'
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Не соответствует
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-secondary asana-sameas-links-remove"
+                                  onClick={() =>
+                                    handleRemoveSameAsForPhoto(
+                                      viewLinksSubjectPhotoId,
+                                      targetPhotoId
+                                    )
+                                  }
+                                >
+                                  Удалить
+                                </button>
+                              )
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="asana-sameas-links-empty">
+                          {viewLinksSearchQuery.trim()
+                            ? `По запросу «${viewLinksSearchQuery.trim()}» ничего не найдено`
+                            : 'Соответствий пока нет.'}
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {viewLinksTab === 'not_same' && (
+                    <>
+                      {filteredNotSameAsLinksForModal.length > 0 ? (
+                        <ul className="asana-sameas-links-list">
+                          {filteredNotSameAsLinksForModal.map((row) => {
+                            const targetPhotoId = row.photo_id || row.id;
+                            return renderPhotoLinkRow(
+                              row,
+                              <button
+                                type="button"
+                                className="btn-secondary asana-sameas-links-remove"
+                                onClick={() =>
+                                  handleRemoveNotSameAsForPhoto(
+                                    viewLinksSubjectPhotoId,
+                                    targetPhotoId
+                                  )
+                                }
+                              >
+                                Удалить
+                              </button>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="asana-sameas-links-empty">
+                          {viewLinksSearchQuery.trim()
+                            ? `По запросу «${viewLinksSearchQuery.trim()}» ничего не найдено`
+                            : 'Пометок «не соответствует» пока нет.'}
+                        </p>
+                      )}
+                    </>
                   )}
                 </>
-              ) : (
-                <p className="asana-sameas-links-empty">Соответствий не найдено.</p>
               )}
-            </div>
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  setShowSameAsLinksModal(false);
-                  setSameAsLinksSubjectId(null);
-                  setSameAsLinksSearchQuery('');
-                }}
-              >
-                Закрыть
-              </button>
             </div>
           </div>
         </div>

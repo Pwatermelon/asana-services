@@ -24,6 +24,12 @@ export const asanasAPI = {
     return response.data;
   },
 
+  /** Плоский индекс фото для модалки «Указать соответствие». */
+  getPhotosForMatch: async () => {
+    const response = await apiClient.get('/api/photos/for-match');
+    return response.data;
+  },
+
   getByNameRu: async (nameRu) => {
     const response = await apiClient.get('/api/asanas/by-name', {
       params: { name_ru: nameRu },
@@ -134,6 +140,50 @@ export const asanasAPI = {
     const shortId = asanaId.split('#').pop();
     const targetShortId = targetAsanaId.split('#').pop();
     const response = await apiClient.delete(`/api/asana/${encodeURIComponent(shortId)}/same-as/${encodeURIComponent(targetShortId)}`);
+    return response.data;
+  },
+
+  photoIdParam: (photoId) => encodeURIComponent(String(photoId).split('#').pop()),
+
+  getSimilarPhotos: async (photoId) => {
+    const pid = asanasAPI.photoIdParam(photoId);
+    const response = await apiClient.get(`/api/photo/${pid}/similar`);
+    return response.data;
+  },
+
+  getNotSameAsPhotos: async (photoId) => {
+    const pid = asanasAPI.photoIdParam(photoId);
+    const response = await apiClient.get(`/api/photo/${pid}/not-same-as`);
+    return response.data;
+  },
+
+  setSameAsPhoto: async (photoId, targetPhotoId) => {
+    const pid = asanasAPI.photoIdParam(photoId);
+    const response = await apiClient.post(`/api/photo/${pid}/same-as`, {
+      target_photo_id: String(targetPhotoId).split('#').pop(),
+    });
+    return response.data;
+  },
+
+  removeSameAsPhoto: async (photoId, targetPhotoId) => {
+    const pid = asanasAPI.photoIdParam(photoId);
+    const tid = asanasAPI.photoIdParam(targetPhotoId);
+    const response = await apiClient.delete(`/api/photo/${pid}/same-as/${tid}`);
+    return response.data;
+  },
+
+  setNotSameAsPhoto: async (photoId, targetPhotoId) => {
+    const pid = asanasAPI.photoIdParam(photoId);
+    const response = await apiClient.post(`/api/photo/${pid}/not-same-as`, {
+      target_photo_id: String(targetPhotoId).split('#').pop(),
+    });
+    return response.data;
+  },
+
+  removeNotSameAsPhoto: async (photoId, targetPhotoId) => {
+    const pid = asanasAPI.photoIdParam(photoId);
+    const tid = asanasAPI.photoIdParam(targetPhotoId);
+    const response = await apiClient.delete(`/api/photo/${pid}/not-same-as/${tid}`);
     return response.data;
   },
 

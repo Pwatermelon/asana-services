@@ -1,0 +1,32 @@
+# Локальный облегчённый запуск: только приложение, без мониторинга и бэкапов.
+#
+#   docker compose -f docker-compose.local.yml up --build
+#
+# Открывать: http://localhost  (не :3000)
+#
+# В .env для прода стоит MINIO_URL_PREFIX=https://catalog-asan.ru/images —
+# здесь принудительно подменяем на localhost, иначе картинки не грузятся.
+
+include:
+  - docker-compose.yml
+
+x-local-urls: &local-urls
+  MINIO_URL_PREFIX: http://localhost/images
+  PUBLIC_SITE_URL: http://localhost
+
+services:
+  server-module:
+    environment:
+      <<: *local-urls
+
+  asana-backend:
+    environment:
+      <<: *local-urls
+
+  asana-import:
+    environment:
+      <<: *local-urls
+
+  nginx:
+    volumes:
+      - ./nginx.local.conf:/etc/nginx/conf.d/default.conf:ro

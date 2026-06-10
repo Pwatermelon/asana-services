@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
+from rdflib.namespace import RDF
 from sqlalchemy.orm import Session
 
 from app.models import AISimilarityProposal
@@ -140,17 +141,24 @@ def _pair_is_noise(meta_a: Dict[str, str], meta_b: Dict[str, str]) -> Optional[s
     return None
 
 
-def _get_existing_same_as_pairs(asanas: List[Dict[str, Any]]) -> set[Tuple[str, str]]:
-    """Возвращает множество отсортированных пар асан, между которыми уже есть isSameAs."""
-    existing: set[Tuple[str, str]] = set()
-    for a in asanas:
-        a_id = a["id"]
-        for sid in a.get("same_as_ids") or []:
-            if not sid or sid == a_id:
+def _get_decided_photo_pairs() -> set[Tuple[str, str]]:
+    """Пары photo_id, между которыми уже есть sameAs (asserted/inferred) или notSameAs."""
+    from app.ontology import get_graph
+    from app.photo_links import make_photo_uri, photo_pair_is_decided
+
+    g = get_graph()
+    seen: set[Tuple[str, str]] = set()
+    from app.ontology import ASANA
+
+    for photo in g.subjects(RDF.type, ASANA.AsanaPhoto):
+        pid = str(photo)
+        for other in g.subjects(RDF.type, ASANA.AsanaPhoto):
+            oid = str(other)
+            if pid >= oid:
                 continue
-            pair = tuple(sorted([a_id, sid]))
-            existing.add(pair)
-    return existing
+            if photo_pair_is_decided(g, photo, other):
+                seen.add(tuple(sorted([pid, oid])))
+    return seen
 
 
 def call_network_scan(
@@ -217,7 +225,7 @@ def run_ai_scan_and_save(
     photo_meta_map = _build_photo_meta_map(asanas)
     logger.info("AI scan: найдено фото для анализа: %d", len(photos))
 
-    existing_pairs = _get_existing_same_as_pairs(asanas) if skip_existing_links else set()
+    existing_pairs = _get_decided_photo_pairs() if skip_existing_links else set()
 
     # Чистим старые мусорные предложения из БД — те, что уже стали «шумом»
     # (одна книга, одинаковый файл, одинаковый отпечаток).
@@ -253,22 +261,21 @@ def run_ai_scan_and_save(
 
         photo_a_id = proposal.get("photo_a_id")
         photo_b_id = proposal.get("photo_b_id")
+        if not photo_a_id or not photo_b_id:
+            continue
         noise = _pair_is_noise(
             photo_meta_map.get(photo_a_id or "", {}),
             photo_meta_map.get(photo_b_id or "", {}),
         )
-        if noise == "same_source":
-            skipped_same_source += 1
-            continue
         if noise in ("identical_file", "identical_image"):
             skipped_identical_photo += 1
             continue
 
-        pair_sorted = tuple(sorted([asana_a, asana_b]))
+        pair_sorted = tuple(sorted([photo_a_id, photo_b_id]))
         if skip_existing_links and pair_sorted in existing_pairs:
             skipped_existing_link += 1
             continue
-        pair_key = _make_pair_key(asana_a, asana_b, reason)
+        pair_key = _make_pair_key(photo_a_id, photo_b_id, reason)
         if pair_key in seen_keys:
             skipped_dup += 1
             continue

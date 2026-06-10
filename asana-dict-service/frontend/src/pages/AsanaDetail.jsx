@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
 import { asanaPagePath } from '../components/CompactAsanaRow';
 import UserPhotoLightbox from '../components/UserPhotoLightbox';
@@ -9,10 +9,19 @@ import {
   canonicalAsanaId,
   mergeSameAsCluster,
 } from '../utils/asanaSameAs';
+import { canonicalPhotoId, resolvePhotoId } from '../utils/photoSameAs';
+import {
+  clearFocusPhoto,
+  findSlideIndexByPhoto,
+  resolveFocusPhotoHint,
+} from '../utils/catalogFocus';
+import CatalogPageNav from '../components/CatalogPageNav';
+import '../styles/AsanasList.css';
 import '../styles/AsanaDetail.css';
 
 const AsanaDetail = () => {
   const params = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const id = params.id || params['id-page'] || params.idPage;
@@ -27,11 +36,140 @@ const AsanaDetail = () => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
+  const [catalogForNav, setCatalogForNav] = useState([]);
+
   const lastRouteIdRef = useRef(null);
+  const lightboxAnchorPhotoRef = useRef(null);
+  const activeLightboxPhotoRef = useRef(null);
+  const stableLightboxSlidesRef = useRef([]);
+  const mutationBusyRef = useRef(false);
+  const focusPhotoAttemptRef = useRef(0);
+  const focusEnrichBusyRef = useRef(false);
+  const lightboxOpenRef = useRef(false);
 
   useEffect(() => {
-    loadPage();
+    lightboxOpenRef.current = lightboxOpen;
+  }, [lightboxOpen]);
+
+  useEffect(() => {
+    asanasAPI.getCatalog().then(setCatalogForNav).catch(() => setCatalogForNav([]));
+  }, []);
+
+  useEffect(() => {
+    if (!searchParams.get('focusPhoto') && !location.state?.focusPhoto) {
+      clearFocusPhoto();
+    }
+  }, [id, searchParams, location.state]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const focusHint = resolveFocusPhotoHint(searchParams, location.state);
+    const softLoad =
+      lightboxOpenRef.current ||
+      Boolean(focusHint?.photoCanon || searchParams.get('focusOwner'));
+
+    (async () => {
+      try {
+        setError(null);
+        if (!softLoad) {
+          setLoading(true);
+          setAllAsanas([]);
+          setSimilarAsanas([]);
+        }
+
+        let data = await fetchPageData();
+        if (cancelled || !data) return;
+
+        if (focusHint?.photoCanon && focusHint.ownerId) {
+          const enriched = await enrichAllAsanasForOwner(data, focusHint.ownerId);
+          if (enriched) data = enriched;
+        }
+
+        setAsana(data.asana);
+        setAllAsanas(data.allAsanas);
+        setSimilarAsanas(data.similarAsanas);
+        focusPhotoAttemptRef.current += 1;
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Error loading asana page:', err);
+          setError(`Ошибка при загрузке асаны: ${err.message || 'Неизвестная ошибка'}`);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  async function enrichAllAsanasForOwner(data, ownerId) {
+    if (!ownerId || !data?.asana) return data;
+    const ownerCanon = canonicalAsanaId(ownerId);
+    const already = data.allAsanas.some((a) => canonicalAsanaId(a.id) === ownerCanon);
+    if (already) return data;
+
+    try {
+      const owner = await asanasAPI.getById(ownerId);
+      if (!owner?.id) return data;
+      const nameRu = owner.name?.name_ru;
+      const siblings = nameRu
+        ? await asanasAPI.getByNameRu(nameRu).catch(() => [owner])
+        : [owner];
+      const merged = new Map();
+      for (const a of [...data.allAsanas, ...(siblings || []), owner]) {
+        if (!a?.id) continue;
+        const k = canonicalAsanaId(a.id);
+        if (!k) continue;
+        merged.set(k, merged.has(k) ? { ...merged.get(k), ...a, id: a.id } : a);
+      }
+      return { ...data, allAsanas: [...merged.values()] };
+    } catch {
+      return data;
+    }
+  }
+
+  const fetchPageData = async () => {
+    if (!id) {
+      setError('ID асаны не указан в URL');
+      setAsana(null);
+      return null;
+    }
+
+    let asanaId = String(id);
+    if (asanaId.endsWith('-page')) {
+      asanaId = asanaId.replace('-page', '');
+    }
+
+    const found = await asanasAPI.getById(asanaId);
+    if (!found) {
+      setError(`Асана не найдена (ID: ${asanaId.trim()})`);
+      setAsana(null);
+      return null;
+    }
+
+    const nameRu = found.name?.name_ru;
+    const [siblings, similar] = await Promise.all([
+      nameRu ? asanasAPI.getByNameRu(nameRu) : Promise.resolve([found]),
+      asanasAPI.getSimilarAsanas(found.id).catch(() => []),
+    ]);
+    const siblingList = Array.isArray(siblings) && siblings.length ? siblings : [found];
+    const similarList = similar || [];
+    const merged = new Map();
+    for (const a of [...siblingList, ...similarList, found]) {
+      if (!a?.id) continue;
+      const k = canonicalAsanaId(a.id);
+      if (!k) continue;
+      merged.set(k, merged.has(k) ? { ...merged.get(k), ...a, id: a.id } : a);
+    }
+
+    return {
+      asana: found,
+      allAsanas: [...merged.values()],
+      similarAsanas: similarList,
+    };
+  };
 
   const loadPage = async () => {
     try {
@@ -40,40 +178,12 @@ const AsanaDetail = () => {
       setAllAsanas([]);
       setSimilarAsanas([]);
 
-      if (!id) {
-        setError('ID асаны не указан в URL');
-        return;
-      }
+      const data = await fetchPageData();
+      if (!data) return;
 
-      let asanaId = String(id);
-      if (asanaId.endsWith('-page')) {
-        asanaId = asanaId.replace('-page', '');
-      }
-
-      const found = await asanasAPI.getById(asanaId);
-      if (!found) {
-        setError(`Асана не найдена (ID: ${asanaId.trim()})`);
-        setAsana(null);
-        return;
-      }
-
-      setAsana(found);
-      const nameRu = found.name?.name_ru;
-      const [siblings, similar] = await Promise.all([
-        nameRu ? asanasAPI.getByNameRu(nameRu) : Promise.resolve([found]),
-        asanasAPI.getSimilarAsanas(found.id).catch(() => []),
-      ]);
-      const siblingList = Array.isArray(siblings) && siblings.length ? siblings : [found];
-      const similarList = similar || [];
-      const merged = new Map();
-      for (const a of [...siblingList, ...similarList, found]) {
-        if (!a?.id) continue;
-        const k = canonicalAsanaId(a.id);
-        if (!k) continue;
-        merged.set(k, merged.has(k) ? { ...merged.get(k), ...a, id: a.id } : a);
-      }
-      setAllAsanas([...merged.values()]);
-      setSimilarAsanas(similarList);
+      setAsana(data.asana);
+      setAllAsanas(data.allAsanas);
+      setSimilarAsanas(data.similarAsanas);
     } catch (err) {
       console.error('Error loading asana page:', err);
       setError(`Ошибка при загрузке асаны: ${err.message || 'Неизвестная ошибка'}`);
@@ -92,11 +202,43 @@ const AsanaDetail = () => {
 
   const firstAsana = groupAsanas[0] || asana;
 
-  /** Слайды для миниатюр и лайтбокса — все фото группы. */
-  const slides = useMemo(
-    () => buildSlidesFromAsanas(groupAsanas, photoGalleryVersion),
-    [groupAsanas, photoGalleryVersion]
-  );
+  /** Слайды для миниатюр и лайтбокса — все фото группы (+ фото владельца из focusPhoto, если ещё не в группе). */
+  const slides = useMemo(() => {
+    const base = buildSlidesFromAsanas(groupAsanas, photoGalleryVersion);
+    const focusHint = resolveFocusPhotoHint(searchParams, null);
+    if (!focusHint?.photoCanon || findSlideIndexByPhoto(base, focusHint.photoCanon) >= 0) {
+      return base;
+    }
+    if (!focusHint.ownerId || !allAsanas.length) return base;
+    const ownerCanon = canonicalAsanaId(focusHint.ownerId);
+    const owner = allAsanas.find((a) => canonicalAsanaId(a.id) === ownerCanon);
+    if (!owner?.photos?.length) return base;
+    const extra = buildSlidesFromAsanas([owner], photoGalleryVersion);
+    const merged = [...base];
+    for (const slide of extra) {
+      const pid = canonicalPhotoId(
+        resolvePhotoId(slide.photo, slide.photoIndexInOwner)
+      );
+      if (pid && findSlideIndexByPhoto(merged, pid) < 0) merged.push(slide);
+    }
+    return merged;
+  }, [groupAsanas, allAsanas, photoGalleryVersion, searchParams]);
+
+  /** Пока лайтбокс открыт — не отдавать пустой массив слайдов. */
+  const lightboxSlides = useMemo(() => {
+    if (!lightboxOpen) {
+      if (slides.length > 0) stableLightboxSlidesRef.current = slides;
+      return slides;
+    }
+    if (slides.length > 0) {
+      stableLightboxSlidesRef.current = slides;
+      return slides;
+    }
+    if (stableLightboxSlidesRef.current.length > 0) {
+      return stableLightboxSlidesRef.current;
+    }
+    return slides;
+  }, [slides, lightboxOpen]);
 
   /** Карточки-миниатюры (parallel to slides, добавляем дополнительную инфу). */
   const tiles = useMemo(() => {
@@ -112,13 +254,13 @@ const AsanaDetail = () => {
 
   /** Соседние группы каталога по русскому названию: предыдущая / следующая по алфавиту. */
   const catalogGroupNeighbors = useMemo(() => {
-    if (!allAsanas.length || !asana?.name?.name_ru) {
+    if (!catalogForNav.length || !asana?.name?.name_ru) {
       return { prevRep: null, nextRep: null };
     }
     const currentKey = normalizeCatalogNameKey(asana.name.name_ru);
     if (!currentKey) return { prevRep: null, nextRep: null };
     const byKey = new Map();
-    for (const a of allAsanas) {
+    for (const a of catalogForNav) {
       const nk = normalizeCatalogNameKey(a.name?.name_ru || '');
       if (!nk || byKey.has(nk)) continue;
       byKey.set(nk, a);
@@ -136,40 +278,215 @@ const AsanaDetail = () => {
       prevRep: idx > 0 ? reps[idx - 1] : null,
       nextRep: idx < reps.length - 1 ? reps[idx + 1] : null,
     };
-  }, [allAsanas, asana]);
+  }, [catalogForNav, asana]);
 
-  /** Закрывать лайтбокс при смене URL (между страницами асан). */
+  /** Закрывать лайтбокс при смене URL, кроме перехода с ?focusPhoto / ?focusOwner. */
   useEffect(() => {
     let routeId = id != null ? String(id) : '';
     if (routeId.endsWith('-page')) routeId = routeId.replace(/-page$/i, '');
     const prev = lastRouteIdRef.current;
-    if (prev !== null && prev !== routeId) {
+    const openingWithFocus =
+      searchParams.has('focusPhoto') || searchParams.has('focusOwner');
+    if (prev !== null && prev !== routeId && !openingWithFocus) {
       setLightboxOpen(false);
       setLightboxIndex(0);
     }
     lastRouteIdRef.current = routeId;
-  }, [id]);
+  }, [id, searchParams]);
 
-  /** Поддержка ?focusOwner=...: открыть лайтбокс на первом фото указанного владельца. */
+  /** ?focusPhoto / ?focusOwner — открыть лайтбокс после загрузки слайдов. */
   useEffect(() => {
-    const focus = searchParams.get('focusOwner');
-    if (!focus || !slides.length) return;
-    const canon = canonicalAsanaId(focus);
-    const idx = slides.findIndex((s) => canonicalAsanaId(s.ownerId) === canon);
-    if (idx >= 0) {
-      setLightboxIndex(idx);
-      setLightboxOpen(true);
-    }
-    if (searchParams.has('focusOwner')) {
+    const focusHint = resolveFocusPhotoHint(searchParams, location.state);
+    if (!focusHint?.photoCanon) {
+      const focusOwnerOnly = searchParams.get('focusOwner');
+      if (!focusOwnerOnly || loading || !slides.length) return;
+      const canon = canonicalAsanaId(focusOwnerOnly);
+      const idx = slides.findIndex((s) => canonicalAsanaId(s.ownerId) === canon);
+      if (idx >= 0) {
+        setLightboxIndex(idx);
+        setLightboxOpen(true);
+      }
       const next = new URLSearchParams(searchParams);
       next.delete('focusOwner');
       setSearchParams(next, { replace: true });
+      return;
     }
-  }, [searchParams, slides, setSearchParams]);
 
-  const handleMutation = async () => {
-    setPhotoGalleryVersion((v) => v + 1);
-    await loadPage();
+    if (loading || !slides.length) return;
+
+    const idx = findSlideIndexByPhoto(slides, focusHint.photoCanon);
+    if (idx >= 0) {
+      setLightboxIndex(idx);
+      setLightboxOpen(true);
+      clearFocusPhoto();
+      if (searchParams.has('focusPhoto') || searchParams.has('focusOwner')) {
+        const next = new URLSearchParams(searchParams);
+        next.delete('focusPhoto');
+        next.delete('focusOwner');
+        setSearchParams(next, { replace: true });
+      }
+      if (location.state?.focusPhoto) {
+        navigate(
+          { pathname: location.pathname, search: location.search },
+          { replace: true, state: {} }
+        );
+      }
+      return;
+    }
+
+    if (focusHint.ownerId && !focusEnrichBusyRef.current && asana) {
+      focusEnrichBusyRef.current = true;
+      enrichAllAsanasForOwner(
+        { asana, allAsanas, similarAsanas },
+        focusHint.ownerId
+      )
+        .then((enriched) => {
+          if (enriched?.allAsanas) setAllAsanas(enriched.allAsanas);
+        })
+        .finally(() => {
+          focusEnrichBusyRef.current = false;
+        });
+    }
+  }, [id, searchParams, slides, loading, setSearchParams, location.state, location.pathname, location.search, asana, allAsanas, similarAsanas, navigate]);
+
+  /** Запомнить id текущего кадра лайтбокса. */
+  useEffect(() => {
+    if (!lightboxOpen) {
+      activeLightboxPhotoRef.current = null;
+      return;
+    }
+    const slide = lightboxSlides[lightboxIndex];
+    if (!slide) return;
+    activeLightboxPhotoRef.current = canonicalPhotoId(
+      resolvePhotoId(slide.photo, slide.photoIndexInOwner)
+    );
+  }, [lightboxOpen, lightboxIndex, lightboxSlides]);
+
+  /** При смене слайдов держать тот же кадр по id фото. */
+  useEffect(() => {
+    const photoId = activeLightboxPhotoRef.current;
+    if (!lightboxOpen || !photoId || !slides.length) return;
+    const idx = findSlideIndexByPhoto(slides, photoId);
+    if (idx >= 0 && idx !== lightboxIndex) setLightboxIndex(idx);
+  }, [slides, lightboxOpen, lightboxIndex]);
+
+  /** После мутации с визуальными изменениями — якорь по id фото. */
+  useEffect(() => {
+    const anchor = lightboxAnchorPhotoRef.current;
+    if (!anchor || !lightboxOpen || !slides.length) return;
+    const idx = findSlideIndexByPhoto(slides, anchor);
+    if (idx >= 0) setLightboxIndex(idx);
+    lightboxAnchorPhotoRef.current = null;
+  }, [slides, lightboxOpen, photoGalleryVersion]);
+
+  const mergePhotoImagesFromPrevious = (nextAsanas, prevAsanas) => {
+    const prevPhotos = new Map();
+    for (const a of prevAsanas || []) {
+      for (const p of a.photos || []) {
+        const k = canonicalPhotoId(resolvePhotoId(p));
+        if (k && p?.image) prevPhotos.set(k, p);
+      }
+    }
+    return (nextAsanas || []).map((a) => {
+      if (!a?.photos?.length) return a;
+      const photos = a.photos.map((p, idx) => {
+        const k = canonicalPhotoId(resolvePhotoId(p, idx));
+        if (!k || p?.image) return p;
+        const prev = prevPhotos.get(k);
+        return prev ? { ...prev, ...p, image: prev.image } : p;
+      });
+      return { ...a, photos };
+    });
+  };
+
+  const handleMutation = async (opts = {}) => {
+    const bumpGallery =
+      typeof opts === 'object' && opts !== null ? opts.bumpGallery !== false : true;
+
+    if (!bumpGallery) {
+      const enrichIds = Array.isArray(opts?.enrichAsanaIds)
+        ? opts.enrichAsanaIds.filter(Boolean)
+        : [];
+      if (enrichIds.length && !mutationBusyRef.current) {
+        mutationBusyRef.current = true;
+        try {
+          const merged = [...allAsanas];
+          const known = new Set(merged.map((a) => canonicalAsanaId(a.id)));
+          for (const aid of enrichIds) {
+            const canon = canonicalAsanaId(aid);
+            if (!canon || known.has(canon)) continue;
+            const extra = await asanasAPI.getById(aid).catch(() => null);
+            if (extra?.id) {
+              merged.push(extra);
+              known.add(canon);
+            }
+          }
+          setAllAsanas(mergePhotoImagesFromPrevious(merged, allAsanas));
+        } catch (err) {
+          console.error('Error enriching linked asanas:', err);
+        } finally {
+          mutationBusyRef.current = false;
+        }
+      }
+      return;
+    }
+
+    if (mutationBusyRef.current) return;
+    mutationBusyRef.current = true;
+
+    const anchorSlide = lightboxSlides[lightboxIndex] || slides[lightboxIndex];
+    if (lightboxOpen && anchorSlide) {
+      const photoId = canonicalPhotoId(
+        resolvePhotoId(anchorSlide.photo, anchorSlide.photoIndexInOwner)
+      );
+      lightboxAnchorPhotoRef.current = photoId;
+      activeLightboxPhotoRef.current = photoId;
+    }
+
+    try {
+      let data = await fetchPageData();
+      if (!data) return;
+
+      const anchorPhoto = lightboxAnchorPhotoRef.current;
+      if (anchorPhoto) {
+        const linked = await asanasAPI.getSimilarPhotos(anchorPhoto).catch(() => []);
+        for (const row of linked || []) {
+          const aid = row.asana_id;
+          if (!aid) continue;
+          const canon = canonicalAsanaId(aid);
+          if (data.allAsanas.some((a) => canonicalAsanaId(a.id) === canon)) continue;
+          const extra = await asanasAPI.getById(aid).catch(() => null);
+          if (extra?.id) data.allAsanas.push(extra);
+        }
+      }
+
+      data.allAsanas = mergePhotoImagesFromPrevious(data.allAsanas, allAsanas);
+
+      if (bumpGallery) {
+        setPhotoGalleryVersion((v) => v + 1);
+      }
+      setAsana(data.asana);
+      setAllAsanas(data.allAsanas);
+      setSimilarAsanas(data.similarAsanas);
+
+      const name = data.asana.name?.name_ru?.toLowerCase().trim();
+      const group = name
+        ? data.allAsanas.filter((a) => a.name?.name_ru?.toLowerCase().trim() === name)
+        : [data.asana];
+      const refreshed = buildSlidesFromAsanas(
+        group,
+        bumpGallery ? photoGalleryVersion + 1 : photoGalleryVersion
+      );
+      if (lightboxOpen && !refreshed.length) {
+        setLightboxOpen(false);
+        stableLightboxSlidesRef.current = [];
+        document.body.style.overflow = '';
+      }
+    } catch (err) {
+      console.error('Error refreshing asana page:', err);
+    } finally {
+      mutationBusyRef.current = false;
+    }
   };
 
   const handleAsanaDeleted = () => {
@@ -177,7 +494,7 @@ const AsanaDetail = () => {
     navigate('/asanas');
   };
 
-  if (loading) {
+  if (loading && !asana) {
     return <div className="container">Загрузка...</div>;
   }
 
@@ -205,6 +522,9 @@ const AsanaDetail = () => {
 
   return (
     <div className="container">
+      <div className="catalog-toolbar">
+        <CatalogPageNav />
+      </div>
       <div className="asana-detail">
         <div className="asana-header">
           <div className="asana-header-inner">
@@ -293,8 +613,11 @@ const AsanaDetail = () => {
 
       <UserPhotoLightbox
         open={lightboxOpen}
-        onClose={() => setLightboxOpen(false)}
-        slides={slides}
+        onClose={() => {
+          setLightboxOpen(false);
+          stableLightboxSlidesRef.current = [];
+        }}
+        slides={lightboxSlides}
         index={lightboxIndex}
         setIndex={setLightboxIndex}
         allAsanas={allAsanas}

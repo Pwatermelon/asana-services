@@ -660,9 +660,29 @@
   padding: 0.75em;
   background: var(--background-alt);
   border-radius: 8px;
-  cursor: pointer;
   transition: all 0.2s ease;
   border: 2px solid transparent;
+}
+
+.modal-asana-item-open {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border-radius: 6px;
+}
+
+.modal-asana-item-open:hover {
+  opacity: 0.92;
 }
 
 .modal-asana-item:hover {
@@ -1140,6 +1160,35 @@
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.user-photo-lightbox-img-missing {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 1rem;
+  margin: 0;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.user-photo-lightbox--waiting {
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.user-photo-lightbox-waiting-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  color: #fff;
+  background: rgba(30, 41, 59, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.user-photo-lightbox-waiting-inner p {
+  margin: 0;
+  font-size: 1.05rem;
 }
 
 .user-photo-lightbox-nav {
@@ -1669,11 +1718,80 @@
   white-space: nowrap;
 }
 
+.asana-sameas-links-not-same {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.55rem;
+  flex-shrink: 0;
+}
+
+.modal-asana-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.modal-asana-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.modal-asana-item-action-same,
+.modal-asana-item .asana-sameas-links-not-same {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.55rem;
+}
+
+.modal-asana-item .asana-sameas-links-not-same {
+  margin-left: 0;
+}
+
 .asana-sameas-links-empty {
   margin: 0;
   text-align: center;
   color: var(--text-secondary);
   font-size: 0.95rem;
+}
+
+.photo-links-panel-tabs,
+.photo-links-view-tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border-light);
+  flex-wrap: wrap;
+}
+
+.photo-links-panel-tab,
+.photo-links-view-tab {
+  border: 1px solid var(--border-light);
+  background: var(--background-alt, #f1f5f9);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.photo-links-panel-tab--active,
+.photo-links-view-tab--active {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #fff;
+}
+
+.photo-links-view-tabs {
+  padding-top: 0.65rem;
+  border-bottom: none;
+}
+
+.asana-sameas-links-item--not-same {
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .user-lightbox-same-name-linked-strip {

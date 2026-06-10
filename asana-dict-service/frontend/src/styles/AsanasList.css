@@ -115,8 +115,24 @@
   border-top: 1px solid var(--border-light);
 }
 
+:root {
+  --catalog-sticky-offset: 9.5rem;
+}
+
 .letter-section {
   margin-bottom: 1.25em;
+  scroll-margin-top: calc(var(--app-header-offset, 56px) + var(--catalog-sticky-offset, 9.5rem));
+}
+
+.catalog-page-head {
+  margin-bottom: 0.5rem;
+}
+
+.page-title--catalog {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  color: var(--text-primary);
 }
 
 .letter-heading {
@@ -141,9 +157,9 @@
 .alphabet-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5em;
-  margin-bottom: 1.25em;
-  padding: 0.85em 1em;
+  gap: 0.35em;
+  margin-bottom: 0.75em;
+  padding: 0.55em 0.75em;
   background: var(--card-background);
   border-radius: 12px;
   box-shadow: var(--shadow-sm);
@@ -161,7 +177,9 @@
   color: var(--text-primary);
   text-decoration: none;
   border-radius: 8px;
-  font-weight: 600;
+  font-weight: 800;
+  font-size: 1.05em;
+  letter-spacing: 0.02em;
   transition: all 0.2s ease;
   border: 1px solid transparent;
 }
@@ -174,8 +192,38 @@
   border-color: var(--primary-color);
 }
 
+.catalog-toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.catalog-toolbar--sticky {
+  position: sticky;
+  top: var(--app-header-offset);
+  z-index: 90;
+  background: var(--background);
+  padding-top: 0.15rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.page-header--catalog {
+  margin-bottom: 0.25rem;
+}
+
+.page-title--compact {
+  font-size: 1.35rem;
+  margin: 0 0 0.25rem;
+}
+
+.alphabet-nav a.alphabet-link,
+.alphabet-nav button.alphabet-link {
+  cursor: pointer;
+  font: inherit;
+}
+
 .search-form-container {
-  margin: 0.5em 0 0.75em 0;
+  margin: 0.35em 0 0.5em 0;
   background: var(--card-background);
   border-radius: 10px;
   padding: 0.65em 0.9em;

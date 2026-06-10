@@ -222,6 +222,7 @@ def sync_owl_to_db_after_owl_write() -> None:
 def release_owl_write_lease_and_resync() -> None:
     """Снять одну lease запись в OWL и запустить синхронизацию зеркала (после импорта / upload)."""
     from app.main import SessionLocal
+    from app.ontology import invalidate_ontology_cache
 
     if SessionLocal is None:
         return
@@ -230,4 +231,5 @@ def release_owl_write_lease_and_resync() -> None:
         release_owl_write_lease(db)
     finally:
         db.close()
+    invalidate_ontology_cache()
     run_sync_with_new_session()

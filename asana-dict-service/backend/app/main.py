@@ -564,6 +564,7 @@ def init_database():
         from sqlalchemy import text
         from app.models import (
             AboutProject,
+            AsanaNameMeta,
             AuditEvent,
             AISimilarityProposal,
             CatalogMirrorItem,
@@ -572,6 +573,7 @@ def init_database():
             ImportBatch,
             ImportStagingRow,
             ModerationItem,
+            NameImportBatch,
             User,
         )
         try:
@@ -584,6 +586,12 @@ def init_database():
                     conn.execute(text("CREATE SCHEMA IF NOT EXISTS dict_schema"))
                     conn.execute(text("ALTER TABLE IF EXISTS dict_schema.users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(1024)"))
                     conn.execute(text("ALTER TABLE IF EXISTS dict_schema.users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE"))
+                    conn.execute(
+                        text(
+                            "ALTER TABLE IF EXISTS dict_schema.asana_name_meta "
+                            "ADD COLUMN IF NOT EXISTS import_batch_id INTEGER"
+                        )
+                    )
                     Base.metadata.create_all(
                         bind=conn,
                         tables=[
@@ -594,6 +602,8 @@ def init_database():
                             ModerationItem.__table__,
                             CatalogSyncState.__table__,
                             CatalogMirrorItem.__table__,
+                            AsanaNameMeta.__table__,
+                            NameImportBatch.__table__,
                             ImportBatch.__table__,
                             ImportStagingRow.__table__,
                             AISimilarityProposal.__table__,
@@ -746,6 +756,16 @@ def run_application_startup() -> None:
             except Exception as sync_err:
                 logger.warning("Синхронизация зеркала после очистки асан без фото: %s", sync_err)
 
+    if os.getenv("OWL_MIGRATE_PHOTO_LINKS_ON_START", "true").lower() in ("1", "true", "yes"):
+        try:
+            from app.photo_links import run_photo_links_migration
+
+            mig = run_photo_links_migration()
+            if not mig.get("skipped"):
+                logger.info("Старт: миграция связей на уровень фото: %s", mig)
+        except Exception as mig_err:
+            logger.warning("Миграция photo-level links пропущена: %s", mig_err, exc_info=True)
+
     # OWL: isSameAsObject Transitive+Symmetric в файле + проверка owlrl (без ручного правления онтологии).
     if os.getenv("OWL_UPGRADE_SAME_AS_ON_START", "true").lower() in ("1", "true", "yes"):
         try:
@@ -807,6 +827,31 @@ def run_application_startup() -> None:
                 except Exception as rel_err:
                     logger.warning("release_owl_write_lease после миграции staging: %s", rel_err)
             db_mig.close()
+
+    db_name_meta = SessionLocal()
+    lease_name_meta = False
+    try:
+        from app.catalog_sync import acquire_owl_write_lease, release_owl_write_lease
+        from app.name_metadata import migrate_name_created_at_from_owl_to_db
+
+        acquire_owl_write_lease(db_name_meta)
+        lease_name_meta = True
+        migrate_name_created_at_from_owl_to_db(db_name_meta)
+        db_name_meta.commit()
+    except Exception as name_meta_mig_err:
+        db_name_meta.rollback()
+        logger.warning(
+            "Миграция nameCreatedAt OWL→PostgreSQL пропущена: %s",
+            name_meta_mig_err,
+            exc_info=True,
+        )
+    finally:
+        if lease_name_meta:
+            try:
+                release_owl_write_lease(db_name_meta)
+            except Exception as rel_err:
+                logger.warning("release_owl_write_lease после name metadata: %s", rel_err)
+        db_name_meta.close()
 
     try:
         from app.audit_context import maintain_audit_log
@@ -1039,6 +1084,9 @@ async def post_asana(
             if definition:
                 name_data["definition"] = definition
             name_id = add_asana_name(name_data)
+            from app.name_metadata import record_asana_name_created
+
+            record_asana_name_created(name_id)
             logger.debug(f"Created new name with ID: {name_id}")
         else:
             logger.error("Missing required name fields for new name")
@@ -1405,8 +1453,10 @@ async def delete_source(user: str = Depends(is_expert_or_admin), uri: str = Quer
 @app.get("/api/asana-names")
 async def get_asana_names():
     """Получить все названия асан (доступно всем)"""
+    from app.name_metadata import attach_name_metadata
+
     logger.info("Getting asana names list for all users")
-    names = load_asana_names()
+    names = attach_name_metadata(load_asana_names())
     logger.info(f"Retrieved {len(names)} asana names")
     return names
 
@@ -1419,6 +1469,9 @@ async def post_asana_name(name: AsanaNameCreate, user: str = Depends(is_expert_o
         if not name_id:
             logger.warning(f"Failed to add asana name: {name}")
             raise HTTPException(status_code=400, detail="Asana name already exists or invalid")
+        from app.name_metadata import record_asana_name_created
+
+        record_asana_name_created(name_id)
         logger.info(f"Successfully added asana name with ID: {name_id}")
         return {"message": "Asana name added successfully", "id": name_id}
     except Exception as e:
@@ -1435,6 +1488,9 @@ async def delete_asana_name(user: str = Depends(is_expert_or_admin), uri: str = 
         if not success:
             logger.warning(f"Asana name not found: {uri}")
             raise HTTPException(status_code=404, detail="Asana name not found")
+        from app.name_metadata import delete_asana_name_metadata
+
+        delete_asana_name_metadata(uri)
         logger.info(f"Successfully deleted asana name: {uri}")
         return {"message": "Asana name deleted successfully"}
     except ValueError as e:
@@ -1986,6 +2042,101 @@ async def get_asana_photo_by_source(asana_id: str, source_id: str):
 class SameAsRequest(BaseModel):
     target_asana_id: str
 
+
+class PhotoSameAsRequest(BaseModel):
+    target_photo_id: str
+
+
+@app.get("/api/photos/for-match", tags=["asana"])
+async def get_photos_for_match():
+    """Плоский список всех фото для модалки «Указать соответствие» (легче, чем GET /api/asanas)."""
+    try:
+        from app.photo_links import load_photos_for_match_index
+
+        rows = load_photos_for_match_index()
+        logger.info("Photos for match index: %s rows", len(rows))
+        return rows
+    except Exception as e:
+        logger.error("Error loading photos for match: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/photo/{photo_id}/not-same-as", tags=["asana"])
+async def get_photo_not_same_as(photo_id: str = Path(...)):
+    """Фото, помеченные notSameAsObject относительно данного фото."""
+    try:
+        from app.ontology import get_not_same_as_photos_for_api
+
+        return get_not_same_as_photos_for_api(photo_id)
+    except Exception as e:
+        logger.error("Error getting not-same-as photos: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/photo/{photo_id}/similar", tags=["asana"])
+async def get_photo_similar(photo_id: str = Path(...)):
+    """Связанные фото (sameAs + inferred), с контекстом асаны и источника."""
+    try:
+        from app.ontology import get_similar_photos_for_api
+
+        return get_similar_photos_for_api(photo_id)
+    except Exception as e:
+        logger.error("Error getting similar photos: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/photo/{photo_id}/same-as", tags=["asana"])
+async def add_photo_same_as(
+    photo_id: str = Path(...),
+    request: PhotoSameAsRequest = None,
+    user: str = Depends(is_expert_or_admin),
+):
+    from app.photo_links import add_same_as_photo
+
+    ok, err = add_same_as_photo(photo_id, request.target_photo_id)
+    if ok:
+        return {"message": "Совпадение фото указано"}
+    raise HTTPException(status_code=400, detail=err or "Не удалось добавить связь между фото")
+
+
+@app.delete("/api/photo/{photo_id}/same-as/{target_photo_id}", tags=["asana"])
+async def remove_photo_same_as(
+    photo_id: str = Path(...),
+    target_photo_id: str = Path(...),
+    user: str = Depends(is_expert_or_admin),
+):
+    from app.photo_links import remove_same_as_photo
+
+    remove_same_as_photo(photo_id, target_photo_id)
+    return {"message": "Связь sameAs между фото удалена"}
+
+
+@app.post("/api/photo/{photo_id}/not-same-as", tags=["asana"])
+async def add_photo_not_same_as(
+    photo_id: str = Path(...),
+    request: PhotoSameAsRequest = None,
+    user: str = Depends(is_expert_or_admin),
+):
+    from app.photo_links import add_not_same_as_photo
+
+    ok, err = add_not_same_as_photo(photo_id, request.target_photo_id)
+    if ok:
+        return {"message": "Связь «не соответствует» добавлена"}
+    raise HTTPException(status_code=400, detail=err or "Не удалось добавить notSameAs")
+
+
+@app.delete("/api/photo/{photo_id}/not-same-as/{target_photo_id}", tags=["asana"])
+async def remove_photo_not_same_as(
+    photo_id: str = Path(...),
+    target_photo_id: str = Path(...),
+    user: str = Depends(is_expert_or_admin),
+):
+    from app.photo_links import remove_not_same_as_photo
+
+    remove_not_same_as_photo(photo_id, target_photo_id)
+    return {"message": "Связь notSameAs удалена"}
+
+
 @app.get("/api/asana/{asana_id}/similar", tags=["asana"])
 async def get_asana_similar(asana_id: str = Path(...)):
     """
@@ -2096,11 +2247,28 @@ def _serialize_proposal(item: AISimilarityProposal) -> Dict[str, Any]:
     }
 
 
+def _build_photo_asana_index(
+    asana_index: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for asana in asana_index.values():
+        for photo in asana.get("photos") or []:
+            pid = photo.get("id")
+            if pid:
+                out[pid] = asana
+    return out
+
+
 def _enrich_proposal_with_asanas(
-    proposal: Dict[str, Any], asana_index: Dict[str, Dict[str, Any]]
+    proposal: Dict[str, Any],
+    asana_index: Dict[str, Dict[str, Any]],
+    photo_asana_index: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    a = asana_index.get(proposal.get("asana_a_id") or "") or {}
-    b = asana_index.get(proposal.get("asana_b_id") or "") or {}
+    photo_lookup = photo_asana_index or _build_photo_asana_index(asana_index)
+    photo_a_id = proposal.get("photo_a_id")
+    photo_b_id = proposal.get("photo_b_id")
+    a = asana_index.get(proposal.get("asana_a_id") or "") or photo_lookup.get(photo_a_id or "") or {}
+    b = asana_index.get(proposal.get("asana_b_id") or "") or photo_lookup.get(photo_b_id or "") or {}
 
     def _find_photo(asana: Dict[str, Any], photo_id: Optional[str]) -> Optional[Dict[str, Any]]:
         if not asana or not photo_id:
@@ -2243,7 +2411,10 @@ async def get_ai_proposals(
         logger.warning("Не удалось загрузить каталог для обогащения предложений: %s", e)
         asana_index = {}
 
-    enriched = [_enrich_proposal_with_asanas(r, asana_index) for r in rows]
+    photo_asana_index = _build_photo_asana_index(asana_index)
+    enriched = [
+        _enrich_proposal_with_asanas(r, asana_index, photo_asana_index) for r in rows
+    ]
     return enriched
 
 
@@ -2280,11 +2451,15 @@ async def confirm_ai_proposal(
             raise HTTPException(
                 status_code=400, detail=f"Предложение уже обработано (status={item.status})"
             )
-        ok = add_same_as_object(item.asana_a_id, item.asana_b_id)
+        if not item.photo_a_id or not item.photo_b_id:
+            raise HTTPException(status_code=400, detail="У предложения нет id фото")
+        from app.photo_links import add_same_as_photo
+
+        ok, err = add_same_as_photo(item.photo_a_id, item.photo_b_id)
         if not ok:
             raise HTTPException(
                 status_code=400,
-                detail="Не удалось установить связь (одна из асан могла быть удалена)",
+                detail=err or "Не удалось установить связь (одна из асан могла быть удалена)",
             )
         item.status = "confirmed"
         item.reviewed_at = datetime.utcnow().isoformat()
@@ -2316,6 +2491,12 @@ async def reject_ai_proposal(
             raise HTTPException(
                 status_code=400, detail=f"Предложение уже обработано (status={item.status})"
             )
+        if item.photo_a_id and item.photo_b_id:
+            from app.photo_links import add_not_same_as_photo
+
+            ok, err = add_not_same_as_photo(item.photo_a_id, item.photo_b_id)
+            if not ok:
+                raise HTTPException(status_code=400, detail=err or "Не удалось добавить notSameAs")
         item.status = "rejected"
         item.reviewed_at = datetime.utcnow().isoformat()
         item.reviewed_by = user

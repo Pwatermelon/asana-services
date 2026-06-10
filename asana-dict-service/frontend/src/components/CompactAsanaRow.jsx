@@ -1,9 +1,19 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
+/** Путь к странице асаны; безопасен для null и сырого id. */
+export function asanaPagePathSafe(asanaOrId) {
+  if (asanaOrId == null) return null;
+  const id = typeof asanaOrId === 'object' ? asanaOrId?.id : asanaOrId;
+  if (!id) return null;
+  const raw = String(id).split('#').pop();
+  return raw ? `/asana/${raw}-page` : null;
+}
+
 export function asanaPagePath(asana) {
-  const raw = asana.id.split('#').pop();
-  return `/asana/${raw}-page`;
+  const path = asanaPagePathSafe(asana);
+  if (!path) throw new Error('asanaPagePath: missing asana id');
+  return path;
 }
 
 export function CompactAsanaRow({ asana }) {

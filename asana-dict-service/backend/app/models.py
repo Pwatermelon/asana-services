@@ -134,6 +134,29 @@ class CatalogMirrorItem(Base):
     payload = Column(JSON, nullable=False)
 
 
+class AsanaNameMeta(Base):
+    """Метаданные названия асаны вне OWL (дата создания, пакет импорта)."""
+
+    __tablename__ = "asana_name_meta"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    uri = Column(String(2048), primary_key=True)
+    created_at = Column(String(64), nullable=False)
+    import_batch_id = Column(Integer, nullable=True, index=True)
+
+
+class NameImportBatch(Base):
+    """Один запуск импорта названий из Excel."""
+
+    __tablename__ = "name_import_batches"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(String(64), nullable=False)
+    user = Column(String(256), nullable=True)
+    imported_count = Column(Integer, nullable=False, default=0)
+
+
 class ImportBatch(Base):
     """
     Пакет импорта из Excel: сначала строки пишутся в staging без блокировки OWL,

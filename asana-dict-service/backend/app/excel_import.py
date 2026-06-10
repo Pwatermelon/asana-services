@@ -1878,10 +1878,17 @@ def run_asana_names_indexed_rows(
     user: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Импорт названий по списку (номер строки, нормализованные поля)."""
+    from app.name_metadata import (
+        finish_name_import_batch,
+        record_asana_name_created,
+        start_name_import_batch,
+    )
+
     imported = 0
     skipped = 0
     skipped_items: List[Dict[str, Any]] = []
     errors = []
+    batch_id = start_name_import_batch(user=user)
 
     for idx, normalized in indexed_rows:
         try:
@@ -1915,7 +1922,8 @@ def run_asana_names_indexed_rows(
             if normalized.get('definition'):
                 name_data["definition"] = str(normalized['definition']).strip()
             
-            add_asana_name(name_data)
+            name_id = add_asana_name(name_data)
+            record_asana_name_created(name_id, import_batch_id=batch_id)
             imported += 1
 
         except Exception as e:
@@ -1923,11 +1931,14 @@ def run_asana_names_indexed_rows(
             errors.append(error_msg)
             logger.error(error_msg)
 
+    finish_name_import_batch(batch_id, imported)
+
     return {
         "imported": imported,
         "skipped": skipped,
         "skipped_items": skipped_items,
         "errors": errors,
+        "import_batch_id": batch_id,
     }
 
 

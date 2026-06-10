@@ -51,6 +51,9 @@ html {
   /* Градиенты */
   --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   --gradient-secondary: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+
+  /* Высота фиксированной шапки — для sticky-панели каталога */
+  --app-header-offset: clamp(4rem, 4.15rem + 0.55vw, 4.65rem);
 }
 
 body {
@@ -74,7 +77,7 @@ body {
 .main-content {
   flex: 1;
   /* Минимальный зазор под фиксированный navbar (двухстрочный бренд + ссылки) */
-  padding-top: clamp(4rem, 4.15rem + 0.55vw, 4.65rem);
+  padding-top: var(--app-header-offset);
 }
 
 .container {
@@ -304,8 +307,8 @@ textarea::placeholder {
 }
 
 @media (max-width: 768px) {
-  .main-content {
-    padding-top: clamp(3.85rem, 4rem + 1.2vw, 4.45rem);
+  :root {
+    --app-header-offset: clamp(3.85rem, 4rem + 1.2vw, 4.45rem);
   }
 
   .container {

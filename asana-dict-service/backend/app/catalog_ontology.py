@@ -30,7 +30,7 @@ def snapshot_graph_to_mirror(session: "Session", g: Graph) -> None:
 
     names = load_asana_names_from_graph(g)
     sources = load_sources_from_graph(g)
-    asanas = load_asanas_from_graph(g)
+    asanas = load_asanas_from_graph(g, for_mirror=True)
 
     session.query(CatalogMirrorItem).delete()
     for n in names:
@@ -97,8 +97,6 @@ def build_graph_from_mirror(session: "Session") -> Graph:
         name_id = nm.get("id")
         if name_id:
             g.add((asana_uri, ASANA.hasName, URIRef(name_id)))
-        for target in p.get("same_as_ids") or []:
-            g.add((asana_uri, ASANA.isSameAsObject, URIRef(target)))
 
         for ph in p.get("photos") or []:
             pid = ph.get("id")
@@ -120,6 +118,10 @@ def build_graph_from_mirror(session: "Session") -> Graph:
             if src:
                 g.add((photo_uri, ASANA.hasSource, URIRef(src)))
             g.add((asana_uri, ASANA.hasPhoto, photo_uri))
+            for target in ph.get("same_as_photo_ids") or []:
+                g.add((photo_uri, ASANA.isSameAsObject, URIRef(target)))
+            for target in ph.get("not_same_as_photo_ids") or []:
+                g.add((photo_uri, ASANA.notSameAsObject, URIRef(target)))
 
     return g
 
@@ -151,13 +153,14 @@ def persist_ontology_graph(g: Graph) -> None:
             os.makedirs(os.path.dirname(config.OWL_FILE_PATH) or ".", exist_ok=True)
             # В OWL-файл всегда включаем TBox (isSameAsObject), даже если в зеркале только ABox
             from app.ontology import ASANA
-            from app.owl_reasoning import inject_is_same_as_owl_axioms
+            from app.owl_reasoning import inject_is_same_as_owl_axioms, inject_not_same_as_owl_axioms
 
             export_g = Graph()
             export_g.bind("asana", ASANA)
             for triple in g:
                 export_g.add(triple)
             inject_is_same_as_owl_axioms(export_g, ASANA.isSameAsObject)
+            inject_not_same_as_owl_axioms(export_g, ASANA.notSameAsObject)
             export_g.serialize(destination=config.OWL_FILE_PATH, format="xml")
             sha = _file_sha256(config.OWL_FILE_PATH)
             ensure_catalog_sync_state_row(db)

@@ -1,81 +1,19 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
+import CatalogPageNav from '../components/CatalogPageNav';
 import {
-  catalogNameSuggestions,
   dedupeAsanasByDisplayNameRu,
   filterAsanasByCatalogQuery,
   normalizeCatalogNameKey,
 } from '../utils/catalogSearch';
 import { CompactAsanaRow } from '../components/CompactAsanaRow';
+import { scrollToCatalogLetter } from '../utils/catalogFocus';
 import '../styles/AsanasList.css';
 
-/** Поиск по каталогу: подсказки из загруженных асан, поиск по целым словам. */
-function CatalogSearchBar({ asanas, searchQuery, setSearchQuery, onRunSearch }) {
-  const [suggestOpen, setSuggestOpen] = useState(false);
-  const suggestions = useMemo(
-    () => catalogNameSuggestions(asanas, searchQuery, 14),
-    [asanas, searchQuery]
-  );
-  const showList =
-    suggestOpen && searchQuery.trim().length >= 1 && suggestions.length > 0;
-
-  return (
-    <div className="search-form-container">
-      <form
-        className="search-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onRunSearch();
-        }}
-      >
-        <div
-          className={`search-input-container${showList ? ' search-input-container--suggest' : ''}`}
-        >
-          <input
-            type="search"
-            enterKeyHint="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setSuggestOpen(true)}
-            onBlur={() => {
-              window.setTimeout(() => setSuggestOpen(false), 200);
-            }}
-            placeholder="Поиск…"
-            className="search-input"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <button type="submit" className="search-button">
-            Найти
-          </button>
-          {showList && (
-            <ul className="catalog-search-suggestions" role="listbox" aria-label="Подсказки по названию">
-              {suggestions.map((name) => (
-                <li key={name} role="none">
-                  <button
-                    type="button"
-                    className="catalog-search-suggestion-btn"
-                    role="option"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setSearchQuery(name);
-                      setSuggestOpen(false);
-                      onRunSearch(name);
-                    }}
-                  >
-                    {name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </form>
-    </div>
-  );
-}
-
 const AsanasList = () => {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [asanas, setAsanas] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
@@ -84,6 +22,26 @@ const AsanasList = () => {
   useEffect(() => {
     loadAsanas();
   }, []);
+
+  useEffect(() => {
+    const q = searchParams.get('search');
+    if (!q || !asanas.length) return;
+    setSearchQuery(q);
+    const matched = filterAsanasByCatalogQuery(asanas, q);
+    setSearchResults(dedupeAsanasByDisplayNameRu(matched));
+  }, [searchParams, asanas]);
+
+  /** Прокрутка к букве после перехода с другой страницы (/asanas#letter-…) */
+  useEffect(() => {
+    if (loading || searchResults) return;
+    const hash = location.hash;
+    if (!hash || hash.length < 2) return;
+    const id = decodeURIComponent(hash.slice(1));
+    const scrollToLetter = () => scrollToCatalogLetter(id);
+    scrollToLetter();
+    const t = window.setTimeout(scrollToLetter, 180);
+    return () => window.clearTimeout(t);
+  }, [loading, searchResults, location.hash]);
 
   const loadAsanas = async () => {
     try {
@@ -131,9 +89,17 @@ const AsanasList = () => {
     return byLetter;
   }, [asanas]);
 
+  const catalogLetters = useMemo(
+    () => Object.keys(mergedAsanasByRuName).sort((a, b) => a.localeCompare(b, 'ru')),
+    [mergedAsanasByRuName]
+  );
+
   const runCatalogSearch = useCallback(
     (explicitQuery) => {
-      const raw = explicitQuery !== undefined && explicitQuery !== null ? String(explicitQuery) : searchQuery;
+      const raw =
+        explicitQuery !== undefined && explicitQuery !== null
+          ? String(explicitQuery)
+          : searchQuery;
       const q = raw.trim();
       if (!q) {
         setSearchResults(null);
@@ -151,28 +117,20 @@ const AsanasList = () => {
 
   return (
     <div className="container">
-      <div className="page-header">
-        <h1 className="page-title">Каталог асан</h1>
+      <header className="catalog-page-head">
+        <h1 className="page-title page-title--catalog">Каталог асан</h1>
+      </header>
 
-        <CatalogSearchBar
-          asanas={asanas}
+      <div className="catalog-toolbar catalog-toolbar--sticky">
+        <CatalogPageNav
+          mode="inline"
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          onRunSearch={runCatalogSearch}
+          onSearch={runCatalogSearch}
+          letters={catalogLetters}
+          showAlphabet={!searchResults}
         />
       </div>
-
-      {!searchResults && (
-        <div className="alphabet-nav">
-          {Object.keys(mergedAsanasByRuName)
-            .sort()
-            .map((letter) => (
-              <a key={letter} href={`#letter-${letter}`} className="alphabet-link">
-                {letter}
-              </a>
-            ))}
-        </div>
-      )}
 
       {searchResults ? (
         <div className="letter-section">
@@ -191,7 +149,7 @@ const AsanasList = () => {
         </div>
       ) : (
         Object.entries(mergedAsanasByRuName)
-          .sort()
+          .sort(([a], [b]) => a.localeCompare(b, 'ru'))
           .map(([letter, letterAsanas]) => (
             <div key={letter} className="letter-section" id={`letter-${letter}`}>
               <h2 className="letter-heading">{letter}</h2>
