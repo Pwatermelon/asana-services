@@ -103,16 +103,17 @@ def _collect_photos_from_catalog(asanas: List[Dict[str, Any]]) -> List[Dict[str,
 
 
 def _build_photo_meta_map(asanas: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
-    """photo_id → {source, hash, dedup_fp}.
+    """photo_id → {source, hash, dedup_fp, name_ru}.
 
     Используется для отсева «шумных» пар, которые эксперту бесполезны:
-    - одна и та же книга у обоих фото → авторское решение;
+    - одна книга и разные названия асан → автор уже разделил позы;
     - одинаковый photo_hash → буквально один и тот же файл, загруженный дважды;
     - одинаковый photo_dedup_fingerprint → визуально идентичные кадры
       (например, один и тот же скан, загруженный под разными названиями).
     """
     mapping: Dict[str, Dict[str, str]] = {}
     for a in asanas:
+        name_ru = ((a.get("name") or {}).get("name_ru") or "").strip()
         for p in a.get("photos") or []:
             pid = p.get("id") or ""
             if not pid:
@@ -121,6 +122,7 @@ def _build_photo_meta_map(asanas: List[Dict[str, Any]]) -> Dict[str, Dict[str, s
                 "source": p.get("source") or "",
                 "hash": p.get("photo_hash") or "",
                 "dedup_fp": p.get("photo_dedup_fingerprint") or "",
+                "name_ru": name_ru,
             }
     return mapping
 
@@ -131,7 +133,10 @@ def _pair_is_noise(meta_a: Dict[str, str], meta_b: Dict[str, str]) -> Optional[s
         return None
     sa, sb = meta_a.get("source"), meta_b.get("source")
     if sa and sb and sa == sb:
-        return "same_source"
+        name_a = (meta_a.get("name_ru") or "").strip()
+        name_b = (meta_b.get("name_ru") or "").strip()
+        if name_a and name_b and name_a.casefold() != name_b.casefold():
+            return "same_source"
     ha, hb = meta_a.get("hash"), meta_b.get("hash")
     if ha and hb and ha == hb:
         return "identical_file"
@@ -228,7 +233,7 @@ def run_ai_scan_and_save(
     existing_pairs = _get_decided_photo_pairs() if skip_existing_links else set()
 
     # Чистим старые мусорные предложения из БД — те, что уже стали «шумом»
-    # (одна книга, одинаковый файл, одинаковый отпечаток).
+    # (одна книга с разными названиями, одинаковый файл, одинаковый отпечаток).
     purged_noise = purge_noise_proposals(db, photo_meta_map)
     if purged_noise:
         logger.info("AI scan: удалено мусорных предложений из БД: %d", purged_noise)
@@ -267,8 +272,11 @@ def run_ai_scan_and_save(
             photo_meta_map.get(photo_a_id or "", {}),
             photo_meta_map.get(photo_b_id or "", {}),
         )
-        if noise in ("identical_file", "identical_image"):
-            skipped_identical_photo += 1
+        if noise:
+            if noise == "same_source":
+                skipped_same_source += 1
+            else:
+                skipped_identical_photo += 1
             continue
 
         pair_sorted = tuple(sorted([photo_a_id, photo_b_id]))
@@ -316,7 +324,7 @@ def purge_noise_proposals(
     photo_meta_map: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> int:
     """Удаляет из БД pending-предложения, которые стали «шумом»:
-    одна книга, одинаковый файл, одинаковый визуальный отпечаток.
+    одна книга с разными названиями, одинаковый файл, одинаковый визуальный отпечаток.
 
     Возвращает количество удалённых записей. Не коммитит — это делает caller
     (например, `run_ai_scan_and_save` коммитит весь батч одной транзакцией).
