@@ -1091,7 +1091,7 @@ export default function UserPhotoLightbox({
           </div>
 
         <div
-          className="user-photo-lightbox-inner"
+          className="user-photo-lightbox-scroll"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="user-photo-lightbox-viewport">
@@ -1138,6 +1138,7 @@ export default function UserPhotoLightbox({
             </div>
           </div>
 
+          <div className="user-photo-lightbox-panel">
           {displaySlides.length > 1 && (
             <p className="user-photo-lightbox-counter">
               {safeIndex + 1} / {displaySlides.length}
@@ -1317,6 +1318,7 @@ export default function UserPhotoLightbox({
             </div>
           )}
 
+          </div>
         </div>
       </div>
   ) : null;
