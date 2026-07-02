@@ -1057,6 +1057,20 @@
   text-align: center;
 }
 
+.user-photo-lightbox-catalog-source {
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: rgba(226, 232, 240, 0.82);
+  line-height: 1.35;
+  word-break: break-word;
+  text-align: center;
+}
+
+.user-photo-lightbox-catalog-source .user-photo-source-caption-link--on-dark {
+  font-size: inherit;
+}
+
 .user-lightbox-more-wrap {
   position: relative;
 }
@@ -1249,6 +1263,10 @@
   border-top: 1px solid rgba(148, 163, 184, 0.35);
 }
 
+.user-lightbox-source-strip--actions-only {
+  padding-top: 0.65rem;
+}
+
 .user-lightbox-other-sources-strip {
   position: relative;
   z-index: 6;
@@ -1432,13 +1450,13 @@
   display: block;
 }
 
-/* Список «под другими названиями»: квадратная миниатюра слева (не width:100% карточки) */
+/* Список «под другими названиями»: квадратная миниатюра слева */
 .user-lightbox-other-source-row-inner--with-photo .user-lightbox-other-source-photo--row {
-  flex: 0 0 3.25rem;
-  width: 3.25rem;
-  height: 3.25rem;
-  min-width: 3.25rem;
-  max-width: 3.25rem;
+  flex: 0 0 5.5rem;
+  width: 5.5rem;
+  height: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 5.5rem;
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
@@ -1507,7 +1525,7 @@
   letter-spacing: 0.04em;
 }
 
-/* Подпись источника в блоке «Это издание» (всегда одна, под заголовком) */
+/* Подпись источника под заголовком лайтбокса */
 .user-lightbox-edition-caption {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
@@ -1819,8 +1837,8 @@
 
 .user-lightbox-same-name-linked-thumb {
   flex: 0 0 auto;
-  width: 4.25rem;
-  height: 4.25rem;
+  width: 5.5rem;
+  height: 5.5rem;
   padding: 0;
   border: 2px solid rgba(148, 163, 184, 0.35);
   border-radius: 8px;

@@ -42,10 +42,10 @@ const normRotation = (d) => ((d % 360) + 360) % 360;
  *  - onAsanaDeleted() — вызывается, когда из-за удаления последнего фото
  *                       (или явного удаления сущности) исчезла запись асаны.
  *                       Родитель решает, что сделать (например, навигировать).
- *  - renderEditionCaption(slide, ownerAsana) → ReactNode — рендер подписи под
- *                       картинкой в блоке «Это издание» (только editionStripVariant='edition').
- *  - editionStripVariant: 'edition' | 'asana-link' — на странице источника вместо
- *                       блока «Это издание» показывается ссылка на страницу асаны в каталоге.
+ *  - renderEditionCaption(slide, ownerAsana) → ReactNode — ссылка на источник
+ *                       под заголовком (editionStripVariant='edition').
+ *  - editionStripVariant: 'edition' | 'asana-link' — на странице источника под
+ *                       заголовком показывается ссылка на страницу асаны в каталоге.
  *  - getPageAsana(slide, ownerAsana) → asana — «страница» для sameAs/похожих (группа по имени).
  *  - getTitleParts(slide, ownerAsana, defaultTitle) → { title, subtitle? } —
  *                       заголовок и подзаголовок над фото.
@@ -304,12 +304,28 @@ export default function UserPhotoLightbox({
     });
   }, [open, lbSlideOwnerFull, lbSubjectPhotoId, effectiveSimilarPhotos, photoGalleryVersion]);
 
-  const lightboxSameSourceSiblings = useMemo(() => {
-    if (!lbSlide || !lbSlide.linkId) return [];
-    return displaySlides
-      .map((slide, i) => ({ slide, i }))
-      .filter(({ slide }) => slide.linkId === lbSlide.linkId);
-  }, [displaySlides, lbSlide]);
+  const topbarSourceNode = useMemo(() => {
+    if (!lbSlide) return null;
+    if (editionStripVariant === 'edition') {
+      if (!lbSlide.caption) return null;
+      if (typeof renderEditionCaption === 'function') {
+        return renderEditionCaption(lbSlide, lbSlideOwnerFull);
+      }
+      return lbSlide.caption;
+    }
+    if (editionStripVariant === 'asana-link' && lbSlideOwnerFull) {
+      return (
+        <Link
+          className="user-photo-source-caption-link user-photo-source-caption-link--on-dark"
+          to={asanaPagePath(lbSlideOwnerFull)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {lbSlideOwnerFull.name?.name_ru || 'Открыть асану в каталоге'}
+        </Link>
+      );
+    }
+    return null;
+  }, [lbSlide, lbSlideOwnerFull, editionStripVariant, renderEditionCaption]);
 
   const lightboxOtherNameRows = useMemo(() => {
     if (!open || !lbSlideOwnerFull || !lbSubjectPhotoId) return [];
@@ -965,6 +981,11 @@ export default function UserPhotoLightbox({
                   {titleParts.subtitle}
                 </div>
               ) : null}
+              {topbarSourceNode ? (
+                <div className="user-photo-lightbox-catalog-source">
+                  {topbarSourceNode}
+                </div>
+              ) : null}
             </div>
             <div className="user-photo-lightbox-topbar-side user-photo-lightbox-topbar-side--right">
               <div className="user-lightbox-more-wrap">
@@ -1095,31 +1116,11 @@ export default function UserPhotoLightbox({
             </p>
           )}
 
-          <div className="user-lightbox-source-strip" onClick={(e) => e.stopPropagation()}>
-            {editionStripVariant === 'edition' ? (
-              <>
-                <h4 className="user-lightbox-source-strip-title">Это издание</h4>
-                {lbSlide.caption ? (
-                  <p className="user-lightbox-edition-caption">
-                    {typeof renderEditionCaption === 'function'
-                      ? renderEditionCaption(lbSlide, lbSlideOwnerFull)
-                      : lbSlide.caption}
-                  </p>
-                ) : null}
-              </>
-            ) : editionStripVariant === 'asana-link' && lbSlideOwnerFull ? (
-              <p className="user-lightbox-edition-caption">
-                <Link
-                  className="user-photo-source-caption-link user-photo-source-caption-link--on-dark"
-                  to={asanaPagePath(lbSlideOwnerFull)}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {lbSlideOwnerFull.name?.name_ru || 'Открыть асану в каталоге'}
-                </Link>
-              </p>
-            ) : null}
-
-            {isExpertOrAdmin && lbSlide?.ownerId && (
+          {isExpertOrAdmin && lbSlide?.ownerId && (
+            <div
+              className="user-lightbox-source-strip user-lightbox-source-strip--actions-only"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="user-lightbox-expert-edition-actions">
                 <button
                   type="button"
@@ -1186,37 +1187,8 @@ export default function UserPhotoLightbox({
                   Удалить сущность
                 </button>
               </div>
-            )}
-
-            {lightboxSameSourceSiblings.length > 1 && (
-              <div
-                className="user-lightbox-source-thumbs"
-                role="tablist"
-                aria-label="Другие фото этой асаны из этого издания"
-              >
-                {lightboxSameSourceSiblings.map(({ slide, i }) => (
-                  <button
-                    key={slide.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={i === index}
-                    className={
-                      i === index
-                        ? 'user-lightbox-source-thumb user-lightbox-source-thumb--active'
-                        : 'user-lightbox-source-thumb'
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIndex(i);
-                    }}
-                  >
-                    <img src={slide.src} alt="" />
-                  </button>
-                ))}
-              </div>
-            )}
-
-          </div>
+            </div>
+          )}
 
           {lightboxSameNameLinkedPhotos.length > 0 && (
             <div
@@ -1224,7 +1196,7 @@ export default function UserPhotoLightbox({
               onClick={(e) => e.stopPropagation()}
             >
               <h4 className="user-lightbox-source-strip-title">
-                Асана с тем же названием но в других источниках
+                Данная асана под таким же названием
               </h4>
               <div className="user-lightbox-same-name-linked-scroll">
                 {lightboxSameNameLinkedPhotos.map((ph) => {
