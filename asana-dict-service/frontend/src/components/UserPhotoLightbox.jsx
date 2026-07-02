@@ -1094,7 +1094,7 @@ export default function UserPhotoLightbox({
           className="user-photo-lightbox-inner"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="user-photo-lightbox-stage">
+          <div className="user-photo-lightbox-viewport">
             {displaySlides.length > 1 && (
               <>
                 <button
@@ -1123,16 +1123,18 @@ export default function UserPhotoLightbox({
                 </button>
               </>
             )}
-            <div className="user-photo-lightbox-imgwrap">
-              {lbSlideSrc ? (
-                <img
-                  key={`${lbSlide.key}-${photoGalleryVersion}`}
-                  src={lbSlideSrc}
-                  alt=""
-                />
-              ) : (
-                <p className="user-photo-lightbox-img-missing">Не удалось загрузить изображение</p>
-              )}
+            <div className="user-photo-lightbox-stage">
+              <div className="user-photo-lightbox-imgwrap">
+                {lbSlideSrc ? (
+                  <img
+                    key={`${lbSlide.key}-${photoGalleryVersion}`}
+                    src={lbSlideSrc}
+                    alt=""
+                  />
+                ) : (
+                  <p className="user-photo-lightbox-img-missing">Не удалось загрузить изображение</p>
+                )}
+              </div>
             </div>
           </div>
 
