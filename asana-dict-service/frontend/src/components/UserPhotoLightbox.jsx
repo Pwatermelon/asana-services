@@ -374,6 +374,32 @@ export default function UserPhotoLightbox({
   const location = useLocation();
   const navigate = useNavigate();
 
+  const openLinkedPhotoInLightbox = (photoId, asanaId = null) => {
+    const photoCanon = canonicalPhotoId(photoId);
+    if (!photoCanon) return;
+
+    const idx = findSlideIndexByPhoto(displaySlides, photoCanon);
+    if (idx >= 0) {
+      setIndex(idx);
+      return;
+    }
+
+    const ownerCanon = asanaId ? canonicalAsanaId(asanaId) : null;
+    const target =
+      (ownerCanon &&
+        allAsanas.find((a) => canonicalAsanaId(a.id) === ownerCanon)) ||
+      null;
+    if (!target) return;
+
+    stashFocusPhoto(photoCanon, target.id);
+    const path = asanaPagePath(target);
+    const query = buildFocusPhotoQuery(photoCanon, target.id);
+    onClose();
+    navigate(`${path}?${query}`, {
+      state: { focusPhoto: photoCanon, focusOwner: target.id },
+    });
+  };
+
   const closeMatchModal = () => {
     setShowMatchModal(false);
     setMatchSubjectPhotoId(null);
@@ -1200,22 +1226,22 @@ export default function UserPhotoLightbox({
               </h4>
               <div className="user-lightbox-same-name-linked-scroll">
                 {lightboxSameNameLinkedPhotos.map((ph) => {
-                  const target =
-                    catalogRepresentativeByNameRu(allAsanas, ph.nameRu) ||
-                    allAsanas.find((a) => a.id === ph.asana_id);
-                  const to = target ? asanaPagePath(target) : null;
+                  const isActive =
+                    canonicalPhotoId(ph.photo_id) === canonicalPhotoId(lbSubjectPhotoId);
                   return (
                   <button
                     key={ph.key}
                     type="button"
-                    className="user-lightbox-same-name-linked-thumb"
+                    className={
+                      isActive
+                        ? 'user-lightbox-same-name-linked-thumb user-lightbox-same-name-linked-thumb--active'
+                        : 'user-lightbox-same-name-linked-thumb'
+                    }
                     title={ph.caption}
+                    aria-current={isActive ? 'true' : undefined}
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (to) {
-                        onClose();
-                        navigate(to);
-                      }
+                      openLinkedPhotoInLightbox(ph.photo_id, ph.asana_id);
                     }}
                   >
                     <img src={ph.src} alt="" />

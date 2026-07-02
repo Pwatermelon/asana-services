@@ -988,7 +988,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.35rem;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -1010,7 +1010,7 @@
   width: 100%;
   max-width: min(96vw, 1100px);
   align-self: center;
-  padding: 0.2rem 0 0.45rem;
+  padding: 0.15rem 0 0.25rem;
   margin-bottom: 0;
   background: transparent;
   box-sizing: border-box;
@@ -1150,18 +1150,16 @@
   position: relative;
   width: 100%;
   min-width: 0;
-  /* Фиксированная высота сцены: при перелистывании стрелки не «прыгают»
-     вверх-вниз, даже если у соседних фото разные пропорции. */
-  height: min(62vh, 720px);
+  max-height: min(58vh, 640px);
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-top: 0.25rem;
+  margin-top: 0;
 }
 
 .user-photo-lightbox-imgwrap {
   position: relative;
-  height: 100%;
+  max-height: min(58vh, 640px);
   max-width: 100%;
   display: flex;
   align-items: center;
@@ -1169,7 +1167,7 @@
 }
 
 .user-photo-lightbox-imgwrap img {
-  max-height: 100%;
+  max-height: min(58vh, 640px);
   max-width: 100%;
   object-fit: contain;
   border-radius: 8px;
@@ -1258,13 +1256,13 @@
   width: 100%;
   min-width: 0;
   max-width: 52rem;
-  margin-top: 0.5rem;
-  padding-top: 0.85rem;
+  margin-top: 0.25rem;
+  padding-top: 0.55rem;
   border-top: 1px solid rgba(148, 163, 184, 0.35);
 }
 
 .user-lightbox-source-strip--actions-only {
-  padding-top: 0.65rem;
+  padding-top: 0.45rem;
 }
 
 .user-lightbox-other-sources-strip {
@@ -1452,11 +1450,11 @@
 
 /* Список «под другими названиями»: квадратная миниатюра слева */
 .user-lightbox-other-source-row-inner--with-photo .user-lightbox-other-source-photo--row {
-  flex: 0 0 5.5rem;
-  width: 5.5rem;
-  height: 5.5rem;
-  min-width: 5.5rem;
-  max-width: 5.5rem;
+  flex: 0 0 7.5rem;
+  width: 7.5rem;
+  height: 7.5rem;
+  min-width: 7.5rem;
+  max-width: 7.5rem;
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
@@ -1539,7 +1537,7 @@
   flex-wrap: wrap;
   gap: 0.45rem;
   justify-content: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.35rem;
 }
 
 .user-lightbox-expert-btn {
@@ -1816,8 +1814,8 @@
   width: 100%;
   min-width: 0;
   max-width: 52rem;
-  margin-top: 0.75rem;
-  padding-top: 0.85rem;
+  margin-top: 0.45rem;
+  padding-top: 0.55rem;
   border-top: 1px solid rgba(148, 163, 184, 0.35);
 }
 
@@ -1837,14 +1835,24 @@
 
 .user-lightbox-same-name-linked-thumb {
   flex: 0 0 auto;
-  width: 5.5rem;
-  height: 5.5rem;
+  width: 7.5rem;
+  height: 7.5rem;
   padding: 0;
   border: 2px solid rgba(148, 163, 184, 0.35);
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
   background: rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.user-lightbox-same-name-linked-thumb:hover {
+  transform: scale(1.03);
+}
+
+.user-lightbox-same-name-linked-thumb--active {
+  border-color: #a5b4fc;
+  box-shadow: 0 0 0 1px rgba(165, 180, 252, 0.5);
 }
 
 .user-lightbox-same-name-linked-thumb img {
