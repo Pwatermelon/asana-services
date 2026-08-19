@@ -279,6 +279,14 @@ async def verify_admin_monitoring(request: Request):
     return Response(status_code=200)
 
 
+def _request_is_secure(request: Request) -> bool:
+    """HTTPS с учётом reverse proxy (nginx X-Forwarded-Proto)."""
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded:
+        return forwarded == "https"
+    return request.url.scheme == "https"
+
+
 @app.get("/api/auth/monitoring-session", include_in_schema=False)
 async def monitoring_session(
     request: Request,
@@ -290,7 +298,7 @@ async def monitoring_session(
     if not (next.startswith("/grafana") or next.startswith("/kibana")):
         raise HTTPException(status_code=400, detail="Недопустимый redirect")
     response = RedirectResponse(url=next, status_code=302)
-    secure = request.url.scheme == "https"
+    secure = _request_is_secure(request)
     response.set_cookie(
         key="monitoring_token",
         value=access_token,
@@ -310,7 +318,7 @@ async def monitoring_bootstrap(
 ):
     """Выдаёт cookie мониторинга без редиректа — для iframe во фронтенде."""
     _require_admin_from_token(access_token)
-    secure = request.url.scheme == "https"
+    secure = _request_is_secure(request)
     response = JSONResponse({"ok": True})
     response.set_cookie(
         key="monitoring_token",
@@ -333,7 +341,7 @@ def _clear_auth_cookies(response: Response, *, secure: bool) -> None:
 async def logout_session(request: Request):
     """Сброс cookie мониторинга и Swagger (localStorage чистит фронтенд)."""
     response = JSONResponse({"ok": True})
-    _clear_auth_cookies(response, secure=request.url.scheme == "https")
+    _clear_auth_cookies(response, secure=_request_is_secure(request))
     return response
 
 
@@ -467,6 +475,7 @@ class UserActivityMiddleware(BaseHTTPMiddleware):
         "/metrics",
         "/api/auth/verify-admin",
         "/api/auth/monitoring-session",
+        "/api/auth/monitoring-bootstrap",
     )
 
     async def dispatch(self, request: StarletteRequest, call_next):

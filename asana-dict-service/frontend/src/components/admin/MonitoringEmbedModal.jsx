@@ -12,24 +12,24 @@ export default function MonitoringEmbedModal({ open, onClose, kind }) {
   const tabs = kind === 'grafana' ? GRAFANA_DASHBOARD_TABS : KIBANA_LOG_TABS;
   const [activeTabId, setActiveTabId] = useState(tabs[0]?.id || '');
   const [sessionReady, setSessionReady] = useState(false);
-  const [sessionError, setSessionError] = useState(false);
+  const [sessionError, setSessionError] = useState('');
 
   const title = kind === 'grafana' ? 'Grafana — мониторинг' : 'Kibana — логи';
 
   useEffect(() => {
     if (!open) {
       setSessionReady(false);
-      setSessionError(false);
+      setSessionError('');
       return undefined;
     }
     setActiveTabId(tabs[0]?.id || '');
     let cancelled = false;
     (async () => {
       const token = window.localStorage.getItem('access_token');
-      const ok = await bootstrapMonitoringCookie(token);
+      const result = await bootstrapMonitoringCookie(token);
       if (cancelled) return;
-      setSessionReady(ok);
-      setSessionError(!ok);
+      setSessionReady(result.ok);
+      setSessionError(result.ok ? '' : result.message);
     })();
     return () => {
       cancelled = true;
@@ -108,9 +108,7 @@ export default function MonitoringEmbedModal({ open, onClose, kind }) {
 
         <div className="monitoring-embed-body">
           {sessionError && (
-            <p className="monitoring-embed-error">
-              Не удалось открыть мониторинг. Обновите страницу и войдите как администратор.
-            </p>
+            <p className="monitoring-embed-error">{sessionError}</p>
           )}
           {!sessionError && !sessionReady && (
             <p className="monitoring-embed-loading">Подключение к мониторингу…</p>

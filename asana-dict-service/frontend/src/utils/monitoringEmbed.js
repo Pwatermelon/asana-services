@@ -67,14 +67,49 @@ export function grafanaDashboardEmbedUrl(uid, slug) {
 
 /** Cookie monitoring_token для iframe Grafana/Kibana (только админ). */
 export async function bootstrapMonitoringCookie(accessToken) {
-  if (!accessToken) return false;
+  if (!accessToken) {
+    return { ok: false, status: 0, message: 'Сессия не найдена. Войдите в каталог заново.' };
+  }
   const params = new URLSearchParams({ access_token: accessToken });
   try {
     const res = await fetch(`/api/auth/monitoring-bootstrap?${params.toString()}`, {
       credentials: 'include',
     });
-    return res.ok;
+    if (res.ok) {
+      return { ok: true, status: res.status, message: '' };
+    }
+    if (res.status === 401) {
+      return {
+        ok: false,
+        status: res.status,
+        message: 'Сессия истекла. Обновите страницу и войдите снова.',
+      };
+    }
+    if (res.status === 403) {
+      return {
+        ok: false,
+        status: res.status,
+        message: 'Мониторинг доступен только администратору.',
+      };
+    }
+    if (res.status === 404) {
+      return {
+        ok: false,
+        status: res.status,
+        message:
+          'Сервис мониторинга не настроен на сервере (404). Обновите nginx.prod.conf и перезапустите nginx.',
+      };
+    }
+    return {
+      ok: false,
+      status: res.status,
+      message: `Не удалось получить доступ к мониторингу (HTTP ${res.status}).`,
+    };
   } catch {
-    return false;
+    return {
+      ok: false,
+      status: 0,
+      message: 'Сеть недоступна. Проверьте подключение и попробуйте снова.',
+    };
   }
 }

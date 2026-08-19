@@ -322,7 +322,7 @@ docker compose down
 - **Swagger** (`/api/docs`) — документация API.
 
 Доступ закрыт на уровне nginx: без cookie администратора откроется 403.  
-Ссылки в админ-панели выдают cookie через `/api/auth/monitoring-session` (нужен JWT админа).
+В админ-панели Grafana/Kibana открываются во встроенном окне: cookie выдаёт `GET /api/auth/monitoring-bootstrap` (маршрут nginx → `asana-backend`, не `server-module`).
 
 Прямые порты Prometheus/Elasticsearch/Kibana/Grafana наружу не публикуются — только через nginx.
 
