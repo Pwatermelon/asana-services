@@ -9,6 +9,7 @@ import {
 } from '../utils/catalogSearch';
 import { CompactAsanaRow } from '../components/CompactAsanaRow';
 import { scrollToCatalogLetter } from '../utils/catalogFocus';
+import { usePageSeo } from '../utils/pageSeo';
 import '../styles/AsanasList.css';
 
 const AsanasList = () => {
@@ -18,6 +19,13 @@ const AsanasList = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  usePageSeo({
+    title: 'Каталог асан',
+    description:
+      'Алфавитный каталог асан традиционных школ йоги с русскими и санскритскими названиями.',
+    path: '/asanas',
+  });
 
   useEffect(() => {
     loadAsanas();

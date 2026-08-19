@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Form, File, UploadFile, Query, Request, Path, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, Response
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, EmailStr
 import base64
@@ -18,6 +18,7 @@ import httpx
 from starlette.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
+from app.seo import build_sitemap_xml
 from app.smtp_client import send_email
 from app.auth import (
     get_current_user, is_admin, is_expert_or_admin, get_user_info_from_token_sync
@@ -302,6 +303,27 @@ async def monitoring_session(
     return response
 
 
+@app.get("/api/auth/monitoring-bootstrap", include_in_schema=False)
+async def monitoring_bootstrap(
+    request: Request,
+    access_token: str = Query(..., description="JWT администратора"),
+):
+    """Выдаёт cookie мониторинга без редиректа — для iframe во фронтенде."""
+    _require_admin_from_token(access_token)
+    secure = request.url.scheme == "https"
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        key="monitoring_token",
+        value=access_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=8 * 3600,
+        path="/",
+    )
+    return response
+
+
 def _clear_auth_cookies(response: Response, *, secure: bool) -> None:
     for key in ("monitoring_token", "access_token", "session_token"):
         response.delete_cookie(key=key, path="/", secure=secure, samesite="lax")
@@ -498,6 +520,13 @@ async def prometheus_metrics_middleware(request: Request, call_next):
     HTTP_REQUESTS_TOTAL.labels("asana-backend", method, path, str(response.status_code)).inc()
     HTTP_REQUEST_DURATION_SECONDS.labels("asana-backend", method, path).observe(elapsed)
     return response
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap_xml():
+    """Карта сайта для поисковых систем (асаны, источники, публичные страницы)."""
+    xml = build_sitemap_xml(_public_site_url())
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
 @app.get("/metrics", include_in_schema=False)

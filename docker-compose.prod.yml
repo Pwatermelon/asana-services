@@ -401,6 +401,7 @@ services:
       - GF_SECURITY_ADMIN_USER=${ADMIN_USERNAME:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-https://catalog-asan.ru/grafana/}
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
@@ -438,6 +439,8 @@ services:
       - SERVER_PUBLICBASEURL=${KIBANA_ROOT_URL:-https://catalog-asan.ru/kibana}
       - SERVER_BASEPATH=/kibana
       - SERVER_REWRITEBASEPATH=true
+      - SERVER_SECURITYRESPONSEHEADERS_DISABLEEMBEDDING=false
+      - CSP_STRICT=false
     depends_on:
       - elasticsearch
     networks:

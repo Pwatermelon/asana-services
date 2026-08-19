@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { contentAPI } from '../api/content';
 import { useAuth } from '../contexts/AuthContext';
+import { usePageSeo } from '../utils/pageSeo';
 import '../styles/AboutProject.css';
 
 const AboutProject = () => {
@@ -13,6 +14,13 @@ const AboutProject = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { isAdmin } = useAuth();
+
+  usePageSeo({
+    title: 'О проекте',
+    description:
+      'О проекте «Каталог асан традиционных школ йоги»: цели, методология и команда.',
+    path: '/about',
+  });
 
   useEffect(() => {
     loadContent();

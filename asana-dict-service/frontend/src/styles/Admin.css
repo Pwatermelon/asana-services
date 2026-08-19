@@ -110,6 +110,18 @@
   background: rgba(255, 255, 255, 0.55);
 }
 
+.admin-link-card--button {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.admin-link-card--button:focus-visible {
+  outline: 2px solid rgba(98, 0, 238, 0.55);
+  outline-offset: 2px;
+}
+
 .admin-link-card--grafana .admin-link-card__icon {
   background: linear-gradient(135deg, #f97316, #fb7185);
 }

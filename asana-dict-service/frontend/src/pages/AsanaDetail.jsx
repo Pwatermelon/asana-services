@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { asanasAPI } from '../api/asanas';
-import { asanaPagePath } from '../components/CompactAsanaRow';
+import { asanaPagePath, asanaPagePathSafe } from '../components/CompactAsanaRow';
 import UserPhotoLightbox from '../components/UserPhotoLightbox';
 import { normalizeCatalogNameKey } from '../utils/catalogSearch';
 import {
@@ -16,6 +16,7 @@ import {
   resolveFocusPhotoHint,
 } from '../utils/catalogFocus';
 import CatalogPageNav from '../components/CatalogPageNav';
+import { usePageSeo, DEFAULT_SITE_DESCRIPTION } from '../utils/pageSeo';
 import '../styles/AsanasList.css';
 import '../styles/AsanaDetail.css';
 
@@ -201,6 +202,23 @@ const AsanaDetail = () => {
   }, [asana, allAsanas]);
 
   const firstAsana = groupAsanas[0] || asana;
+
+  const seoTitle = firstAsana?.name?.name_ru || 'Асана';
+  const seoDescription = useMemo(() => {
+    const parts = [
+      firstAsana?.name?.name_ru,
+      firstAsana?.name?.name_sanskrit && `(${firstAsana.name.name_sanskrit})`,
+      firstAsana?.name?.definition,
+    ].filter(Boolean);
+    return parts.length ? parts.join(' — ') : DEFAULT_SITE_DESCRIPTION;
+  }, [firstAsana]);
+
+  usePageSeo({
+    title: seoTitle,
+    description: seoDescription,
+    path: asanaPagePathSafe(firstAsana || asana) || undefined,
+    type: 'article',
+  });
 
   /** Слайды для миниатюр и лайтбокса — все фото группы (+ фото владельца из focusPhoto, если ещё не в группе). */
   const slides = useMemo(() => {

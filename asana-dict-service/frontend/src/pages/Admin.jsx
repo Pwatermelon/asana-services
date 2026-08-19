@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import UsersManagement from '../components/admin/UsersManagement';
 import AuditEvents from '../components/admin/AuditEvents';
+import MonitoringEmbedModal from '../components/admin/MonitoringEmbedModal';
 import '../styles/Admin.css';
 
 const Admin = () => {
@@ -12,22 +13,10 @@ const Admin = () => {
     users: true,
     audit: false,
   });
+  const [monitoringModal, setMonitoringModal] = useState(null);
   const accessToken = window.localStorage.getItem('access_token');
   const baseUrl = `${window.location.protocol}//${window.location.hostname}`;
 
-  const monitoringUrl = (targetPath) => {
-    if (!accessToken) {
-      return `${baseUrl}/login?next=${encodeURIComponent(targetPath)}`;
-    }
-    const params = new URLSearchParams({
-      access_token: accessToken,
-      next: targetPath,
-    });
-    return `${baseUrl}/api/auth/monitoring-session?${params.toString()}`;
-  };
-
-  const grafanaUrl = monitoringUrl('/grafana/');
-  const kibanaUrl = monitoringUrl('/kibana/');
   const swaggerUrl = accessToken
     ? `${baseUrl}/api/docs?access_token=${encodeURIComponent(accessToken)}`
     : `${baseUrl}/login?next=${encodeURIComponent('/api/docs')}`;
@@ -60,19 +49,20 @@ const Admin = () => {
           {openSections.links && (
             <div className="admin-section-panel">
               <div className="admin-links-row">
-                <a
-                  href={grafanaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="admin-link-card admin-link-card--grafana"
+                <button
+                  type="button"
+                  className="admin-link-card admin-link-card--grafana admin-link-card--button"
+                  onClick={() => setMonitoringModal('grafana')}
                 >
                   <span className="admin-link-card__icon">G</span>
                   <span className="admin-link-card__content">
                     <span className="admin-link-card__title">Grafana</span>
-                    <span className="admin-link-card__subtitle">Мониторинг сервисов, API и инфраструктуры</span>
+                    <span className="admin-link-card__subtitle">
+                      Мониторинг сервисов — дашборды во вкладках
+                    </span>
                   </span>
-                  <span className="admin-link-card__arrow" aria-hidden="true">→</span>
-                </a>
+                  <span className="admin-link-card__arrow" aria-hidden="true">↗</span>
+                </button>
                 <a
                   href={swaggerUrl}
                   target="_blank"
@@ -86,19 +76,20 @@ const Admin = () => {
                   </span>
                   <span className="admin-link-card__arrow" aria-hidden="true">→</span>
                 </a>
-                <a
-                  href={kibanaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="admin-link-card admin-link-card--kibana"
+                <button
+                  type="button"
+                  className="admin-link-card admin-link-card--kibana admin-link-card--button"
+                  onClick={() => setMonitoringModal('kibana')}
                 >
                   <span className="admin-link-card__icon">LOG</span>
                   <span className="admin-link-card__content">
                     <span className="admin-link-card__title">Kibana Logs</span>
-                    <span className="admin-link-card__subtitle">Просмотр логов сервисов и поиск по ошибкам</span>
+                    <span className="admin-link-card__subtitle">
+                      Просмотр логов — фильтры во вкладках
+                    </span>
                   </span>
-                  <span className="admin-link-card__arrow" aria-hidden="true">→</span>
-                </a>
+                  <span className="admin-link-card__arrow" aria-hidden="true">↗</span>
+                </button>
               </div>
             </div>
           )}
@@ -142,6 +133,17 @@ const Admin = () => {
           )}
         </section>
       </div>
+
+      <MonitoringEmbedModal
+        open={monitoringModal === 'grafana'}
+        onClose={() => setMonitoringModal(null)}
+        kind="grafana"
+      />
+      <MonitoringEmbedModal
+        open={monitoringModal === 'kibana'}
+        onClose={() => setMonitoringModal(null)}
+        kind="kibana"
+      />
     </div>
   );
 };

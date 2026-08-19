@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { usePageSeo } from '../utils/pageSeo';
 import '../styles/Login.css';
 
 const Login = () => {
@@ -15,6 +16,12 @@ const Login = () => {
   const resetSuccessMessage = location.state?.message;
   const [searchParams] = useSearchParams();
   const nextPath = searchParams.get('next');
+
+  usePageSeo({
+    title: 'Вход',
+    path: '/login',
+    noindex: true,
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

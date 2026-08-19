@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { sourcesAPI } from '../api/sources';
 import { useAuth } from '../contexts/AuthContext';
+import { usePageSeo } from '../utils/pageSeo';
 import '../styles/SourcesList.css';
 
 function filterSourcesLocal(sources, query) {
@@ -32,6 +33,13 @@ const SourcesList = () => {
   const [searchActive, setSearchActive] = useState(false);
   const { isExpertOrAdmin } = useAuth();
   const navigate = useNavigate();
+
+  usePageSeo({
+    title: 'Источники',
+    description:
+      'Библиография и первоисточники асан традиционных школ йоги: книги, авторы, издательства.',
+    path: '/sources',
+  });
 
   useEffect(() => {
     loadSources();

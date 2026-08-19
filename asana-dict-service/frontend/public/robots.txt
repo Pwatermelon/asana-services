@@ -1,0 +1,21 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /users
+Disallow: /settings
+Disallow: /moderation
+Disallow: /ai-moderation
+Disallow: /names
+Disallow: /profile
+Disallow: /login
+Disallow: /confirm-registration
+Disallow: /reset-password
+Disallow: /asana/add
+Disallow: /sources/add
+Disallow: /sources/*/edit
+Disallow: /api/
+Disallow: /grafana/
+Disallow: /kibana/
+
+Sitemap: https://catalog-asan.ru/sitemap.xml

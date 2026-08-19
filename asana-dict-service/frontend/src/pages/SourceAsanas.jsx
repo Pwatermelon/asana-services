@@ -12,6 +12,7 @@ import {
   catalogNameSuggestions,
   filterAsanasByCatalogQuery,
 } from '../utils/catalogSearch';
+import { usePageSeo, DEFAULT_SITE_DESCRIPTION } from '../utils/pageSeo';
 import '../styles/AsanaDetail.css';
 import '../styles/AsanasList.css';
 import './SourceAsanas.css';
@@ -132,6 +133,14 @@ const SourceAsanas = () => {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [similarAsanas, setSimilarAsanas] = useState([]);
   const [photoGalleryVersion, setPhotoGalleryVersion] = useState(0);
+
+  usePageSeo({
+    title: source ? `Асаны из источника: ${source.title}` : 'Асаны из источника',
+    description: source
+      ? [source.title, source.author, source.year, source.annotation].filter(Boolean).join(' · ')
+      : DEFAULT_SITE_DESCRIPTION,
+    path: id ? `/sources/${id}/asanas` : undefined,
+  });
 
   useEffect(() => {
     loadData();

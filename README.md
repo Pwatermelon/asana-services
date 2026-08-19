@@ -254,6 +254,18 @@ sudo docker-compose up -d --scale asana-import=3
 
 Он обновляет версию образов и перезапускает стек на сервере.
 
+### Яндекс.Вебмастер и SEO
+
+После деплоя на `https://catalog-asan.ru`:
+
+1. **Подтверждение прав** — файл `frontend/public/yandex_5ef638559f7ee62a.html` (метод «HTML-файл»).
+2. **Главное зеркало** — указать `https://catalog-asan.ru` (без `www`, если не используется).
+3. **robots.txt** — `https://catalog-asan.ru/robots.txt` (статика из `frontend/public/robots.txt`).
+4. **Sitemap** — добавить в Вебмастере URL `https://catalog-asan.ru/sitemap.xml` (генерируется backend из OWL-каталога: асаны, источники, публичные страницы).
+5. **Переобход** — после крупных обновлений каталога можно запросить переиндексацию ключевых страниц в Вебмастере.
+
+Переменная `PUBLIC_SITE_URL` (или `SITE_URL`) в `.env` backend задаёт базовый URL в sitemap и canonical на фронте (`VITE_PUBLIC_SITE_URL` при сборке frontend).
+
 ---
 
 ## 11. Масштабирование импорта
