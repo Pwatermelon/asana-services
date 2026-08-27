@@ -154,7 +154,6 @@ body {
   padding: 0;
   background: var(--background);
   color: var(--text-primary);
-  margin-bottom: 4.5rem;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

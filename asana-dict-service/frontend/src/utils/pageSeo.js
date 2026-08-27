@@ -95,15 +95,24 @@ export function buildSiteGraphJsonLd() {
         email: SITE_EMAIL,
         description: DEFAULT_SITE_DESCRIPTION,
         foundingDate: '2025',
-        parentOrganization: {
-          '@type': 'CollegeOrUniversity',
-          name: 'Саратовский государственный технический университет имени Гагарина Ю.А.',
-          url: 'https://www.sstu.ru/',
-        },
         sameAs: [
           'https://vk.com/tatianashulgayoga',
           'https://vk.com/sergey_babkin9',
           'https://github.com/Pwatermelon',
+        ],
+        contactPoint: [
+          {
+            '@type': 'ContactPoint',
+            email: SITE_EMAIL,
+            contactType: 'technical support',
+            availableLanguage: 'Russian',
+          },
+          {
+            '@type': 'ContactPoint',
+            email: 'taiss@yandex.ru',
+            contactType: 'customer support',
+            availableLanguage: 'Russian',
+          },
         ],
       },
       {
