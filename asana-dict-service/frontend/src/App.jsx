@@ -25,6 +25,7 @@ import AsanaNamesPage from './pages/AsanaNamesPage';
 import AIModeration from './pages/AIModeration';
 import Profile from './pages/Profile';
 import ScrollToTop from './components/ScrollToTop';
+import NoindexGuard from './components/NoindexGuard';
 
 // Защищенные маршруты
 import PrivateRoute from './components/PrivateRoute';
@@ -36,6 +37,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <ScrollToTop />
+        <NoindexGuard />
         <div className="app">
           <Navbar />
           <main className="main-content">

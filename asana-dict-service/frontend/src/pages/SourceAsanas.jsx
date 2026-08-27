@@ -140,6 +140,14 @@ const SourceAsanas = () => {
       ? [source.title, source.author, source.year, source.annotation].filter(Boolean).join(' · ')
       : DEFAULT_SITE_DESCRIPTION,
     path: id ? `/sources/${id}/asanas` : undefined,
+    breadcrumbs: [
+      { name: 'Каталог асан', path: '/asanas' },
+      { name: 'Источники', path: '/sources' },
+      {
+        name: source?.title || 'Источник',
+        path: id ? `/sources/${id}/asanas` : '/sources',
+      },
+    ],
   });
 
   useEffect(() => {

@@ -16,6 +16,7 @@ const Navbar = () => {
   const [aiPendingCount, setAiPendingCount] = useState(0);
   const dropdownRef = useRef(null);
   const addMenuRef = useRef(null);
+  const navRef = useRef(null);
 
   const isActive = (path) => location.pathname === path;
 
@@ -72,6 +73,28 @@ const Navbar = () => {
   useEffect(() => {
     closeMobileMenu();
   }, [location.pathname, closeMobileMenu]);
+
+  /** Реальная высота шапки → --app-header-offset (иначе sticky-поиск «отстаёт» и виден зазор со скроллом). */
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return undefined;
+
+    const apply = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      if (h > 0) {
+        document.documentElement.style.setProperty('--app-header-offset', `${h}px`);
+      }
+    };
+
+    apply();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(apply) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', apply);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', apply);
+    };
+  }, [isAuthenticated, isAdmin, isExpertOrAdmin, user?.login]);
 
   useEffect(() => {
     if (!isMobileMenuOpen) return undefined;
@@ -243,7 +266,7 @@ const Navbar = () => {
 
   return (
     <>
-    <nav className="navbar">
+    <nav className="navbar" ref={navRef}>
       <div className="navbar-content">
         <Link to="/" className="navbar-brand">
           <span className="navbar-brand-line">Каталог асан</span>

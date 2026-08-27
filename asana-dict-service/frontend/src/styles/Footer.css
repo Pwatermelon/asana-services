@@ -1,11 +1,12 @@
+.site-footer,
 footer {
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   color: #ffffff;
   text-align: center;
-  padding: 1em 1.25rem;
+  padding: 0.65em 1.25rem 0.75em;
   font-size: 0.8125em;
   font-weight: 500;
-  line-height: 1.45;
+  line-height: 1.4;
   position: fixed;
   left: 0;
   right: 0;
@@ -16,3 +17,42 @@ footer {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.site-footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.site-footer-copy {
+  margin: 0;
+  opacity: 0.95;
+}
+
+.site-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.85rem;
+}
+
+.site-footer-nav a {
+  color: #e2e8f0;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.site-footer-nav a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .site-footer,
+  footer {
+    font-size: 0.75em;
+    padding: 0.55em 0.75rem 0.65em;
+  }
+}

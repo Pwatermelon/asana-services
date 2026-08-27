@@ -39,6 +39,10 @@ const SourcesList = () => {
     description:
       'Библиография и первоисточники асан традиционных школ йоги: книги, авторы, издательства.',
     path: '/sources',
+    breadcrumbs: [
+      { name: 'Каталог асан', path: '/asanas' },
+      { name: 'Источники', path: '/sources' },
+    ],
   });
 
   useEffect(() => {

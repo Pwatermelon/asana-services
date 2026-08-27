@@ -25,6 +25,10 @@ const AsanasList = () => {
     description:
       'Алфавитный каталог асан традиционных школ йоги с русскими и санскритскими названиями.',
     path: '/asanas',
+    breadcrumbs: [
+      { name: 'Главная', path: '/asanas' },
+      { name: 'Каталог асан', path: '/asanas' },
+    ],
   });
 
   useEffect(() => {

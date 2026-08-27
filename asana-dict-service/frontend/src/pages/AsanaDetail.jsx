@@ -16,7 +16,7 @@ import {
   resolveFocusPhotoHint,
 } from '../utils/catalogFocus';
 import CatalogPageNav from '../components/CatalogPageNav';
-import { usePageSeo, DEFAULT_SITE_DESCRIPTION } from '../utils/pageSeo';
+import { usePageSeo, DEFAULT_SITE_DESCRIPTION, buildAsanaJsonLd } from '../utils/pageSeo';
 import '../styles/AsanasList.css';
 import '../styles/AsanaDetail.css';
 
@@ -204,6 +204,7 @@ const AsanaDetail = () => {
   const firstAsana = groupAsanas[0] || asana;
 
   const seoTitle = firstAsana?.name?.name_ru || 'Асана';
+  const seoPath = asanaPagePathSafe(firstAsana || asana) || undefined;
   const seoDescription = useMemo(() => {
     const parts = [
       firstAsana?.name?.name_ru,
@@ -213,11 +214,32 @@ const AsanaDetail = () => {
     return parts.length ? parts.join(' — ') : DEFAULT_SITE_DESCRIPTION;
   }, [firstAsana]);
 
+  const seoJsonLd = useMemo(
+    () =>
+      buildAsanaJsonLd({
+        nameRu: firstAsana?.name?.name_ru,
+        nameSa: firstAsana?.name?.name_sanskrit,
+        definition: firstAsana?.name?.definition,
+        path: seoPath,
+      }),
+    [firstAsana, seoPath]
+  );
+
+  const seoBreadcrumbs = useMemo(
+    () => [
+      { name: 'Каталог асан', path: '/asanas' },
+      { name: seoTitle, path: seoPath || '/asanas' },
+    ],
+    [seoTitle, seoPath]
+  );
+
   usePageSeo({
     title: seoTitle,
     description: seoDescription,
-    path: asanaPagePathSafe(firstAsana || asana) || undefined,
+    path: seoPath,
     type: 'article',
+    breadcrumbs: seoBreadcrumbs,
+    jsonLd: seoJsonLd,
   });
 
   /** Слайды для миниатюр и лайтбокса — все фото группы (+ фото владельца из focusPhoto, если ещё не в группе). */

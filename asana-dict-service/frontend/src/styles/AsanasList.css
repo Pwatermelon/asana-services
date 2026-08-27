@@ -192,10 +192,6 @@
   border-color: var(--primary-color);
 }
 
-.catalog-toolbar {
-  margin-bottom: 0.75rem;
-}
-
 .catalog-toolbar--sticky {
   position: sticky;
   top: var(--app-header-offset);
@@ -205,6 +201,24 @@
   padding-bottom: 0.35rem;
   margin-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-light);
+  /* Закрывает субпиксельный зазор между fixed-navbar и sticky-панелью при прокрутке */
+  box-shadow: 0 -1px 0 0 var(--background);
+}
+
+.catalog-toolbar--sticky::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 3px;
+  background: var(--background);
+  pointer-events: none;
+}
+
+.catalog-toolbar {
+  position: relative;
+  margin-bottom: 0.75rem;
 }
 
 .page-header--catalog {

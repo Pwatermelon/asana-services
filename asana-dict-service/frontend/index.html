@@ -14,18 +14,66 @@
     <meta property="og:url" content="https://catalog-asan.ru/asanas">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="ru_RU">
-    <meta property="og:image" content="https://catalog-asan.ru/icon.svg">
+    <meta property="og:image" content="https://catalog-asan.ru/icon-512.png">
 
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Каталог асан традиционных школ йоги">
     <meta name="twitter:description" content="Справочник асан традиционных школ йоги: русские и санскритские названия, иллюстрации из первоисточников.">
-    <meta name="twitter:image" content="https://catalog-asan.ru/icon.svg">
+    <meta name="twitter:image" content="https://catalog-asan.ru/icon-512.png">
 
-    <!-- Favicon и иконки -->
+    <!-- Favicon: ICO/PNG — Яндекс и старые браузеры; SVG — современные -->
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
     <link rel="icon" type="image/svg+xml" href="/icon.svg">
-    <link rel="apple-touch-icon" href="/icon.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#6200EE">
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://catalog-asan.ru/#organization",
+          "name": "Каталог асан традиционных школ йоги",
+          "url": "https://catalog-asan.ru",
+          "logo": "https://catalog-asan.ru/icon-512.png",
+          "email": "zhukov.jm@gmail.com",
+          "description": "Справочник асан традиционных школ йоги: русские и санскритские названия, иллюстрации из первоисточников, связи между школами и источниками.",
+          "foundingDate": "2025",
+          "parentOrganization": {
+            "@type": "CollegeOrUniversity",
+            "name": "Саратовский государственный технический университет имени Гагарина Ю.А.",
+            "url": "https://www.sstu.ru/"
+          },
+          "sameAs": [
+            "https://vk.com/tatianashulgayoga",
+            "https://vk.com/sergey_babkin9",
+            "https://github.com/Pwatermelon"
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://catalog-asan.ru/#website",
+          "url": "https://catalog-asan.ru",
+          "name": "Каталог асан традиционных школ йоги",
+          "description": "Справочник асан традиционных школ йоги: русские и санскритские названия, иллюстрации из первоисточников, связи между школами и источниками.",
+          "inLanguage": "ru-RU",
+          "publisher": { "@id": "https://catalog-asan.ru/#organization" },
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": "https://catalog-asan.ru/asanas?search={search_term_string}"
+            },
+            "query-input": "required name=search_term_string"
+          }
+        }
+      ]
+    }
+    </script>
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>

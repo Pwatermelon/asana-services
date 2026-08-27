@@ -4,9 +4,100 @@
   box-sizing: border-box;
 }
 
-/* Стабильная ширина под скроллбар: меню не «прыгает» при lock scroll у модалок/оверлеев */
+/*
+ * Скролл: одна полоса у окна (особенно Windows Edge/Chrome, где overflow:auto
+ * рисует толстые полосы на каждом вложенном блоке).
+ */
 html {
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.55);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Вложенные скролл-зоны: тонкие полосы (Windows иначе показывает «лес» баров) */
+.catalog-search-suggestions,
+.photo-menu,
+.modal-body,
+.add-photo-form--modal,
+.asana-sameas-links-modal .modal-body,
+.user-photo-lightbox-scroll,
+.user-lightbox-other-sources-scroll,
+.user-lightbox-same-name-linked-scroll,
+.user-lightbox-source-thumbs,
+.user-lightbox-source-linked,
+.navbar-mobile-scroll,
+.searchable-select-options,
+.names-skipped-list,
+.users-table-container,
+.audit-table-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+  -ms-overflow-style: -ms-autohiding-scrollbar;
+}
+
+.catalog-search-suggestions::-webkit-scrollbar,
+.photo-menu::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.add-photo-form--modal::-webkit-scrollbar,
+.asana-sameas-links-modal .modal-body::-webkit-scrollbar,
+.navbar-mobile-scroll::-webkit-scrollbar,
+.searchable-select-options::-webkit-scrollbar,
+.names-skipped-list::-webkit-scrollbar,
+.users-table-container::-webkit-scrollbar,
+.audit-table-wrap::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.catalog-search-suggestions::-webkit-scrollbar-thumb,
+.photo-menu::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.add-photo-form--modal::-webkit-scrollbar-thumb,
+.asana-sameas-links-modal .modal-body::-webkit-scrollbar-thumb,
+.navbar-mobile-scroll::-webkit-scrollbar-thumb,
+.searchable-select-options::-webkit-scrollbar-thumb,
+.names-skipped-list::-webkit-scrollbar-thumb,
+.users-table-container::-webkit-scrollbar-thumb,
+.audit-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
+}
+
+.catalog-search-suggestions::-webkit-scrollbar-track,
+.photo-menu::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track,
+.add-photo-form--modal::-webkit-scrollbar-track,
+.asana-sameas-links-modal .modal-body::-webkit-scrollbar-track,
+.navbar-mobile-scroll::-webkit-scrollbar-track,
+.searchable-select-options::-webkit-scrollbar-track,
+.names-skipped-list::-webkit-scrollbar-track,
+.users-table-container::-webkit-scrollbar-track,
+.audit-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 :root {
@@ -52,8 +143,8 @@ html {
   --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   --gradient-secondary: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
 
-  /* Высота фиксированной шапки — для sticky-панели каталога */
-  --app-header-offset: clamp(4rem, 4.15rem + 0.55vw, 4.65rem);
+  /* Высота фиксированной шапки — перезаписывается из Navbar (ResizeObserver) */
+  --app-header-offset: 5.25rem;
 }
 
 body {
@@ -63,7 +154,8 @@ body {
   padding: 0;
   background: var(--background);
   color: var(--text-primary);
-  margin-bottom: 48px;
+  margin-bottom: 4.5rem;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -308,7 +400,7 @@ textarea::placeholder {
 
 @media (max-width: 768px) {
   :root {
-    --app-header-offset: clamp(3.85rem, 4rem + 1.2vw, 4.45rem);
+    --app-header-offset: 4.75rem;
   }
 
   .container {
