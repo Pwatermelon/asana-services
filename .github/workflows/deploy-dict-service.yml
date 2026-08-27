@@ -112,6 +112,8 @@ jobs:
           context: ./asana-dict-service/frontend
           file: ./asana-dict-service/frontend/Dockerfile
           push: true
+          build-args: |
+            VITE_APP_VERSION=${{ needs.resolve.outputs.version }}
           tags: plwatermelon/asana-frontend:${{ needs.resolve.outputs.version }}
 
       - name: AI / network service (YOLO + scan-duplicates)

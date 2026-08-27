@@ -197,16 +197,15 @@
 }
 
 .catalog-toolbar--sticky {
+  position: -webkit-sticky;
   position: sticky;
-  top: var(--app-header-offset);
+  top: var(--app-header-offset, 5.25rem);
   z-index: 90;
   background: var(--background);
   padding-top: 0.15rem;
   padding-bottom: 0.35rem;
   margin-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-light);
-  /* positioning context для ::before; sticky сам создаёт, но явно надёжнее */
-  isolation: isolate;
   box-shadow: 0 -1px 0 0 var(--background);
 }
 

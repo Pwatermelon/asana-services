@@ -177,6 +177,8 @@ services:
     build:
       context: ./asana-dict-service/frontend
       dockerfile: Dockerfile
+      args:
+        VITE_APP_VERSION: ${DICT_SERVICE_VERSION:-${ASANA_IMPORT_TAG:-dev}}
     container_name: asana-frontend
     ports:
       - "3000:3000"

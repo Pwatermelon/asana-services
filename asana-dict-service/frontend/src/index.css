@@ -5,12 +5,10 @@
 }
 
 /*
- * Скролл: одна полоса у окна (особенно Windows Edge/Chrome, где overflow:auto
- * рисует толстые полосы на каждом вложенном блоке).
+ * Важно: не ставить overflow-x: hidden на html/body —
+ * в Chrome/Edge это ломает position: sticky у поиска каталога.
  */
 html {
-  overflow-x: hidden;
-  overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
@@ -154,7 +152,8 @@ body {
   padding: 0;
   background: var(--background);
   color: var(--text-primary);
-  overflow-x: hidden;
+  /* overflow-x: clip не создаёт scrollport и не ломает sticky (в отличие от hidden) */
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

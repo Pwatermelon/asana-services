@@ -2,6 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import '../styles/Footer.css';
 
+const APP_VERSION = (import.meta.env.VITE_APP_VERSION || '').trim() || 'dev';
+
 const Footer = () => {
   const currentYear = new Date().getFullYear();
   const startYear = 2025;
@@ -54,6 +56,9 @@ const Footer = () => {
         <div className="site-footer-bottom">
           <p className="site-footer-copy">
             © {yearText} Каталог асан традиционных школ йоги
+          </p>
+          <p className="site-footer-version" title="Версия сборки">
+            ver {APP_VERSION}
           </p>
         </div>
       </div>
