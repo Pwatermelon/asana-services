@@ -263,7 +263,8 @@ sudo docker-compose up -d --scale asana-import=3
 3. **robots.txt** — `https://catalog-asan.ru/robots.txt` (статика из `frontend/public/robots.txt`).
 4. **Sitemap** — добавить в Вебмастере URL `https://catalog-asan.ru/sitemap.xml` (генерируется backend из OWL-каталога: асаны, источники, публичные страницы).
 5. **Переобход** — после крупных обновлений каталога можно запросить переиндексацию ключевых страниц в Вебмастере.
-6. **Фавиконка** — в корне сайта: `/favicon.ico`, `/favicon-32x32.png`, `/favicon-48x48.png` (Яндекс плохо индексирует SVG). После деплоя отправьте `/asanas` на переобход — иконка в выдаче обновится за ~3 дня.
+6. **Фавиконка** — `/favicon.ico`, `/favicon-120x120.png` (рекомендация Яндекса), `/icon.svg`, 32/48 PNG. После деплоя отправьте `/asanas` на переобход.
+7. **HTTP 404** — неизвестные URL отдают статус 404 и страницу `/404.html` (не `index.html` с 200). Белый список SPA-маршрутов в `frontend/nginx.conf`.
 
 На сайте уже есть: HTTPS, canonical, meta description/OG, JSON-LD (`Organization`, `WebSite`+`SearchAction`, `BreadcrumbList`, `Article` на страницах асан), `noindex` для служебных URL, sitemap, footer с контактами и ссылками доверия.
 

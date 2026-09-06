@@ -24,6 +24,7 @@ import Admin from './pages/Admin';
 import AsanaNamesPage from './pages/AsanaNamesPage';
 import AIModeration from './pages/AIModeration';
 import Profile from './pages/Profile';
+import NotFound from './pages/NotFound';
 import ScrollToTop from './components/ScrollToTop';
 import NoindexGuard from './components/NoindexGuard';
 
@@ -149,6 +150,7 @@ function App() {
                   </AdminRoute>
                 }
               />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </main>
           <Footer />

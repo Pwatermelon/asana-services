@@ -4,6 +4,11 @@
   "description": "Каталог асан традиционных школ йоги",
   "icons": [
     {
+      "src": "/favicon-120x120.png",
+      "sizes": "120x120",
+      "type": "image/png"
+    },
+    {
       "src": "/favicon-32x32.png",
       "sizes": "32x32",
       "type": "image/png"
