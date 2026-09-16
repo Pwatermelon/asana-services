@@ -157,7 +157,9 @@ asana-services/
 ### Требования
 
 - Docker + Docker Compose
-- свободные порты: `80`, `3000`, `5432`, `8000`, `8001`, `8002`, `9000`, `9001`
+- свободные порты: `80`, `443` (prod); локально ещё могут быть заняты сервисами внутри compose
+- **не** открывать сайт как `http://…:3000` — в production фронт только через nginx на 80/443
+
 
 ### Шаги
 
@@ -239,7 +241,7 @@ Production-конфигурация: `docker-compose.prod.yml`.
 1. Подготовить каталог `/app` и положить туда рабочий `.env`.
 2. Скопировать:
    - `docker-compose.prod.yml` как `/app/docker-compose.yml`;
-   - `nginx.prod.conf` как `/app/nginx.prod.conf`.
+GG   - `nginx.prod.conf` как `/app/nginx.prod.conf`.
 3. Запустить:
 
 ```bash

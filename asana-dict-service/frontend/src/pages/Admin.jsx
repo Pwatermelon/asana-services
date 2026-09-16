@@ -15,7 +15,12 @@ const Admin = () => {
   });
   const [monitoringModal, setMonitoringModal] = useState(null);
   const accessToken = window.localStorage.getItem('access_token');
-  const baseUrl = `${window.location.protocol}//${window.location.hostname}`;
+  // Сайт снаружи всегда на 80/443; если зашли через :3000 — ссылки без порта
+  const { protocol, hostname, port } = window.location;
+  const baseUrl =
+    port && port !== '80' && port !== '443'
+      ? `${protocol}//${hostname}`
+      : `${protocol}//${hostname}${port ? `:${port}` : ''}`;
 
   const swaggerUrl = accessToken
     ? `${baseUrl}/api/docs?access_token=${encodeURIComponent(accessToken)}`

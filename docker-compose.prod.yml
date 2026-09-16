@@ -177,8 +177,10 @@ services:
   asana-frontend:
     image: plwatermelon/asana-frontend:${DICT_SERVICE_VERSION:-2.1.5-beta}
     container_name: asana-frontend
-    ports:
-      - "3000:3000"
+    # Порт 3000 только внутри docker-сети (nginx → asana-frontend:3000).
+    # Не публиковать наружу: иначе открывается http://catalog-asan.ru:3000 в обход HTTPS.
+    expose:
+      - "3000"
     restart: unless-stopped
     depends_on:
       - asana-backend
