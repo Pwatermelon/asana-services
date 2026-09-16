@@ -210,7 +210,17 @@ jobs:
           echo "=== Pull и запуск ==="
           sudo docker-compose pull
           sudo docker-compose up -d --scale asana-import=3
-          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
+          # Фронт не должен публиковать :3000 на хост (редирект / → Location с :3000)
+          if sudo docker-compose port asana-frontend 3000 2>/dev/null | grep -q .; then
+            echo "WARN: asana-frontend всё ещё публикует 3000 — force-recreate"
+            sudo docker-compose up -d --force-recreate --no-deps asana-frontend
+          fi
+          if sudo docker-compose port asana-frontend 3000 2>/dev/null | grep -q .; then
+            echo "ERROR: порт 3000 всё ещё опубликован у asana-frontend"
+            sudo docker-compose ps asana-frontend
+            exit 1
+          fi
+          echo "OK: asana-frontend без publish :3000"          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
             if ! grep -qE '^TELEGRAM_HTTP_PROXY=' .env; then
               printf '\nTELEGRAM_HTTP_PROXY=http://telegram-proxy:8888\n' >> .env
             fi
