@@ -220,7 +220,27 @@ jobs:
             sudo docker-compose ps asana-frontend
             exit 1
           fi
-          echo "OK: asana-frontend без publish :3000"          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
+          echo "OK: asana-frontend без publish :3000"
+
+          echo "=== Проверка server-module (auth) ==="
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sf --max-time 3 http://127.0.0.1:8001/metrics >/dev/null 2>&1 \
+              || curl -sf --max-time 3 http://127.0.0.1:8001/docs >/dev/null 2>&1 \
+              || curl -sf --max-time 3 -o /dev/null -w '' http://127.0.0.1:8001/api/auth >/dev/null 2>&1; then
+              echo "OK: server-module отвечает на :8001 (попытка $i)"
+              break
+            fi
+            if [ "$i" -eq 10 ]; then
+              echo "ERROR: server-module не отвечает на :8001 после деплоя"
+              sudo docker-compose ps server-module minio || true
+              sudo docker-compose logs --tail=120 server-module || true
+              sudo docker-compose logs --tail=40 minio || true
+              exit 1
+            fi
+            sleep 3
+          done
+
+          if [ -f .env ] && grep -qE '^VLESS_URI=.+.' .env; then
             if ! grep -qE '^TELEGRAM_HTTP_PROXY=' .env; then
               printf '\nTELEGRAM_HTTP_PROXY=http://telegram-proxy:8888\n' >> .env
             fi
