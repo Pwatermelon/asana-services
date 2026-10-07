@@ -58,8 +58,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Auth не ждёт healthy MinIO: иначе при проблемах S3 логин даёт 502.
       minio:
-        condition: service_healthy
+        condition: service_started
     networks:
       - asana-network
 
@@ -230,10 +231,11 @@ services:
       retries: 5
 
   # ============================================
-  # MINIO S3 хранилище
+  # MINIO S3 (pgsty/silo — community fork; quay.io/minio/*.RELEASE.* сняты,
+  # AIStor требует license). API/MINIO_*/диск совместимы, license не нужен.
   # ============================================
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     container_name: minio
     # S3 только внутри сети; снаружи — nginx /images/
     expose:
@@ -248,7 +250,7 @@ services:
     networks:
       - asana-network
     healthcheck:
-      # В образе MinIO есть curl; /minio/health/live — официальная проверка
+      # В образе есть curl; /minio/health/live — тот же путь, что у MinIO
       test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 30s
       timeout: 10s
@@ -257,7 +259,7 @@ services:
 
   # Init контейнер для настройки MinIO bucket policy
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     container_name: minio-init
     depends_on:
       minio:
