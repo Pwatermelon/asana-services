@@ -44,7 +44,7 @@ from app.moderation_photo import (
 from app.config import logger, NAME_BUCKET_IMAGES_MINIO, S3_IMPORT_STAGING_PREFIX
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem, AISimilarityProposal, AuditEvent
+from app.models import Base, AboutProject, ExpertInstructions, UserRole, User, ModerationItem, AISimilarityProposal, AuditEvent, NavTrafficEvent
 from sqlalchemy import create_engine, func, asc, desc
 from sqlalchemy.orm import sessionmaker
 from app import config
@@ -371,7 +371,14 @@ async def access_denied_page(code: int = Query(403, ge=401, le=403)):
 class AuditMiddleware(BaseHTTPMiddleware):
     """Записывает аудит mutating API-запросов для админ-панели."""
 
-    _skip_prefixes = ("/api/docs", "/api/redoc", "/api/openapi.json", "/health", "/metrics")
+    _skip_prefixes = (
+        "/api/docs",
+        "/api/redoc",
+        "/api/openapi.json",
+        "/health",
+        "/metrics",
+        "/api/analytics/nav",
+    )
     _skip_exact = ("/api/auth/check", "/api/auth/logout")
     _track_methods = {"POST", "PATCH", "PUT", "DELETE"}
 
@@ -476,6 +483,7 @@ class UserActivityMiddleware(BaseHTTPMiddleware):
         "/api/auth/verify-admin",
         "/api/auth/monitoring-session",
         "/api/auth/monitoring-bootstrap",
+        "/api/analytics/nav",
     )
 
     async def dispatch(self, request: StarletteRequest, call_next):
@@ -612,6 +620,7 @@ def init_database():
             ImportStagingRow,
             ModerationItem,
             NameImportBatch,
+            NavTrafficEvent,
             User,
         )
         try:
@@ -645,6 +654,7 @@ def init_database():
                             ImportBatch.__table__,
                             ImportStagingRow.__table__,
                             AISimilarityProposal.__table__,
+                            NavTrafficEvent.__table__,
                         ],
                     )
                 finally:
@@ -2893,6 +2903,157 @@ def _audit_summary_from_row(row: AuditEvent) -> str:
             parts.append(str(row.entity_id))
         return " — ".join(parts)
     return f"{row.method} {row.path}"
+
+
+class NavPageviewIn(BaseModel):
+    path: str
+    referrer_path: Optional[str] = None
+    session_id: str
+    dwell_ms: Optional[int] = None
+    viewport_w: Optional[int] = None
+    created_at: Optional[str] = None
+
+
+class NavPageviewBatchIn(BaseModel):
+    events: List[NavPageviewIn]
+
+
+@app.post("/api/analytics/nav", tags=["analytics"])
+async def post_nav_pageviews(
+    payload: NavPageviewBatchIn,
+    request: Request,
+    user: str = Depends(is_admin),
+):
+    """
+    Приём pageview-событий SPA (AsanaNavPath). Только администратор.
+    """
+    import hashlib
+    from app.nav_analytics import normalize_path, path_to_pattern
+
+    if not payload.events:
+        return {"accepted": 0}
+    if len(payload.events) > 40:
+        raise HTTPException(status_code=400, detail="Слишком много событий в пакете")
+
+    login = user
+    ua = request.headers.get("user-agent") or ""
+    ua_hash = hashlib.sha256(ua.encode("utf-8", errors="ignore")).hexdigest()[:32] if ua else None
+    now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    db = SessionLocal()
+    try:
+        accepted = 0
+        for ev in payload.events:
+            sid = (ev.session_id or "").strip()[:64]
+            if not sid or len(sid) < 8:
+                continue
+            path = normalize_path(ev.path)[:512]
+            if path.startswith("/api"):
+                continue
+            ref = normalize_path(ev.referrer_path)[:512] if ev.referrer_path else None
+            row = NavTrafficEvent(
+                created_at=(ev.created_at or now_iso)[:64],
+                session_id=sid,
+                path=path,
+                path_pattern=path_to_pattern(path)[:256],
+                referrer_path=ref,
+                referrer_pattern=path_to_pattern(ref)[:256] if ref else None,
+                login=login,
+                dwell_ms=ev.dwell_ms if ev.dwell_ms is not None and 0 <= ev.dwell_ms <= 3_600_000 else None,
+                viewport_w=ev.viewport_w if ev.viewport_w and 0 < ev.viewport_w < 10000 else None,
+                user_agent_hash=ua_hash,
+            )
+            db.add(row)
+            accepted += 1
+        db.commit()
+        if accepted:
+            from app.nav_analytics import invalidate_guide_cache
+
+            invalidate_guide_cache()
+        return {"accepted": accepted}
+    except Exception as exc:
+        db.rollback()
+        logger.error("nav analytics ingest failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Ошибка записи навигации")
+    finally:
+        db.close()
+
+
+@app.get("/api/analytics/nav/summary", tags=["analytics"])
+async def get_nav_analytics_summary(
+    user: str = Depends(is_admin),
+    days: int = Query(default=7, ge=1, le=90),
+):
+    """Сводка закономерностей навигации + применённые адаптивные правила."""
+    from app.nav_analytics import analyze_events, get_cached_analysis, period_start
+
+    since = period_start(days)
+    db = SessionLocal()
+    try:
+        retention_cut = period_start(90)
+        db.query(NavTrafficEvent).filter(NavTrafficEvent.created_at < retention_cut).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+        rows = (
+            db.query(NavTrafficEvent)
+            .filter(NavTrafficEvent.created_at >= since)
+            .order_by(NavTrafficEvent.created_at.asc())
+            .limit(50000)
+            .all()
+        )
+        result = analyze_events(rows)
+        get_cached_analysis(result)
+        result["period_days"] = days
+        result["since"] = since
+        return result
+    except Exception as exc:
+        db.rollback()
+        logger.error("nav analytics summary failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Ошибка анализа навигации")
+    finally:
+        db.close()
+
+
+@app.get("/api/analytics/nav/guide", tags=["analytics"])
+async def get_nav_adaptive_guide(
+    user: str = Depends(is_admin),
+    path: Optional[str] = Query(default="/asanas"),
+    days: int = Query(default=14, ge=1, le=90),
+):
+    """
+    Контур адаптации UI для администратора: следующие шаги, порядок меню,
+    популярные асаны/источники.
+    """
+    from app.nav_analytics import (
+        analyze_events,
+        get_cached_analysis,
+        guide_for_path,
+        period_start,
+    )
+
+    cached = get_cached_analysis()
+    if cached is None:
+        since = period_start(days)
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(NavTrafficEvent)
+                .filter(NavTrafficEvent.created_at >= since)
+                .order_by(NavTrafficEvent.created_at.asc())
+                .limit(50000)
+                .all()
+            )
+            cached = analyze_events(rows)
+            get_cached_analysis(cached)
+        except Exception as exc:
+            logger.error("nav guide failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Ошибка адаптивных подсказок")
+        finally:
+            db.close()
+
+    return guide_for_path(cached, path)
 
 
 @app.get("/api/audit/events", tags=["audit"])

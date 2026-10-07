@@ -16,9 +16,11 @@ import {
   resolveFocusPhotoHint,
 } from '../utils/catalogFocus';
 import CatalogPageNav from '../components/CatalogPageNav';
+import AdaptiveNextSteps from '../components/AdaptiveNextSteps';
 import { usePageSeo, DEFAULT_SITE_DESCRIPTION, buildAsanaJsonLd } from '../utils/pageSeo';
 import '../styles/AsanasList.css';
 import '../styles/AsanaDetail.css';
+import '../styles/AdaptiveNav.css';
 
 const AsanaDetail = () => {
   const params = useParams();
@@ -565,6 +567,7 @@ const AsanaDetail = () => {
       <div className="catalog-toolbar">
         <CatalogPageNav />
       </div>
+      <AdaptiveNextSteps title="После этой асаны обычно открывают" />
       <div className="asana-detail">
         <div className="asana-header">
           <div className="asana-header-inner">

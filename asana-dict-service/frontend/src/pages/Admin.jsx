@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import UsersManagement from '../components/admin/UsersManagement';
 import AuditEvents from '../components/admin/AuditEvents';
+import NavigationAnalytics from '../components/admin/NavigationAnalytics';
 import MonitoringEmbedModal from '../components/admin/MonitoringEmbedModal';
 import '../styles/Admin.css';
 
@@ -12,6 +13,7 @@ const Admin = () => {
     links: true,
     users: true,
     audit: false,
+    nav: true,
   });
   const [monitoringModal, setMonitoringModal] = useState(null);
   const accessToken = window.localStorage.getItem('access_token');
@@ -114,6 +116,25 @@ const Admin = () => {
             <div className="admin-section-panel">
               <div className="admin-nested">
                 <UsersManagement />
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="admin-section">
+          <button
+            type="button"
+            className={`admin-section-header ${openSections.nav ? 'is-open' : ''}`}
+            onClick={() => toggleSection('nav')}
+            aria-expanded={openSections.nav}
+          >
+            <span className="admin-section-title">Анализ навигации</span>
+            <span className="admin-section-chevron">{openSections.nav ? '▼' : '▶'}</span>
+          </button>
+          {openSections.nav && (
+            <div className="admin-section-panel">
+              <div className="admin-nested">
+                <NavigationAnalytics />
               </div>
             </div>
           )}

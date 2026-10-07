@@ -1,9 +1,16 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { moderationAPI } from '../api/moderation';
 import { aiAPI } from '../api/ai';
+import { analyticsAPI } from '../api/analytics';
 import '../styles/Navbar.css';
+
+const PUBLIC_NAV = [
+  { path: '/asanas', label: 'Каталог' },
+  { path: '/sources', label: 'Источники' },
+  { path: '/about', label: 'О проекте' },
+];
 
 const Navbar = () => {
   const location = useLocation();
@@ -14,6 +21,7 @@ const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [moderationCount, setModerationCount] = useState(0);
   const [aiPendingCount, setAiPendingCount] = useState(0);
+  const [navOrder, setNavOrder] = useState(['/asanas', '/sources', '/about']);
   const dropdownRef = useRef(null);
   const addMenuRef = useRef(null);
   const navRef = useRef(null);
@@ -73,6 +81,31 @@ const Navbar = () => {
   useEffect(() => {
     closeMobileMenu();
   }, [location.pathname, closeMobileMenu]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setNavOrder(['/asanas', '/sources', '/about']);
+      return undefined;
+    }
+    let cancelled = false;
+    analyticsAPI.getNavGuide(location.pathname || '/asanas').then((guide) => {
+      if (cancelled) return;
+      if (guide.adaptive_enabled && Array.isArray(guide.nav_order) && guide.nav_order.length) {
+        setNavOrder(guide.nav_order);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, isAdmin]);
+
+  const orderedPublicNav = useMemo(() => {
+    if (!isAdmin) return PUBLIC_NAV;
+    const rank = new Map(navOrder.map((p, i) => [p, i]));
+    return [...PUBLIC_NAV].sort(
+      (a, b) => (rank.get(a.path) ?? 99) - (rank.get(b.path) ?? 99)
+    );
+  }, [navOrder, isAdmin]);
 
   /** Реальная высота шапки → --app-header-offset (иначе sticky-поиск «отстаёт» и виден зазор со скроллом). */
   useEffect(() => {
@@ -165,13 +198,16 @@ const Navbar = () => {
 
     return (
       <>
-        <Link
-          to="/asanas"
-          className={`${linkClass} ${isActive('/asanas') ? 'active' : ''}`}
-          onClick={isMobile ? closeMobileMenu : undefined}
-        >
-          Каталог
-        </Link>
+        {orderedPublicNav.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={`${linkClass} ${isActive(item.path) ? 'active' : ''}`}
+            onClick={isMobile ? closeMobileMenu : undefined}
+          >
+            {item.label}
+          </Link>
+        ))}
         {isExpertOrAdmin && (
           <Link
             to="/names"
@@ -181,13 +217,6 @@ const Navbar = () => {
             Названия
           </Link>
         )}
-        <Link
-          to="/sources"
-          className={`${linkClass} ${isActive('/sources') ? 'active' : ''}`}
-          onClick={isMobile ? closeMobileMenu : undefined}
-        >
-          Источники
-        </Link>
         {isExpertOrAdmin && (
           <Link
             to="/settings"
@@ -244,13 +273,6 @@ const Navbar = () => {
             )}
           </Link>
         )}
-        <Link
-          to="/about"
-          className={`${linkClass} ${isActive('/about') ? 'active' : ''}`}
-          onClick={isMobile ? closeMobileMenu : undefined}
-        >
-          О проекте
-        </Link>
         {isExpertOrAdmin && (
           <Link
             to="/expert-instructions"

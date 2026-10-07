@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 
@@ -27,11 +27,19 @@ import Profile from './pages/Profile';
 import NotFound from './pages/NotFound';
 import ScrollToTop from './components/ScrollToTop';
 import NoindexGuard from './components/NoindexGuard';
+import NavPathTracker from './components/NavPathTracker';
 
 // Защищенные маршруты
 import PrivateRoute from './components/PrivateRoute';
 import ExpertRoute from './components/ExpertRoute';
 import AdminRoute from './components/AdminRoute';
+
+/** Трекер и адаптация навигации только для администратора. */
+function AdminNavPathTracker() {
+  const { isAdmin } = useAuth();
+  if (!isAdmin) return null;
+  return <NavPathTracker />;
+}
 
 function App() {
   return (
@@ -39,6 +47,7 @@ function App() {
       <BrowserRouter>
         <ScrollToTop />
         <NoindexGuard />
+        <AdminNavPathTracker />
         <div className="app">
           <Navbar />
           <main className="main-content">

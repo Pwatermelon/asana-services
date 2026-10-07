@@ -232,3 +232,25 @@ class AuditEvent(Base):
     entity_id = Column(String(256), nullable=True)
     ip = Column(String(128), nullable=True)
     details = Column(String, nullable=True)
+
+
+class NavTrafficEvent(Base):
+    """
+    Событие навигации SPA для анализа веб-трафика (AsanaNavPath).
+    Хранит pageview с анонимным session_id; login опционален.
+    """
+
+    __tablename__ = "nav_traffic_events"
+    __table_args__ = {"schema": DICT_SCHEMA}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(String(64), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    path = Column(String(512), nullable=False, index=True)
+    path_pattern = Column(String(256), nullable=False, index=True)
+    referrer_path = Column(String(512), nullable=True)
+    referrer_pattern = Column(String(256), nullable=True)
+    login = Column(String(256), nullable=True, index=True)
+    dwell_ms = Column(Integer, nullable=True)
+    viewport_w = Column(Integer, nullable=True)
+    user_agent_hash = Column(String(64), nullable=True)

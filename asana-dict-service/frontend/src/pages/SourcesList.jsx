@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { sourcesAPI } from '../api/sources';
+import { analyticsAPI } from '../api/analytics';
 import { useAuth } from '../contexts/AuthContext';
 import { usePageSeo } from '../utils/pageSeo';
+import AdaptiveNextSteps from '../components/AdaptiveNextSteps';
 import '../styles/SourcesList.css';
+import '../styles/AdaptiveNav.css';
 
 function filterSourcesLocal(sources, query) {
   const q = String(query || '').trim().toLowerCase();
@@ -31,7 +34,9 @@ const SourcesList = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
-  const { isExpertOrAdmin } = useAuth();
+  const [popularSourceIds, setPopularSourceIds] = useState([]);
+  const [adaptiveOn, setAdaptiveOn] = useState(false);
+  const { isExpertOrAdmin, isAdmin } = useAuth();
   const navigate = useNavigate();
 
   usePageSeo({
@@ -48,6 +53,23 @@ const SourcesList = () => {
   useEffect(() => {
     loadSources();
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdaptiveOn(false);
+      setPopularSourceIds([]);
+      return undefined;
+    }
+    let cancelled = false;
+    analyticsAPI.getNavGuide('/sources').then((guide) => {
+      if (cancelled) return;
+      setAdaptiveOn(Boolean(guide.adaptive_enabled));
+      setPopularSourceIds((guide.popular_sources || []).map((x) => String(x.id)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
 
   const loadSources = async () => {
     try {
@@ -70,6 +92,17 @@ const SourcesList = () => {
   };
 
   const asanasPath = (source) => `/sources/${getSourceId(source)}/asanas`;
+
+  const displaySources = useMemo(() => {
+    if (!adaptiveOn || searchActive || !popularSourceIds.length) return sources;
+    const rank = new Map(popularSourceIds.map((id, i) => [id, i]));
+    return [...sources].sort((a, b) => {
+      const ra = rank.has(getSourceId(a)) ? rank.get(getSourceId(a)) : 999;
+      const rb = rank.has(getSourceId(b)) ? rank.get(getSourceId(b)) : 999;
+      if (ra !== rb) return ra - rb;
+      return (a.author || '').localeCompare(b.author || '', 'ru');
+    });
+  }, [sources, adaptiveOn, searchActive, popularSourceIds]);
 
   const rowTitle = (source) => {
     const bits = [source.title, source.year != null && source.year !== '' ? String(source.year) : null, source.author]
@@ -152,6 +185,14 @@ const SourcesList = () => {
         </div>
       </div>
 
+      <AdaptiveNextSteps />
+
+      {adaptiveOn && !searchActive && popularSourceIds.length > 0 && (
+        <p className="adaptive-popular__note">
+          Порядок источников адаптирован по частоте просмотров навигации.
+        </p>
+      )}
+
       {searchActive && (
         <p className="sources-search-hint">
           {sources.length > 0
@@ -164,7 +205,7 @@ const SourcesList = () => {
         {sources.length === 0 && !loading ? (
           <p className="sources-empty">Источники не найдены</p>
         ) : null}
-        {sources.map((source) => (
+        {displaySources.map((source) => (
           <div key={source.id} className="source-line">
             <div
               className="source-line-click"
