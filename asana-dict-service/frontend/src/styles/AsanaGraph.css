@@ -1,0 +1,181 @@
+.asana-graph-page {
+  padding-bottom: 2.5rem;
+}
+
+.asana-graph-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.asana-graph-crumb {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: #5a655e;
+}
+
+.asana-graph-crumb a {
+  color: #2d5a46;
+}
+
+.asana-graph-page h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.75rem;
+  color: #1c2b24;
+}
+
+.asana-graph-lead {
+  margin: 0;
+  max-width: 42rem;
+  color: #445048;
+  line-height: 1.45;
+}
+
+.asana-graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.asana-graph-check {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.95rem;
+  color: #2a3530;
+}
+
+.asana-graph-btn {
+  border: 1px solid #2d5a46;
+  background: #2d5a46;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.5rem 0.95rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.asana-graph-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.asana-graph-btn--link {
+  display: inline-block;
+  text-decoration: none;
+  text-align: center;
+  margin-top: 0.75rem;
+}
+
+.asana-graph-error {
+  background: #fdeceb;
+  border: 1px solid #e2a29a;
+  color: #8a2f2a;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.asana-graph-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  color: #3d4a43;
+  font-size: 0.92rem;
+}
+
+.asana-graph-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 1rem;
+  min-height: 560px;
+}
+
+.asana-graph-canvas-wrap {
+  min-height: 560px;
+  border: 1px solid #d5ddd8;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(74, 124, 102, 0.06), transparent 45%),
+    linear-gradient(180deg, #f7f9f7 0%, #eef3ef 100%);
+  overflow: hidden;
+}
+
+.asana-graph-canvas {
+  display: block;
+  width: 100%;
+  height: 560px;
+  cursor: grab;
+}
+
+.asana-graph-side {
+  border: 1px solid #d5ddd8;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #fff;
+}
+
+.asana-graph-side h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: #2a3530;
+}
+
+.asana-graph-side-label {
+  margin: 0;
+  font-weight: 600;
+  color: #1c2b24;
+}
+
+.asana-graph-side-meta {
+  margin: 0.25rem 0 0;
+  color: #5a655e;
+  font-style: italic;
+}
+
+.asana-graph-side-id {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  word-break: break-all;
+  color: #6a756e;
+}
+
+.asana-graph-side-empty {
+  margin: 0;
+  color: #6a756e;
+}
+
+.asana-graph-legend {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5ebe7;
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  color: #445048;
+}
+
+.asana-graph-legend-line {
+  display: inline-block;
+  width: 28px;
+  height: 0;
+  border-top: 2px solid rgba(45, 90, 70, 0.7);
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.asana-graph-legend-line--dash {
+  border-top-style: dashed;
+  border-top-color: rgba(120, 90, 40, 0.55);
+}
+
+@media (max-width: 860px) {
+  .asana-graph-layout {
+    grid-template-columns: 1fr;
+  }
+}

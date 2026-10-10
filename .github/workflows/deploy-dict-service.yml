@@ -141,6 +141,22 @@ jobs:
           push: true
           tags: plwatermelon/server-module:${{ needs.resolve.outputs.version }}
 
+      - name: Graph service (визуальный граф sameAs)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./asana-graph-service
+          file: ./asana-graph-service/Dockerfile
+          push: true
+          tags: plwatermelon/asana-graph:${{ needs.resolve.outputs.version }}
+
+      - name: Ontology merge service (API + CLI, НИР)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./asana-ontology-merge-service
+          file: ./asana-ontology-merge-service/Dockerfile
+          push: true
+          tags: plwatermelon/asana-ontology-merge:${{ needs.resolve.outputs.version }}
+
       - name: Telegram proxy (VLESS для Alertmanager)
         uses: docker/build-push-action@v6
         with:

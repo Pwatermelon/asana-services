@@ -21,6 +21,8 @@ import Settings from './pages/Settings';
 import Moderation from './pages/Moderation';
 import Users from './pages/Users';
 import Admin from './pages/Admin';
+import AsanaGraph from './pages/AsanaGraph';
+import OntologyMerge from './pages/OntologyMerge';
 import AsanaNamesPage from './pages/AsanaNamesPage';
 import AIModeration from './pages/AIModeration';
 import Profile from './pages/Profile';
@@ -148,6 +150,22 @@ function App() {
                 element={
                   <AdminRoute>
                     <Admin />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/asana-graph"
+                element={
+                  <AdminRoute>
+                    <AsanaGraph />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/ontology-merge"
+                element={
+                  <AdminRoute>
+                    <OntologyMerge />
                   </AdminRoute>
                 }
               />

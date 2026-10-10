@@ -191,6 +191,59 @@ services:
       - asana-network
 
   # ============================================
+  # Граф асан (микросервис)
+  # ============================================
+  asana-graph:
+    image: plwatermelon/asana-graph:${DICT_SERVICE_VERSION:-2.1.5-beta}
+    container_name: asana-graph
+    restart: unless-stopped
+    environment:
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-asana_db}
+      - DB_USER=${DB_USER:-asana_user}
+      - DB_PASSWORD=${DB_PASSWORD:-asana_password}
+      - DICT_SCHEMA=${DICT_SCHEMA:-dict_schema}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      server-module:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8010/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - asana-network
+
+  # ============================================
+  # Merge онтологий (микросервис API + CLI)
+  # ============================================
+  asana-ontology-merge:
+    image: plwatermelon/asana-ontology-merge:${DICT_SERVICE_VERSION:-2.1.5-beta}
+    container_name: asana-ontology-merge
+    restart: unless-stopped
+    environment:
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+    depends_on:
+      server-module:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8011/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - asana-network
+
+  # ============================================
   # Сервис с нейронкой (asana-network-service) — образ из CI: plwatermelon/asana-network:$DICT_SERVICE_VERSION
   # ============================================
   server-network:
@@ -340,6 +393,10 @@ services:
       asana-backend:
         condition: service_started
       asana-import:
+        condition: service_started
+      asana-graph:
+        condition: service_started
+      asana-ontology-merge:
         condition: service_started
       redis:
         condition: service_started

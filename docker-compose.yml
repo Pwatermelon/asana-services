@@ -192,6 +192,72 @@ services:
       - asana-network
 
   # ============================================
+  # Граф асан (микросервис) — admin-only API
+  # ============================================
+  asana-graph:
+    platform: linux/amd64
+    build:
+      context: ./asana-graph-service
+      dockerfile: Dockerfile
+    image: asana-graph:${ASANA_GRAPH_TAG:-latest}
+    container_name: asana-graph
+    ports:
+      - "8010:8010"
+    restart: unless-stopped
+    environment:
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-asana_db}
+      - DB_USER=${DB_USER:-asana_user}
+      - DB_PASSWORD=${DB_PASSWORD:-asana_password}
+      - DICT_SCHEMA=${DICT_SCHEMA:-dict_schema}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      server-module:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8010/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - asana-network
+
+  # ============================================
+  # Merge онтологий (микросервис API + CLI) — НИР
+  # CLI: docker compose run --rm asana-ontology-merge asana-ontology-merge preview a.owl b.owl
+  # ============================================
+  asana-ontology-merge:
+    platform: linux/amd64
+    build:
+      context: ./asana-ontology-merge-service
+      dockerfile: Dockerfile
+    image: asana-ontology-merge:${ASANA_MERGE_TAG:-latest}
+    container_name: asana-ontology-merge
+    ports:
+      - "8011:8011"
+    restart: unless-stopped
+    environment:
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+    depends_on:
+      server-module:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8011/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - asana-network
+
+  # ============================================
   # Сервис с нейронкой (asana-network-service)
   # Используется asana-backend для модерации isSameAs:
   #   POST /ai/scan-duplicates → пакетный поиск похожих фото между разными асанами.
@@ -303,6 +369,8 @@ services:
       - asana-frontend
       - asana-backend
       - asana-import
+      - asana-graph
+      - asana-ontology-merge
       - redis
       - server-module
     networks:

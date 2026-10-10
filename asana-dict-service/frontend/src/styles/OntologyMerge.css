@@ -1,0 +1,165 @@
+.ontology-merge-page {
+  padding-bottom: 2.5rem;
+}
+
+.ontology-merge-crumb {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: #5a655e;
+}
+
+.ontology-merge-crumb a {
+  color: #2d5a46;
+}
+
+.ontology-merge-page h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  color: #1c2b24;
+}
+
+.ontology-merge-lead {
+  margin: 0 0 1.25rem;
+  max-width: 46rem;
+  color: #445048;
+  line-height: 1.45;
+}
+
+.ontology-merge-form {
+  display: grid;
+  gap: 0.85rem;
+  max-width: 36rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border: 1px solid #d5ddd8;
+  border-radius: 8px;
+  background: #f7f9f7;
+}
+
+.ontology-merge-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  color: #2a3530;
+}
+
+.ontology-merge-form button {
+  justify-self: start;
+  border: 1px solid #2d5a46;
+  background: #2d5a46;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.55rem 1.1rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ontology-merge-form button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.ontology-merge-error {
+  background: #fdeceb;
+  border: 1px solid #e2a29a;
+  color: #8a2f2a;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.ontology-merge-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.ontology-merge-summary > div {
+  border: 1px solid #d5ddd8;
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: #fff;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ontology-merge-summary strong {
+  font-size: 0.85rem;
+  color: #5a655e;
+  font-weight: 500;
+}
+
+.ontology-merge-summary b {
+  font-size: 1.4rem;
+  color: #1c2b24;
+}
+
+.ontology-merge-note {
+  color: #5a655e;
+  font-size: 0.9rem;
+  margin: 0 0 1.25rem;
+}
+
+.ontology-merge-block {
+  margin-bottom: 1.5rem;
+}
+
+.ontology-merge-block h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.1rem;
+  color: #1c2b24;
+}
+
+.ontology-merge-block h2 span {
+  color: #6a756e;
+  font-weight: 500;
+}
+
+.ontology-merge-empty {
+  color: #6a756e;
+}
+
+.ontology-merge-table-wrap {
+  overflow: auto;
+  border: 1px solid #d5ddd8;
+  border-radius: 8px;
+}
+
+.ontology-merge-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.ontology-merge-table-wrap th,
+.ontology-merge-table-wrap td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid #e5ebe7;
+  vertical-align: top;
+}
+
+.ontology-merge-table-wrap th {
+  background: #f0f4f1;
+  color: #2a3530;
+}
+
+.ontology-merge-table-wrap code {
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.ontology-merge-block--add .ontology-merge-table-wrap th {
+  background: #e8f3ec;
+}
+
+.ontology-merge-block--remove .ontology-merge-table-wrap th {
+  background: #f8eceb;
+}
+
+@media (max-width: 760px) {
+  .ontology-merge-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+}

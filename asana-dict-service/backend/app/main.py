@@ -2264,6 +2264,11 @@ async def admin_reconcile_same_as(user: str = Depends(is_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Граф асан и merge онтологий — отдельные микросервисы:
+#   asana-graph-service, asana-ontology-merge-service (+ CLI).
+# Маршруты /api/admin/asana-graph и /api/admin/ontology-merge/* проксирует nginx.
+
+
 # ============================================
 # AI / модерация isSameAs от нейросети
 # Сервис asana-network-service сканирует фото каталога и предлагает связи

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import UsersManagement from '../components/admin/UsersManagement';
 import AuditEvents from '../components/admin/AuditEvents';
@@ -83,6 +83,32 @@ const Admin = () => {
                   </span>
                   <span className="admin-link-card__arrow" aria-hidden="true">→</span>
                 </a>
+                <Link
+                  to="/admin/asana-graph"
+                  className="admin-link-card admin-link-card--swagger"
+                >
+                  <span className="admin-link-card__icon">G</span>
+                  <span className="admin-link-card__content">
+                    <span className="admin-link-card__title">Граф асан</span>
+                    <span className="admin-link-card__subtitle">
+                      Визуальное дерево связей isSameAsObject
+                    </span>
+                  </span>
+                  <span className="admin-link-card__arrow" aria-hidden="true">→</span>
+                </Link>
+                <Link
+                  to="/admin/ontology-merge"
+                  className="admin-link-card admin-link-card--swagger"
+                >
+                  <span className="admin-link-card__icon">M</span>
+                  <span className="admin-link-card__content">
+                    <span className="admin-link-card__title">Merge онтологий</span>
+                    <span className="admin-link-card__subtitle">
+                      Предпросмотр слияния двух OWL (НИР)
+                    </span>
+                  </span>
+                  <span className="admin-link-card__arrow" aria-hidden="true">→</span>
+                </Link>
                 <button
                   type="button"
                   className="admin-link-card admin-link-card--kibana admin-link-card--button"
