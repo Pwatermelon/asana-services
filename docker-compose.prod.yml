@@ -223,7 +223,7 @@ services:
       - asana-network
 
   # ============================================
-  # Merge онтологий (микросервис API + CLI)
+  # OWL versioning API (CLI из GitHub Releases owl-ontology-versioning)
   # ============================================
   asana-ontology-merge:
     image: plwatermelon/asana-ontology-merge:${DICT_SERVICE_VERSION:-2.1.5-beta}
@@ -231,6 +231,9 @@ services:
     restart: unless-stopped
     environment:
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - OWL_VERSIONING_REPO=${OWL_VERSIONING_REPO:-Pwatermelon/owl-ontology-versioning}
+      - OWL_VERSIONING_VERSION=${OWL_VERSIONING_VERSION:-latest}
+      - MERGE_BINARY=/usr/local/bin/owl-versioning
     depends_on:
       server-module:
         condition: service_started

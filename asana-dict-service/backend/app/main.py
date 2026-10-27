@@ -2265,7 +2265,7 @@ async def admin_reconcile_same_as(user: str = Depends(is_admin)):
 
 
 # Граф асан и merge онтологий — отдельные микросервисы:
-#   asana-graph-service, asana-ontology-merge-service (+ CLI).
+#   asana-graph-service, asana-ontology-merge-api (CLI из owl-ontology-versioning).
 # Маршруты /api/admin/asana-graph и /api/admin/ontology-merge/* проксирует nginx.
 
 
