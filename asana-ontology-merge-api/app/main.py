@@ -1,6 +1,7 @@
 """
-Тонкая Python API-обёртка над Go-бинарником asana-ontology-merge.
-Вся логика сравнения — в бинарнике; здесь только HTTP + auth + subprocess.
+Тонкая HTTP-обёртка над CLI owl-versioning.
+Бинарник скачивается из GitHub Releases при сборке Docker-образа
+(не компилируется в asana-services).
 """
 from __future__ import annotations
 
@@ -16,28 +17,43 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from app.auth_admin import require_admin
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("asana_ontology_merge_api")
+logger = logging.getLogger("owl_versioning_api")
 
-BINARY = os.getenv(
-    "MERGE_BINARY",
-    str(Path(__file__).resolve().parent.parent / "bin" / "asana-ontology-merge"),
-)
+BINARY = os.getenv("MERGE_BINARY", "/usr/local/bin/owl-versioning")
+CLI_REPO = os.getenv("OWL_VERSIONING_REPO", "Pwatermelon/owl-ontology-versioning")
+CLI_VERSION = os.getenv("OWL_VERSIONING_VERSION", "latest")
 
 app = FastAPI(
-    title="Asana Ontology Merge Service",
-    description="Python API-обёртка над Go CLI-бинарником asana-ontology-merge (НИР).",
-    version="0.2.0",
+    title="OWL Versioning API (catalog wrapper)",
+    description="Admin HTTP facade over owl-versioning CLI from GitHub Releases.",
+    version="0.3.0",
 )
 
 
 @app.get("/health")
 def health():
     ok = Path(BINARY).is_file() and os.access(BINARY, os.X_OK)
+    ver = None
+    if ok:
+        try:
+            proc = subprocess.run(
+                [BINARY, "version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            ver = (proc.stdout or proc.stderr or "").strip()[:200] or None
+        except Exception:
+            ver = None
     return {
         "status": "ok" if ok else "degraded",
-        "service": "asana-ontology-merge-service",
+        "service": "asana-ontology-merge-api",
         "binary": BINARY,
         "binary_present": ok,
+        "cli_repo": CLI_REPO,
+        "cli_release": CLI_VERSION,
+        "cli_version_output": ver,
     }
 
 
@@ -54,13 +70,17 @@ def _run_preview(base_path: Path, incoming_path: Path) -> dict:
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Go binary not found: {BINARY}",
+            detail=(
+                f"CLI binary not found: {BINARY}. "
+                f"Rebuild image with OWL_VERSIONING_VERSION from "
+                f"https://github.com/{CLI_REPO}/releases"
+            ),
         ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise HTTPException(status_code=504, detail="Merge binary timeout") from exc
+        raise HTTPException(status_code=504, detail="owl-versioning timeout") from exc
 
     if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "merge binary failed").strip()
+        err = (proc.stderr or proc.stdout or "owl-versioning failed").strip()
         raise HTTPException(status_code=400, detail=err)
 
     try:
@@ -68,7 +88,7 @@ def _run_preview(base_path: Path, incoming_path: Path) -> dict:
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Invalid JSON from binary: {exc}",
+            detail=f"Invalid JSON from CLI: {exc}",
         ) from exc
 
 
@@ -78,7 +98,14 @@ async def preview_merge(
     incoming: UploadFile = File(...),
     user: str = Depends(require_admin),
 ):
-    logger.info("preview by %s via binary base=%s incoming=%s", user, base.filename, incoming.filename)
+    logger.info(
+        "preview by %s base=%s incoming=%s via %s (release=%s)",
+        user,
+        base.filename,
+        incoming.filename,
+        BINARY,
+        CLI_VERSION,
+    )
     base_bytes = await base.read()
     incoming_bytes = await incoming.read()
     if not base_bytes or not incoming_bytes:

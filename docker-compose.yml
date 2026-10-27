@@ -230,14 +230,18 @@ services:
       - asana-network
 
   # ============================================
-  # Merge онтологий (микросервис API + CLI) — НИР
-  # CLI: docker compose run --rm asana-ontology-merge asana-ontology-merge preview a.owl b.owl
+  # OWL versioning — тонкий API; CLI из GitHub Releases
+  # CLI-репо: ../owl-ontology-versioning (тег vX.Y.Z → Release с linux/windows)
+  # OWL_VERSIONING_VERSION=latest | v0.3.0
   # ============================================
   asana-ontology-merge:
     platform: linux/amd64
     build:
-      context: ./asana-ontology-merge-service
+      context: ./asana-ontology-merge-api
       dockerfile: Dockerfile
+      args:
+        OWL_VERSIONING_REPO: ${OWL_VERSIONING_REPO:-Pwatermelon/owl-ontology-versioning}
+        OWL_VERSIONING_VERSION: ${OWL_VERSIONING_VERSION:-latest}
     image: asana-ontology-merge:${ASANA_MERGE_TAG:-latest}
     container_name: asana-ontology-merge
     ports:
@@ -245,6 +249,9 @@ services:
     restart: unless-stopped
     environment:
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://server-module:8000}
+      - OWL_VERSIONING_REPO=${OWL_VERSIONING_REPO:-Pwatermelon/owl-ontology-versioning}
+      - OWL_VERSIONING_VERSION=${OWL_VERSIONING_VERSION:-latest}
+      - MERGE_BINARY=/usr/local/bin/owl-versioning
     depends_on:
       server-module:
         condition: service_started

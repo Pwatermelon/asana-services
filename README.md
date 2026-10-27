@@ -1,5 +1,27 @@
 # asana-services
 
+<p align="center">
+  <strong>Каталог асан традиционных школ йоги</strong><br/>
+  Production-ready микросервисная платформа: онтология OWL · экспертная модерация · ИИ · мониторинг · CI/CD
+</p>
+
+<p align="center">
+  <a href="https://catalog-asan.ru"><img src="https://img.shields.io/badge/Live-catalog--asan.ru-6366f1?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Live site" /></a>
+  <a href="https://catalog-asan.ru/asanas"><img src="https://img.shields.io/badge/Каталог-асан-8b5cf6?style=for-the-badge" alt="Catalog" /></a>
+  <img src="https://img.shields.io/badge/stack-FastAPI%20%7C%20React%20%7C%20Go-0f172a?style=for-the-badge" alt="Stack" />
+  <img src="https://img.shields.io/badge/deploy-Docker%20Compose%20%2B%20GH%20Actions-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Deploy" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/OWL%20%2F%20RDF-ontology-green?style=flat-square" alt="OWL" />
+  <img src="https://img.shields.io/badge/PostgreSQL-336791?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/MinIO-S3-C72E49?style=flat-square&logo=minio&logoColor=white" alt="MinIO" />
+  <img src="https://img.shields.io/badge/Prometheus-E6522C?style=flat-square&logo=prometheus&logoColor=white" alt="Prometheus" />
+  <img src="https://img.shields.io/badge/Grafana-F46800?style=flat-square&logo=grafana&logoColor=white" alt="Grafana" />
+  <img src="https://img.shields.io/badge/YOLO%20%2B%20pHash-AI-blue?style=flat-square" alt="AI" />
+</p>
+
 Монорепозиторий платформы «Каталог асан традиционных школ йоги».
 
 Проект собирает в одном месте:
@@ -7,10 +29,24 @@
 - отдельный сервис тяжелого импорта/экспорта;
 - сервис авторизации и пользовательских функций;
 - сервис ИИ-обработки изображений;
+- сервисы графа `isSameAs` и preview merge онтологий (админ);
 - инфраструктуру для локального и production-запуска.
 
-**Production:** `https://catalog-asan.ru`  
-**Домен с www:** `https://www.catalog-asan.ru`
+**Production:** [`https://catalog-asan.ru`](https://catalog-asan.ru)  
+**Домен с www:** [`https://www.catalog-asan.ru`](https://www.catalog-asan.ru)
+
+> Некоммерческий справочник: асана привязана к **источнику**, фото и названиям; сопоставление трактовок — через явные связи `isSameAs`, а не «склейку» в одну карточку.
+
+### Почему репозиторий интересен
+
+| | |
+|---|---|
+| **Реальный прод** | Живой сайт, HTTPS, SEO, sitemap, CI/CD на сервер |
+| **Микросервисы** | Каталог, import, auth, AI, graph, ontology-merge — за одним Nginx |
+| **Онтология** | OWL как источник истины + зеркало PostgreSQL для скорости |
+| **Экспертный контур** | Роли, модерация, аудит, OTP, инструкции в UI |
+| **ИИ** | pHash + YOLO для гипотез `isSameAs` |
+| **Эксплуатация** | Prometheus / Grafana / Kibana, Telegram-алерты, бэкапы → Google Drive |
 
 ---
 
@@ -30,6 +66,7 @@
 - [12. Диагностика и эксплуатация](#12-диагностика-и-эксплуатация)
 - [13. Безопасность перед публикацией репозитория](#13-безопасность-перед-публикацией-репозитория)
 - [14. Contributing](#14-contributing)
+- [Смежные README](#смежные-readme)
 
 ---
 
@@ -44,6 +81,7 @@
 - отдельный контур auth и пользователей (`server-module`, SMTP, OTP-сброс пароля);
 - хранение изображений в S3-совместимом хранилище (MinIO);
 - ИИ-сервис для поиска совпадений и модерации связей `isSameAs`;
+- админ-инструменты: визуальный граф sameAs (`asana-graph-service`) и preview версий OWL (`asana-ontology-merge-api` + CLI из GitHub Releases `owl-ontology-versioning`);
 - мониторинг, логи, алерты в Telegram и ежедневные бэкапы в Google Drive.
 
 ---
@@ -58,6 +96,8 @@
 - импорт и экспорт данных (длинные операции через отдельный сервис);
 - модерация записей и подтверждение изменений;
 - ИИ-модерация связей `isSameAs` (pHash + YOLO);
+- граф связей `isSameAsObject` и поиск по узлам (админ);
+- preview merge / diff двух OWL-снимков (админ, НИР по версионированию онтологий);
 - аудит действий пользователей (админ-панель);
 - мониторинг (Prometheus, Grafana, Kibana) и алерты в Telegram;
 - ежедневные бэкапы PostgreSQL, OWL и S3 → Google Drive;
@@ -69,7 +109,8 @@
 
 - для команд, которые ведут предметный каталог и регулярно обновляют данные;
 - для экспертных групп, где важны роли и модерация изменений;
-- для проектов, где нужно отделить длинные импортные задачи от интерактивного API.
+- для проектов, где нужно отделить длинные импортные задачи от интерактивного API;
+- для студентов и инженеров, которым нужен **полный** пример fullstack + ontology + ops (не учебный hello-world).
 
 ---
 
@@ -125,6 +166,9 @@ asana-services/
 │   └── ИНСТРУКЦИЯ_ДЛЯ_ЭКСПЕРТОВ.md
 ├── asana-server-module/        # auth + user API + SMTP
 ├── asana-network-service/      # ИИ-сервис обработки изображений
+├── asana-graph-service/        # граф isSameAs (админ UI / API)
+├── asana-ontology-merge-api/      # тонкий HTTP; CLI из GitHub Releases owl-ontology-versioning
+├── android-dict-app/           # Android-клиент (сопутствующий модуль)
 ├── backup-runner/              # cron-бэкапы БД/OWL/S3 → Google Drive
 ├── monitoring/                 # Prometheus, Grafana, Alertmanager, exporters
 ├── architecture_diagram.png    # диаграмма архитектуры (README)
@@ -139,11 +183,13 @@ asana-services/
 ## 6. Технологический стек
 
 - Backend/API: Python, FastAPI
+- Ontology tools: Go (CLI merge), OWL/RDF
 - Frontend: React, Vite
 - База данных: PostgreSQL
 - Координация задач: Redis
 - Объектное хранилище: MinIO (S3 API)
 - Reverse proxy: Nginx (+ Certbot в production)
+- AI: YOLO, perceptual hash (pHash)
 - Мониторинг: Prometheus, Grafana, Alertmanager, exporters
 - Логи: Filebeat, Elasticsearch, Kibana
 - Бэкапы: backup-runner, rclone → Google Drive
@@ -241,7 +287,7 @@ Production-конфигурация: `docker-compose.prod.yml`.
 1. Подготовить каталог `/app` и положить туда рабочий `.env`.
 2. Скопировать:
    - `docker-compose.prod.yml` как `/app/docker-compose.yml`;
-GG   - `nginx.prod.conf` как `/app/nginx.prod.conf`.
+   - `nginx.prod.conf` как `/app/nginx.prod.conf`.
 3. Запустить:
 
 ```bash
@@ -500,6 +546,15 @@ docker compose exec backup-runner BACKUP_FORCE=1 /app/run-backup.sh
 - `asana-dict-service/ИНСТРУКЦИЯ_ДЛЯ_ЭКСПЕРТОВ.md`
 - `asana-dict-service/frontend/README.md`
 - `asana-front-module/README.md`
+- `asana-graph-service/README.md`
+- `asana-ontology-merge-api/README.md`
+- соседний репозиторий CLI: `../owl-ontology-versioning` → GitHub Releases (`owl-versioning-linux-amd64`)
 - `android-dict-app/README.md`
 - `monitoring/alertmanager/README.md`
+
+---
+
+<p align="center">
+  <sub>Сделано для реального каталога · <a href="https://catalog-asan.ru">catalog-asan.ru</a> · star, если полезно ⭐</sub>
+</p>
 
